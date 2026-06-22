@@ -79,6 +79,18 @@ MODULES: list[ModuleEntry] = [
         implemented=True,
     ),
     ModuleEntry(
+        module_id="infra_domain_intel",
+        display_name="Domain Intelligence",
+        category="Infrastructure",
+        description="Passive DNS, HTTP/TLS, security header, and Wayback lookups for a domain.",
+        status="active",
+        mode="passive",
+        risk_level="low",
+        requires_authorisation=False,
+        requires_api_key=False,
+        implemented=True,
+    ),
+    ModuleEntry(
         module_id="infra_amass",
         display_name="Amass",
         category="Infrastructure",

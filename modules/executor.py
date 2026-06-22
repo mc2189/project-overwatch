@@ -23,10 +23,14 @@ from utils.privileges import detect_nmap_privilege_issue
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 NMAP_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_nmap.py"
+DOMAIN_INTEL_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_domain_intel.py"
 
 _nmap_handlers: tuple[Any, Any] | None = None
 _nmap_load_error: str | None = None
 _nmap_load_attempted = False
+_domain_intel_handler: Any | None = None
+_domain_intel_load_error: str | None = None
+_domain_intel_load_attempted = False
 
 
 def make_result(
@@ -84,11 +88,37 @@ def _load_nmap_handlers() -> None:
         _nmap_load_error = str(exc)
 
 
+def _load_domain_intel_handler() -> None:
+    global _domain_intel_handler, _domain_intel_load_error, _domain_intel_load_attempted
+
+    if _domain_intel_load_attempted:
+        return
+
+    _domain_intel_load_attempted = True
+
+    if not DOMAIN_INTEL_MODULE_PATH.is_file():
+        _domain_intel_load_error = f"Module file not found: {DOMAIN_INTEL_MODULE_PATH}"
+        return
+
+    try:
+        spec = importlib.util.spec_from_file_location("infra_domain_intel", DOMAIN_INTEL_MODULE_PATH)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load module spec from {DOMAIN_INTEL_MODULE_PATH}")
+        infra_domain_intel = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(infra_domain_intel)
+        _domain_intel_handler = infra_domain_intel.run_domain_intel
+    except Exception as exc:
+        _domain_intel_load_error = str(exc)
+
+
 def is_runtime_ready(module_id: str) -> bool:
     """Return True when a module's backend is loaded and ready to run."""
     if module_id == "infra_nmap":
         _load_nmap_handlers()
         return _nmap_handlers is not None
+    if module_id == "infra_domain_intel":
+        _load_domain_intel_handler()
+        return _domain_intel_handler is not None
     return False
 
 
@@ -97,6 +127,9 @@ def get_runtime_error(module_id: str) -> str | None:
     if module_id == "infra_nmap":
         _load_nmap_handlers()
         return _nmap_load_error
+    if module_id == "infra_domain_intel":
+        _load_domain_intel_handler()
+        return _domain_intel_load_error
     return None
 
 
@@ -204,6 +237,120 @@ def _persist_investigation_records(
                 "script_results": parsed_data.get("script_results", []),
                 "interpreter_findings": result.get("interpreter_findings", []),
                 "parse_source": parsed_data.get("parse_source"),
+            }
+        ),
+        raw_output=result["raw_output"],
+        conn=conn,
+    )
+
+
+def _persist_domain_intel_records(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    domain_entity_id: int,
+    module_id: str,
+    target: str,
+    result: dict[str, Any],
+    authorisation_confirmed: bool,
+) -> None:
+    """Save domain intelligence operations, observations, entities, and relationships."""
+    create_operation_log(
+        case_id,
+        module_id,
+        target,
+        result["status"],
+        authorisation_confirmed=authorisation_confirmed,
+        summary=result["summary"],
+        conn=conn,
+    )
+
+    if result["status"] != "completed":
+        return
+
+    parsed_data = result.get("parsed_data") or {}
+    dns_records = parsed_data.get("dns", {})
+
+    for ip_address in dns_records.get("A", []) + dns_records.get("AAAA", []):
+        ip_entity = create_or_get_entity(
+            case_id,
+            "ip_address",
+            ip_address,
+            label=ip_address,
+            source=module_id,
+            confidence=85,
+            conn=conn,
+        )
+        create_relationship(
+            case_id,
+            domain_entity_id,
+            "resolves_to",
+            ip_entity["id"],
+            source_module=module_id,
+            confidence=85,
+            conn=conn,
+        )
+
+    for mail_host in dns_records.get("MX", []):
+        mail_entity = create_or_get_entity(
+            case_id,
+            "domain",
+            mail_host,
+            label=mail_host,
+            source=module_id,
+            confidence=80,
+            conn=conn,
+        )
+        create_relationship(
+            case_id,
+            domain_entity_id,
+            "uses_mail_server",
+            mail_entity["id"],
+            source_module=module_id,
+            confidence=80,
+            conn=conn,
+        )
+
+    for nameserver in dns_records.get("NS", []):
+        ns_entity = create_or_get_entity(
+            case_id,
+            "domain",
+            nameserver,
+            label=nameserver,
+            source=module_id,
+            confidence=80,
+            conn=conn,
+        )
+        create_relationship(
+            case_id,
+            domain_entity_id,
+            "uses_nameserver",
+            ns_entity["id"],
+            source_module=module_id,
+            confidence=80,
+            conn=conn,
+        )
+
+    create_observation(
+        case_id,
+        domain_entity_id,
+        module_id,
+        "domain_intelligence",
+        "Domain intelligence result",
+        summary=result["summary"],
+        data_json=json.dumps(
+            {
+                "module_id": module_id,
+                "success": result["success"],
+                "status": result["status"],
+                "findings": result.get("findings", []),
+                "domain": parsed_data.get("domain"),
+                "input": parsed_data.get("input"),
+                "dns": parsed_data.get("dns", {}),
+                "http": parsed_data.get("http", {}),
+                "security_headers": parsed_data.get("security_headers", {}),
+                "tls": parsed_data.get("tls", {}),
+                "wayback": parsed_data.get("wayback", {}),
             }
         ),
         raw_output=result["raw_output"],
@@ -363,6 +510,72 @@ def _execute_nmap(
     return result
 
 
+def _execute_domain_intel(
+    module_id: str,
+    target: str,
+    db_context: sqlite3.Connection | None,
+    authorisation_confirmed: bool,
+    case_id: int | None,
+    entity_id: int | None,
+) -> dict[str, Any]:
+    _load_domain_intel_handler()
+    if _domain_intel_handler is None:
+        error_message = _domain_intel_load_error or "Domain Intelligence module is not available."
+        return make_result(
+            module_id,
+            success=False,
+            status="error",
+            summary="Domain Intelligence module is not available.",
+            errors=[error_message],
+        )
+
+    intel_data = _domain_intel_handler(target)
+    if not intel_data.get("success"):
+        errors = intel_data.get("errors") or ["Domain intelligence collection failed."]
+        return make_result(
+            module_id,
+            success=False,
+            status="error",
+            summary=errors[0],
+            raw_output=intel_data.get("raw_output", ""),
+            errors=errors,
+            parsed_data=intel_data.get("parsed_data"),
+        )
+
+    parsed_data = intel_data.get("parsed_data") or {}
+    domain = parsed_data.get("domain") or target
+    result = make_result(
+        module_id,
+        success=True,
+        status="completed",
+        summary=f"Domain intelligence collected for {domain}.",
+        raw_output=intel_data.get("raw_output", ""),
+        findings=intel_data.get("findings", []),
+        parsed_data=parsed_data,
+    )
+
+    if db_context is not None and case_id is not None:
+        domain_entity = create_or_get_entity(
+            case_id,
+            "domain",
+            domain,
+            label=domain,
+            source=module_id,
+            conn=db_context,
+        )
+        _persist_domain_intel_records(
+            db_context,
+            case_id=case_id,
+            domain_entity_id=domain_entity["id"],
+            module_id=module_id,
+            target=domain,
+            result=result,
+            authorisation_confirmed=authorisation_confirmed,
+        )
+
+    return result
+
+
 def execute_module(
     module_id: str,
     target: str,
@@ -446,7 +659,26 @@ def execute_module(
             entity_id,
         )
 
-    # TODO(v0.7): Route additional implemented modules here.
+    if module_id == "infra_domain_intel":
+        if not is_runtime_ready(module_id):
+            error_message = get_runtime_error(module_id) or "Domain Intelligence runtime is not ready."
+            return make_result(
+                module_id,
+                success=False,
+                status="error",
+                summary="Domain Intelligence module is not available.",
+                errors=[error_message],
+            )
+        return _execute_domain_intel(
+            module_id,
+            target,
+            db_context,
+            authorisation_confirmed,
+            case_id,
+            entity_id,
+        )
+
+    # TODO(v0.8): Route additional implemented modules here.
     return make_result(
         module_id,
         success=False,

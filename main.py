@@ -37,6 +37,8 @@ authorisation_confirmed = False
 
 nmap_runtime_ready = is_runtime_ready("infra_nmap")
 nmap_module_error = get_runtime_error("infra_nmap")
+domain_intel_ready = is_runtime_ready("infra_domain_intel")
+domain_intel_error = get_runtime_error("infra_domain_intel")
 
 
 def module_selectable(module) -> bool:
@@ -45,6 +47,8 @@ def module_selectable(module) -> bool:
         return False
     if module.module_id == "infra_nmap":
         return nmap_runtime_ready
+    if module.module_id == "infra_domain_intel":
+        return domain_intel_ready
     return True
 
 
@@ -104,11 +108,50 @@ def render_execution_result(result: dict) -> None:
     if result["status"] == "error" or not result["success"]:
         st.error(f"**{display_name}:** {result['summary']}")
         if result["raw_output"]:
-            with st.expander("Raw Nmap output", expanded=False):
-                st.code(result["raw_output"], language="bash")
+            with st.expander("Raw output", expanded=False):
+                st.code(result["raw_output"], language="text")
         return
 
-    st.write(f"🛰️ **{display_name}:** {result['summary']}")
+    st.write(f"**{display_name}:** {result['summary']}")
+
+    parsed_data = result.get("parsed_data") or {}
+    if result["module_id"] == "infra_domain_intel" and parsed_data:
+        st.write("### Domain Intelligence Summary")
+        dns_records = parsed_data.get("dns", {})
+        if dns_records:
+            st.markdown("**DNS records**")
+            for record_type, values in dns_records.items():
+                st.write(f"- {record_type}: {', '.join(values) if values else '(none)'}")
+
+        security_headers = parsed_data.get("security_headers", {}).get("https", {})
+        if security_headers:
+            present = [name for name, meta in security_headers.items() if meta.get("present")]
+            missing = [name for name, meta in security_headers.items() if not meta.get("present")]
+            st.markdown("**HTTPS security headers**")
+            st.write(f"Present: {', '.join(present) if present else '(none)'}")
+            st.write(f"Missing: {', '.join(missing) if missing else '(none)'}")
+
+        tls = parsed_data.get("tls", {})
+        if tls:
+            st.markdown("**TLS certificate**")
+            if tls.get("available"):
+                st.write(
+                    f"Issuer: {tls.get('issuer')} · Subject: {tls.get('subject')} · "
+                    f"Valid: {tls.get('not_before')} -> {tls.get('not_after')}"
+                )
+            else:
+                st.write(f"TLS unavailable: {tls.get('error') or 'unknown error'}")
+
+        wayback = parsed_data.get("wayback", {})
+        if wayback:
+            st.markdown("**Wayback Machine**")
+            if wayback.get("available"):
+                st.write(
+                    f"Snapshots available · first={wayback.get('first_snapshot')} · "
+                    f"last={wayback.get('last_snapshot')}"
+                )
+            else:
+                st.write("No snapshots found.")
 
     interpreter_findings = result.get("interpreter_findings") or []
     if interpreter_findings:
@@ -124,13 +167,15 @@ def render_execution_result(result: dict) -> None:
                     st.markdown(f"- {action}")
 
     if result.get("findings"):
-        st.error(f"🚨 {len(result['findings'])} keyword matches in raw output")
+        st.info(f"{len(result['findings'])} note(s) from module output")
         for finding in result["findings"]:
-            st.warning(f"**Match:** {finding}")
+            st.write(f"- {finding}")
 
     if result.get("raw_output"):
-        with st.expander("Raw Nmap output", expanded=False):
-            st.code(result["raw_output"], language="bash")
+        label = "Raw Nmap output" if result["module_id"] == "infra_nmap" else "Raw output"
+        with st.expander(label, expanded=False):
+            language = "bash" if result["module_id"] == "infra_nmap" else "text"
+            st.code(result["raw_output"], language=language)
 
     if result.get("parsed_data") or result.get("selected_options"):
         with st.expander("Structured scan data", expanded=False):
@@ -179,7 +224,12 @@ with st.sidebar:
         st.error("Nmap module unavailable")
         st.caption(nmap_module_error)
 
-    target_ip = st.text_input("Target IP/Domain:", placeholder="e.g. 192.168.1.1")
+    domain_intel_entry = get_module("infra_domain_intel")
+    if domain_intel_entry and is_executable(domain_intel_entry) and domain_intel_error:
+        st.error("Domain Intelligence module unavailable")
+        st.caption(domain_intel_error)
+
+    target_ip = st.text_input("Target IP/Domain:", placeholder="e.g. 192.168.1.1 or example.com")
 
     if st.button("Acquire Target", width="stretch"):
         if not target_ip.strip():
@@ -408,7 +458,7 @@ with tab_relationships:
         display_rows = enrich_relationships_for_display(relationships, entities)
         st.dataframe(pd.DataFrame(display_rows), width="stretch")
     else:
-        st.info("No relationships recorded for this case yet. Run Nmap against a target to discover services.")
+        st.info("No relationships recorded for this case yet. Run Domain Intelligence or Nmap to populate relationships.")
 
 with tab_observations:
     conn = get_db_conn()
@@ -444,6 +494,6 @@ with tab_graph:
     )
     figure = entity_graph_figure(entities, relationships)
     if figure is None:
-        st.info("No graph data yet. Run Nmap against an authorised target to populate entities and relationships.")
+        st.info("No graph data yet. Run Domain Intelligence or Nmap against a target to populate entities and relationships.")
     else:
         st.plotly_chart(figure, width="stretch")

@@ -1,6 +1,6 @@
 # Project Overwatch
 
-Defensive security intelligence dashboard built with Python and Streamlit. Project Overwatch v0.6 adds guided Nmap scan profiles, XML parsing, compatibility rules, and an advisory result interpreter on top of the investigation case model.
+Defensive security intelligence dashboard built with Python and Streamlit. Project Overwatch v0.7 adds passive Domain Intelligence alongside guided Nmap scanning, XML parsing, and the investigation case model.
 
 ## Requirements
 
@@ -185,6 +185,38 @@ After a scan, Overwatch shows an **Analyst Interpretation** section with advisor
 
 The interpreter is **advisory only**. An open port does not automatically mean a vulnerability, missing script results do not mean a host is safe, and NSE vuln output is not proof of compromise.
 
+## Domain Intelligence (passive)
+
+**Domain Intelligence** (`infra_domain_intel`) is an active passive module under **2. Infrastructure**. It does **not** use Nmap and does **not** require the authorisation checkbox.
+
+For a domain or URL, it collects:
+
+- DNS records: A, AAAA, MX, NS, TXT, CNAME
+- Basic HTTP/HTTPS response details
+- Presence or absence of common security headers
+- Basic TLS certificate issuer and validity dates (when HTTPS is reachable)
+- Basic Wayback Machine availability via the public CDX API
+
+Results are stored in the case model as:
+
+- **Operation** log entry
+- **Observation** with structured JSON and raw text summary
+- **Entities** for the domain, resolved IPs, MX hosts, and nameservers
+- **Relationships**:
+  - `resolves_to` (domain → IP)
+  - `uses_mail_server` (domain → MX host)
+  - `uses_nameserver` (domain → NS host)
+
+### How to test with example.com
+
+1. Start the app: `streamlit run main.py`
+2. Enter `example.com` as the target
+3. Under **2. Infrastructure**, enable **Domain Intelligence** only (leave Nmap unchecked if you want a passive-only test)
+4. Click **LAUNCH OPERATION**
+5. Review the **Domain Intelligence Summary**, then check **Archive → Relationships**, **Observations**, and **Graph**
+
+No authorisation checkbox is required for this module.
+
 ## Investigation data model
 
 Project Overwatch v0.4 stores investigation data in a structured model alongside the legacy `targets` / `recon_data` tables.
@@ -268,6 +300,7 @@ modules/
   executor.py                  Execution dispatcher and result format
   2_infrastructure/
     infra_nmap.py                Nmap subprocess wrapper
+    infra_domain_intel.py        Passive DNS/HTTP/TLS/Wayback lookups
 utils/
   nmap_options.py              Scan profiles, compatibility rules, flag builder
   nmap_ui.py                   Streamlit Nmap option UI
