@@ -38,6 +38,7 @@ The sidebar provides case selection and main navigation:
 - **Network Service Check, powered by Nmap** — active; IPv4 or domain only (not URL — enter hostname separately for port scans).
 - **Domain Intelligence** — passive DNS/HTTP/TLS/Wayback for domain or URL.
 - **Certificate & Subdomain Intelligence** — passive certificate transparency names for domain or URL.
+- **Website Metadata Review** — passive homepage title, meta tags, headers, robots.txt, and sitemap hints for domain or URL.
 
 ### Guided run modes (v1.5)
 
@@ -45,8 +46,8 @@ After entering a target, choose **What do you want to do?** on Run Operation:
 
 | Run mode | Purpose | Typical recommendations |
 |----------|---------|-------------------------|
-| **Quick Check** | Simple default | IPv4 → Network Service Check only; domain/URL → Domain Intelligence + Certificate & Subdomain Intelligence; email/username/unknown → none |
-| **Website / Domain Footprint** | Passive domain footprint | Domain Intelligence + Certificate & Subdomain Intelligence (no Nmap by default) |
+| **Quick Check** | Simple default | IPv4 → Network Service Check only; domain/URL → Domain Intelligence + Certificate & Subdomain Intelligence + Website Metadata Review; email/username/unknown → none |
+| **Website / Domain Footprint** | Passive domain footprint | Domain Intelligence + Certificate & Subdomain Intelligence + Website Metadata Review (no Nmap by default) |
 | **Local Device / IP Check** | Conservative active IP scan | Network Service Check with Quick check Nmap profile; authorisation required |
 | **Custom Module Selection** | Power-user manual pick | All compatible modules shown; no automatic preselection when you change target |
 
@@ -172,6 +173,28 @@ The **Report** page suggests export presets based on the case's run mode (e.g. D
 ### Operation run mode analytics (v1.6)
 
 Each operation log records `run_mode_id` and `run_mode_label`. The **Operations** page shows counts by run mode and supports filtering. Case reports include an operations-by-run-mode summary.
+
+### Website Metadata Review (v1.6)
+
+Passive module `infra_website_metadata` for **domain** and **URL** targets. It fetches the public homepage and collects:
+
+- Page title, meta description, canonical URL
+- Basic response headers (server, CSP, HSTS, etc.)
+- Link and form counts from the HTML
+- `robots.txt` summary (disallow/allow/sitemap directives)
+- Sitemap hints from robots.txt and common paths
+
+Included in **Quick Check** and **Website / Domain Footprint** run modes for domain/URL targets. No authorisation required. Does not submit forms or crawl beyond the homepage, robots.txt, and lightweight sitemap probes.
+
+**Test with example.com:**
+
+1. `python scripts/smoke_check.py` — offline parser/interpreter checks (no live network required).
+2. `streamlit run main.py` → **Run Operation**.
+3. Target: `example.com` (or `https://example.com`).
+4. Run mode: **Quick Check** or **Website / Domain Footprint** — Website Metadata Review should be preselected.
+5. Run selected modules (passive only — no authorisation checkbox).
+6. Review **Latest Results** → Summary / Module Output tabs for title, robots.txt, sitemap hints.
+7. Check **Findings**, **Observations**, **Graph** (`has_canonical_url`, `references_sitemap` relationships), and **Report**.
 
 ## Investigation model
 

@@ -48,15 +48,15 @@ MODE_DESCRIPTIONS: dict[str, str] = {
 _MODE_TARGET_RECOMMENDATIONS: dict[str, dict[str, tuple[str, ...]]] = {
     QUICK_CHECK: {
         "ipv4": ("infra_nmap",),
-        "domain": ("infra_domain_intel", "infra_cert_subdomain"),
-        "url": ("infra_domain_intel", "infra_cert_subdomain"),
+        "domain": ("infra_domain_intel", "infra_cert_subdomain", "infra_website_metadata"),
+        "url": ("infra_domain_intel", "infra_cert_subdomain", "infra_website_metadata"),
         "email": (),
         "username": (),
         "unknown": (),
     },
     WEBSITE_FOOTPRINT: {
-        "domain": ("infra_domain_intel", "infra_cert_subdomain"),
-        "url": ("infra_domain_intel", "infra_cert_subdomain"),
+        "domain": ("infra_domain_intel", "infra_cert_subdomain", "infra_website_metadata"),
+        "url": ("infra_domain_intel", "infra_cert_subdomain", "infra_website_metadata"),
     },
     LOCAL_IP_CHECK: {
         "ipv4": ("infra_nmap",),

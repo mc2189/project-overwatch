@@ -257,6 +257,7 @@ def _check_target_compatibility() -> None:
         "infra_nmap" not in module_ids
         or "infra_domain_intel" not in module_ids
         or "infra_cert_subdomain" not in module_ids
+        or "infra_website_metadata" not in module_ids
     ):
         raise AssertionError("example.com should be compatible with all implemented domain modules")
 
@@ -307,13 +308,13 @@ def _check_run_modes() -> None:
     domain_quick = run_modes.get_recommended_modules_for_mode(
         run_modes.QUICK_CHECK, "domain"
     )
-    if set(domain_quick) != {"infra_domain_intel", "infra_cert_subdomain"}:
+    if set(domain_quick) != {"infra_domain_intel", "infra_cert_subdomain", "infra_website_metadata"}:
         raise AssertionError(f"domain quick check recommendations unexpected: {domain_quick}")
 
     url_footprint = run_modes.get_recommended_modules_for_mode(
         run_modes.WEBSITE_FOOTPRINT, "url"
     )
-    if set(url_footprint) != {"infra_domain_intel", "infra_cert_subdomain"}:
+    if set(url_footprint) != {"infra_domain_intel", "infra_cert_subdomain", "infra_website_metadata"}:
         raise AssertionError(f"URL footprint recommendations unexpected: {url_footprint}")
 
     for unsupported in ("email", "username", "unknown"):
@@ -383,6 +384,84 @@ def _check_run_modes() -> None:
         conn.close()
 
 
+def _check_website_metadata_module() -> None:
+    registry = __import__("modules.module_registry", fromlist=["get_module"])
+    module = registry.get_module("infra_website_metadata")
+    if module is None or not module.implemented:
+        raise AssertionError("infra_website_metadata registry entry missing or not implemented")
+    for field in (
+        "accepted_target_types",
+        "short_help",
+        "detailed_help",
+        "example_inputs",
+        "output_summary",
+        "caution_notes",
+    ):
+        if not getattr(module, field):
+            raise AssertionError(f"infra_website_metadata missing registry metadata: {field}")
+
+    import importlib.util
+    from pathlib import Path
+
+    module_path = Path(PROJECT_ROOT) / "modules" / "2_infrastructure" / "infra_website_metadata.py"
+    spec = importlib.util.spec_from_file_location("infra_website_metadata", module_path)
+    if spec is None or spec.loader is None:
+        raise AssertionError("could not load infra_website_metadata module spec")
+    loaded = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(loaded)
+    if not callable(getattr(loaded, "run_website_metadata_review", None)):
+        raise AssertionError("run_website_metadata_review missing")
+
+    sample_html = """
+    <html><head>
+    <title>Example Domain</title>
+    <meta name="description" content="Example public site">
+    <link rel="canonical" href="https://example.com/">
+    </head><body><a href="/about">About</a><form></form></body></html>
+    """
+    metadata = loaded._parse_homepage_metadata(sample_html, "https://example.com/")
+    if metadata.get("page_title") != "Example Domain":
+        raise AssertionError("homepage metadata parser failed on sample HTML")
+    if metadata.get("link_count") != 1 or metadata.get("form_count") != 1:
+        raise AssertionError("link/form counts unexpected in sample HTML")
+
+    robots = loaded._parse_robots_txt("User-agent: *\nDisallow: /admin\nSitemap: https://example.com/sitemap.xml\n")
+    if robots.get("disallow_count") != 1 or not robots.get("sitemap_urls"):
+        raise AssertionError("robots.txt parser failed")
+
+    findings = __import__(
+        "utils.website_metadata_interpreter",
+        fromlist=["interpret_website_metadata_results"],
+    )
+    sample_findings = findings.interpret_website_metadata_results(
+        {
+            "domain": "example.com",
+            "homepage": {
+                "page_title": "Example Domain",
+                "meta_description": "Example public site",
+                "canonical_url": "https://example.com/",
+                "link_count": 3,
+                "form_count": 1,
+            },
+            "robots_txt": {"available": True, "summary": "1 disallow rule(s); 1 sitemap reference(s)"},
+            "sitemap_hints": {"reachable_count": 1, "entries": [{"url": "https://example.com/sitemap.xml"}]},
+        }
+    )
+    if not sample_findings:
+        raise AssertionError("website metadata interpreter returned no findings for sample data")
+
+    registry_pipeline = __import__(
+        "utils.findings_registry",
+        fromlist=["module_has_findings_pipeline"],
+    )
+    if not registry_pipeline.module_has_findings_pipeline("infra_website_metadata"):
+        raise AssertionError("findings pipeline not registered for infra_website_metadata")
+
+    executor = __import__("modules.executor", fromlist=["is_runtime_ready", "get_module"])
+    if not executor.is_runtime_ready("infra_website_metadata"):
+        raise AssertionError("executor cannot load infra_website_metadata backend")
+
+
 def main() -> int:
     print(f"Project Overwatch smoke check (root: {PROJECT_ROOT})")
     errors = 0
@@ -432,6 +511,11 @@ def main() -> int:
     run(
         "run modes",
         lambda: _check_run_modes(),
+    )
+
+    run(
+        "website metadata module",
+        lambda: _check_website_metadata_module(),
     )
 
     run(

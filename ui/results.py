@@ -61,6 +61,26 @@ def render_result_summary_tab(result: dict) -> None:
                 f"last={wayback.get('last_snapshot')}"
             )
 
+    if result["module_id"] == "infra_website_metadata" and parsed_data:
+        homepage = parsed_data.get("homepage") or {}
+        if homepage.get("page_title"):
+            st.markdown(f"**Page title:** {homepage['page_title']}")
+        if homepage.get("meta_description"):
+            st.markdown(f"**Meta description:** {homepage['meta_description']}")
+        if homepage.get("canonical_url"):
+            st.markdown(f"**Canonical URL:** {homepage['canonical_url']}")
+        st.write(
+            f"**Links / forms:** {homepage.get('link_count', 0)} / {homepage.get('form_count', 0)}"
+        )
+        robots = parsed_data.get("robots_txt") or {}
+        if robots.get("summary"):
+            st.markdown(f"**robots.txt:** {robots['summary']}")
+        sitemaps = parsed_data.get("sitemap_hints") or {}
+        if sitemaps.get("summary"):
+            st.markdown(f"**Sitemap hints:** {sitemaps['summary']}")
+        if parsed_data.get("warning"):
+            st.warning(parsed_data["warning"])
+
 
 def render_result_interpretation_tab(result: dict) -> None:
     interpreter_findings = result.get("interpreter_findings") or []
@@ -112,6 +132,30 @@ def render_result_module_output_tab(result: dict) -> None:
             st.markdown("**HTTPS security headers**")
             st.write(f"Present: {', '.join(present) if present else '(none)'}")
             st.write(f"Missing: {', '.join(missing) if missing else '(none)'}")
+
+    if result["module_id"] == "infra_website_metadata" and parsed_data:
+        homepage = parsed_data.get("homepage") or {}
+        headers = homepage.get("basic_headers") or {}
+        if headers:
+            st.markdown("**Basic response headers**")
+            st.dataframe(
+                pd.DataFrame([{"header": key, "value": value} for key, value in headers.items()]),
+                width="stretch",
+                hide_index=True,
+            )
+        robots = parsed_data.get("robots_txt") or {}
+        if robots.get("disallow_rules"):
+            st.markdown("**robots.txt disallow rules (sample)**")
+            st.dataframe(
+                pd.DataFrame({"rule": robots["disallow_rules"][:20]}),
+                width="stretch",
+                hide_index=True,
+            )
+        sitemaps = parsed_data.get("sitemap_hints") or {}
+        entries = sitemaps.get("entries") or []
+        if entries:
+            st.markdown("**Sitemap hints**")
+            st.dataframe(pd.DataFrame(entries), width="stretch", hide_index=True)
 
 
 def render_result_raw_tab(result: dict) -> None:

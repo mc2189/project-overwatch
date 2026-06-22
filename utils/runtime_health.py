@@ -78,6 +78,19 @@ def collect_health_checks() -> list[HealthCheck]:
             )
         )
 
+    website_ready = is_runtime_ready("infra_website_metadata")
+    website_error = get_runtime_error("infra_website_metadata")
+    if website_ready:
+        checks.append(HealthCheck("Website Metadata Review", True, "Backend loaded"))
+    else:
+        checks.append(
+            HealthCheck(
+                "Website Metadata Review",
+                False,
+                website_error or "Backend failed to load — run pip install -r requirements.txt",
+            )
+        )
+
     checks.append(
         HealthCheck(
             "Graph PNG (kaleido)",

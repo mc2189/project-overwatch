@@ -162,6 +162,33 @@ MODULES: list[ModuleEntry] = [
         ),
     ),
     ModuleEntry(
+        module_id="infra_website_metadata",
+        display_name="Website Metadata Review",
+        category="Infrastructure",
+        description="Passive homepage metadata, robots.txt, and sitemap review for a domain or URL.",
+        status="active",
+        mode="passive",
+        risk_level="low",
+        requires_authorisation=False,
+        requires_api_key=False,
+        implemented=True,
+        accepted_target_types=("domain", "url"),
+        short_help="Passive homepage title, meta tags, headers, link/form counts, robots.txt, and sitemap hints.",
+        detailed_help=(
+            "Fetches the public homepage for a domain or URL and extracts page title, meta description, "
+            "canonical URL, selected response headers, link and form counts, robots.txt summary, and sitemap hints. "
+            "This module performs a single passive HTTP GET (plus robots.txt and lightweight sitemap probes). "
+            "It does not submit forms, brute-force paths, or run port scans."
+        ),
+        example_inputs=("example.com", "https://www.example.com/"),
+        output_summary="Homepage metadata, basic headers, robots.txt summary, sitemap hints, advisory findings.",
+        caution_notes=(
+            "Passive HTTP lookups only — no form submission or intrusive crawling.",
+            "Link/form counts depend on the fetched HTML at review time.",
+            "robots.txt and sitemap hints are public signals, not proof of hidden or live content.",
+        ),
+    ),
+    ModuleEntry(
         module_id="infra_amass",
         display_name="Amass",
         category="Infrastructure",

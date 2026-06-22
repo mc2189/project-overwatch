@@ -29,6 +29,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 NMAP_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_nmap.py"
 DOMAIN_INTEL_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_domain_intel.py"
 CERT_SUBDOMAIN_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_cert_subdomain.py"
+WEBSITE_METADATA_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_website_metadata.py"
 
 _nmap_handlers: tuple[Any, Any] | None = None
 _nmap_load_error: str | None = None
@@ -39,6 +40,9 @@ _domain_intel_load_attempted = False
 _cert_subdomain_handler: Any | None = None
 _cert_subdomain_load_error: str | None = None
 _cert_subdomain_load_attempted = False
+_website_metadata_handler: Any | None = None
+_website_metadata_load_error: str | None = None
+_website_metadata_load_attempted = False
 
 
 def make_result(
@@ -142,6 +146,29 @@ def _load_cert_subdomain_handler() -> None:
         _cert_subdomain_load_error = str(exc)
 
 
+def _load_website_metadata_handler() -> None:
+    global _website_metadata_handler, _website_metadata_load_error, _website_metadata_load_attempted
+
+    if _website_metadata_load_attempted:
+        return
+
+    _website_metadata_load_attempted = True
+
+    if not WEBSITE_METADATA_MODULE_PATH.is_file():
+        _website_metadata_load_error = f"Module file not found: {WEBSITE_METADATA_MODULE_PATH}"
+        return
+
+    try:
+        spec = importlib.util.spec_from_file_location("infra_website_metadata", WEBSITE_METADATA_MODULE_PATH)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load module spec from {WEBSITE_METADATA_MODULE_PATH}")
+        infra_website_metadata = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(infra_website_metadata)
+        _website_metadata_handler = infra_website_metadata.run_website_metadata_review
+    except Exception as exc:
+        _website_metadata_load_error = str(exc)
+
+
 def _nmap_binary_available() -> bool:
     return shutil.which("nmap") is not None
 
@@ -157,6 +184,9 @@ def is_runtime_ready(module_id: str) -> bool:
     if module_id == "infra_cert_subdomain":
         _load_cert_subdomain_handler()
         return _cert_subdomain_handler is not None
+    if module_id == "infra_website_metadata":
+        _load_website_metadata_handler()
+        return _website_metadata_handler is not None
     return False
 
 
@@ -176,6 +206,9 @@ def get_runtime_error(module_id: str) -> str | None:
     if module_id == "infra_cert_subdomain":
         _load_cert_subdomain_handler()
         return _cert_subdomain_load_error
+    if module_id == "infra_website_metadata":
+        _load_website_metadata_handler()
+        return _website_metadata_load_error
     return None
 
 
@@ -548,6 +581,120 @@ def _persist_cert_subdomain_records(
         )
 
 
+def _persist_website_metadata_records(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    domain_entity_id: int,
+    module_id: str,
+    target: str,
+    result: dict[str, Any],
+    authorisation_confirmed: bool,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> None:
+    """Save website metadata operations, observations, entities, and relationships."""
+    create_operation_log(
+        case_id,
+        module_id,
+        target,
+        result["status"],
+        authorisation_confirmed=authorisation_confirmed,
+        summary=result["summary"],
+        run_mode_id=run_mode_id,
+        run_mode_label=run_mode_label,
+        conn=conn,
+    )
+
+    if result["status"] != "completed":
+        return
+
+    parsed_data = result.get("parsed_data") or {}
+    domain = parsed_data.get("domain") or target
+    homepage = parsed_data.get("homepage") or {}
+
+    canonical_url = homepage.get("canonical_url")
+    if canonical_url:
+        canonical_entity = create_or_get_entity(
+            case_id,
+            "url",
+            canonical_url,
+            label=canonical_url,
+            source=module_id,
+            confidence=80,
+            conn=conn,
+        )
+        create_relationship(
+            case_id,
+            domain_entity_id,
+            "has_canonical_url",
+            canonical_entity["id"],
+            source_module=module_id,
+            confidence=80,
+            conn=conn,
+        )
+
+    for entry in (parsed_data.get("sitemap_hints") or {}).get("entries") or []:
+        sitemap_url = entry.get("url")
+        if not sitemap_url:
+            continue
+        sitemap_entity = create_or_get_entity(
+            case_id,
+            "url",
+            sitemap_url,
+            label=sitemap_url,
+            source=module_id,
+            confidence=70,
+            conn=conn,
+        )
+        create_relationship(
+            case_id,
+            domain_entity_id,
+            "references_sitemap",
+            sitemap_entity["id"],
+            source_module=module_id,
+            confidence=70,
+            conn=conn,
+        )
+
+    observation = create_observation(
+        case_id,
+        domain_entity_id,
+        module_id,
+        "website_metadata_review",
+        "Website metadata review result",
+        summary=result["summary"],
+        data_json=json.dumps(
+            {
+                "module_id": module_id,
+                "success": result["success"],
+                "status": result["status"],
+                "findings": result.get("findings", []),
+                "interpreter_findings": result.get("interpreter_findings", []),
+                "original_target": parsed_data.get("original_target"),
+                "domain": domain,
+                "homepage": homepage,
+                "robots_txt": parsed_data.get("robots_txt", {}),
+                "sitemap_hints": parsed_data.get("sitemap_hints", {}),
+                "warning": parsed_data.get("warning"),
+            }
+        ),
+        raw_output=result["raw_output"],
+        conn=conn,
+    )
+
+    interpreter_findings = result.get("interpreter_findings") or []
+    if interpreter_findings:
+        _persist_module_findings(
+            conn,
+            case_id=case_id,
+            entity_id=domain_entity_id,
+            observation_id=observation["id"],
+            module_id=module_id,
+            interpreter_findings=interpreter_findings,
+        )
+
+
 def _scan_output_text(scan_data: dict[str, Any]) -> str:
     parts = [
         scan_data.get("raw_output", ""),
@@ -878,6 +1025,78 @@ def _execute_cert_subdomain(
     return result
 
 
+def _execute_website_metadata(
+    module_id: str,
+    target: str,
+    db_context: sqlite3.Connection | None,
+    authorisation_confirmed: bool,
+    case_id: int | None,
+    entity_id: int | None,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> dict[str, Any]:
+    _load_website_metadata_handler()
+    if _website_metadata_handler is None:
+        error_message = _website_metadata_load_error or "Website Metadata Review module is not available."
+        return make_result(
+            module_id,
+            success=False,
+            status="error",
+            summary="Website Metadata Review module is not available.",
+            errors=[error_message],
+        )
+
+    intel_data = _website_metadata_handler(target)
+    if not intel_data.get("success"):
+        errors = intel_data.get("errors") or ["Website metadata review failed."]
+        return make_result(
+            module_id,
+            success=False,
+            status="error",
+            summary=errors[0],
+            raw_output=intel_data.get("raw_output", ""),
+            errors=errors,
+            parsed_data=intel_data.get("data"),
+        )
+
+    parsed_data = intel_data.get("data") or {}
+    domain = parsed_data.get("domain") or target
+    interpreter_findings = interpret_module_findings(module_id, parsed_data)
+    result = make_result(
+        module_id,
+        success=True,
+        status=intel_data.get("status", "completed"),
+        summary=intel_data.get("summary", f"Website metadata reviewed for {domain}."),
+        raw_output=intel_data.get("raw_output", ""),
+        findings=intel_data.get("findings", []),
+        parsed_data=parsed_data,
+        interpreter_findings=interpreter_findings,
+    )
+
+    if db_context is not None and case_id is not None:
+        domain_entity = create_or_get_entity(
+            case_id,
+            "domain",
+            domain,
+            label=domain,
+            source=module_id,
+            conn=db_context,
+        )
+        _persist_website_metadata_records(
+            db_context,
+            case_id=case_id,
+            domain_entity_id=domain_entity["id"],
+            module_id=module_id,
+            target=domain,
+            result=result,
+            authorisation_confirmed=authorisation_confirmed,
+            run_mode_id=run_mode_id,
+            run_mode_label=run_mode_label,
+        )
+
+    return result
+
+
 def execute_module(
     module_id: str,
     target: str,
@@ -1021,6 +1240,27 @@ def execute_module(
                 errors=[error_message],
             )
         return _execute_cert_subdomain(
+            module_id,
+            target,
+            db_context,
+            authorisation_confirmed,
+            case_id,
+            entity_id,
+            run_mode_id,
+            run_mode_label,
+        )
+
+    if module_id == "infra_website_metadata":
+        if not is_runtime_ready(module_id):
+            error_message = get_runtime_error(module_id) or "Website Metadata Review runtime is not ready."
+            return make_result(
+                module_id,
+                success=False,
+                status="error",
+                summary="Website Metadata Review module is not available.",
+                errors=[error_message],
+            )
+        return _execute_website_metadata(
             module_id,
             target,
             db_context,

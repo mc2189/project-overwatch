@@ -19,12 +19,14 @@ IMPLEMENTED_MODULE_IDS: tuple[str, ...] = (
     "infra_nmap",
     "infra_domain_intel",
     "infra_cert_subdomain",
+    "infra_website_metadata",
 )
 
 MODULE_CARD_TITLES: dict[str, str] = {
     "infra_nmap": "Network Service Check, powered by Nmap",
     "infra_domain_intel": "Domain Intelligence",
     "infra_cert_subdomain": "Certificate & Subdomain Intelligence",
+    "infra_website_metadata": "Website Metadata Review",
 }
 
 FINDING_SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")

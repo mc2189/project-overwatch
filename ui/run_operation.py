@@ -364,6 +364,12 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
                         "Queries public certificate transparency data for related hostnames. "
                         "Certificate-derived names are leads for review, not confirmed live hosts."
                     )
+                elif module_id == "infra_website_metadata":
+                    st.caption("Passive module — no authorisation required.")
+                    st.write(
+                        "Fetches the public homepage and reviews title, meta tags, headers, "
+                        "link/form counts, robots.txt, and sitemap hints. Does not submit forms."
+                    )
         st.session_state.nmap_options = nmap_options
 
     st.divider()

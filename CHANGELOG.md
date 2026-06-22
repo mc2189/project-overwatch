@@ -10,6 +10,7 @@ All notable changes to Project Overwatch are documented here.
 - Operations page: counts and filter by run mode; reports include operations-by-run-mode summary
 - Mode-aware report presets (Domain footprint summary, Local IP technical, Quick Check overview)
 - Quick Check optional light port scan for domain/URL targets (conservative Nmap profile, auth required)
+- **Website Metadata Review** passive module (`infra_website_metadata`) for domain/URL targets: homepage metadata, robots.txt, sitemap hints
 
 ## v1.5.0 — Stale findings, graph filters, report presets
 
