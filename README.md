@@ -217,6 +217,42 @@ Results are stored in the case model as:
 
 No authorisation checkbox is required for this module.
 
+## Findings and suggested actions (v0.8)
+
+Project Overwatch stores **findings** as structured analyst aids derived from module results. Findings are **not** final proof of risk, compromise, or misconfiguration. They highlight items worth reviewing and suggest practical next steps.
+
+Each finding includes:
+
+| Field | Purpose |
+|-------|---------|
+| `title` | Short summary of what was observed |
+| `severity` | Relative priority for analyst review (`critical`, `high`, `medium`, `low`, `info`) |
+| `confidence` | How strongly the module supports the observation (0–100) |
+| `explanation` | Cautious narrative describing what was or was not observed |
+| `suggested_actions_json` | Practical follow-up steps for the analyst |
+| `status` | Workflow state (`open` by default) |
+
+**Severity** indicates how urgently an analyst may want to review an item. It does not automatically mean a vulnerability exists. For example, an `info` finding may simply record that MX records were observed.
+
+**Confidence** reflects how reliable the underlying observation is given the module and data source. Low confidence findings should be validated before acting on them.
+
+**Suggested actions** are guidance only. Use them to decide what to verify next — for example, confirming whether an exposed service is expected, checking TLS and security headers, reviewing Wayback snapshots, or documenting that a result is benign.
+
+Findings are created when **Nmap** or **Domain Intelligence** completes successfully. The executor links each finding to the active case, entity, and observation where possible. Exact duplicate findings (same case, entity, module, and title) are not created again.
+
+View findings in **Archive → Findings**. The dashboard shows an **Open Findings** metric for the active case.
+
+### Domain Intelligence interpretation
+
+The domain interpreter uses cautious language. Missing security headers are described as **not observed**, not as confirmed vulnerabilities. Example finding types:
+
+- Common security headers not observed on HTTPS
+- HTTPS unavailable or failed
+- TLS certificate expiry approaching
+- No A or AAAA records observed
+- MX or nameserver records found (informational)
+- Wayback snapshots available
+
 ## Investigation data model
 
 Project Overwatch v0.4 stores investigation data in a structured model alongside the legacy `targets` / `recon_data` tables.
@@ -228,6 +264,7 @@ Project Overwatch v0.4 stores investigation data in a structured model alongside
 | `observations` | Module results linked to a case and entity |
 | `relationships` | Links between entities such as `exposes_service` |
 | `operations` | Audit log of module runs (module, target, status, authorisation) |
+| `findings` | Analyst findings with severity, confidence, explanation, and suggested actions |
 
 ### Cases
 
@@ -307,6 +344,7 @@ utils/
   nmap_parser.py               Text fallback parser for open ports
   nmap_xml_parser.py           XML parser for structured Nmap results
   nmap_interpreter.py          Advisory defensive result interpreter
+  domain_intel_interpreter.py  Domain intelligence findings interpreter
   graph_view.py                NetworkX + Plotly graph rendering
 requirements.txt                 Python dependencies
 ```

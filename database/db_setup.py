@@ -105,6 +105,26 @@ CREATE TABLE IF NOT EXISTS operations (
 )
 """
 
+FINDINGS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS findings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER,
+    entity_id INTEGER,
+    observation_id INTEGER,
+    module_id TEXT,
+    title TEXT NOT NULL,
+    severity TEXT,
+    confidence INTEGER DEFAULT 50,
+    explanation TEXT,
+    suggested_actions_json TEXT,
+    status TEXT DEFAULT 'open',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(case_id) REFERENCES cases(id),
+    FOREIGN KEY(entity_id) REFERENCES entities(id),
+    FOREIGN KEY(observation_id) REFERENCES observations(id)
+)
+"""
+
 ALL_SCHEMAS = (
     TARGETS_SCHEMA,
     RECON_DATA_SCHEMA,
@@ -113,6 +133,7 @@ ALL_SCHEMAS = (
     RELATIONSHIPS_SCHEMA,
     OBSERVATIONS_SCHEMA,
     OPERATIONS_SCHEMA,
+    FINDINGS_SCHEMA,
 )
 
 
@@ -479,6 +500,142 @@ def list_relationships(case_id: int | None = None, conn: sqlite3.Connection | No
                 (case_id,),
             ).fetchall()
         return _rows_to_dicts(rows)
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def _finding_exists(
+    case_id: int,
+    entity_id: int | None,
+    module_id: str,
+    title: str,
+    conn: sqlite3.Connection,
+) -> dict[str, Any] | None:
+    if entity_id is None:
+        row = conn.execute(
+            """
+            SELECT * FROM findings
+            WHERE case_id = ? AND entity_id IS NULL AND module_id = ? AND title = ?
+            """,
+            (case_id, module_id, title),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            """
+            SELECT * FROM findings
+            WHERE case_id = ? AND entity_id = ? AND module_id = ? AND title = ?
+            """,
+            (case_id, entity_id, module_id, title),
+        ).fetchone()
+    return _row_to_dict(row)
+
+
+def create_finding(
+    case_id: int,
+    module_id: str,
+    title: str,
+    severity: str,
+    confidence: int,
+    explanation: str,
+    suggested_actions: list[str] | None = None,
+    entity_id: int | None = None,
+    observation_id: int | None = None,
+    status: str = "open",
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any]:
+    """Create a finding, returning the existing row if an exact duplicate exists."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        existing = _finding_exists(case_id, entity_id, module_id, title, conn)
+        if existing:
+            return existing
+
+        actions_json = json.dumps(suggested_actions or [])
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO findings (
+                case_id, entity_id, observation_id, module_id, title, severity,
+                confidence, explanation, suggested_actions_json, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                case_id,
+                entity_id,
+                observation_id,
+                module_id,
+                title,
+                severity,
+                confidence,
+                explanation,
+                actions_json,
+                status,
+            ),
+        )
+        conn.commit()
+        finding = _row_to_dict(conn.execute("SELECT * FROM findings WHERE id = ?", (cursor.lastrowid,)).fetchone())
+        if finding is None:
+            raise RuntimeError("Failed to create finding.")
+        return finding
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def list_findings(
+    case_id: int | None = None,
+    entity_id: int | None = None,
+    severity: str | None = None,
+    status: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> list[dict[str, Any]]:
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        query = "SELECT * FROM findings"
+        params: list[Any] = []
+        filters: list[str] = []
+
+        if case_id is not None:
+            filters.append("case_id = ?")
+            params.append(case_id)
+        if entity_id is not None:
+            filters.append("entity_id = ?")
+            params.append(entity_id)
+        if severity is not None:
+            filters.append("severity = ?")
+            params.append(severity)
+        if status is not None:
+            filters.append("status = ?")
+            params.append(status)
+
+        if filters:
+            query += " WHERE " + " AND ".join(filters)
+        query += " ORDER BY created_at DESC, id DESC"
+
+        rows = conn.execute(query, params).fetchall()
+        return _rows_to_dicts(rows)
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def update_finding_status(
+    finding_id: int,
+    status: str,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any] | None:
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        conn.execute("UPDATE findings SET status = ? WHERE id = ?", (status, finding_id))
+        conn.commit()
+        return _row_to_dict(conn.execute("SELECT * FROM findings WHERE id = ?", (finding_id,)).fetchone())
     finally:
         if own_conn:
             conn.close()

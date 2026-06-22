@@ -1,3 +1,4 @@
+import json
 import sqlite3
 
 import pandas as pd
@@ -11,6 +12,7 @@ from database.db_setup import (
     infer_entity_type,
     list_cases,
     list_entities,
+    list_findings,
     list_observations,
     list_operations,
     list_relationships,
@@ -339,14 +341,19 @@ relationship_count = conn.execute(
     "SELECT count(*) FROM relationships WHERE case_id = ?",
     (st.session_state.case_id,),
 ).fetchone()[0]
+open_findings_count = conn.execute(
+    "SELECT count(*) FROM findings WHERE case_id = ? AND status = 'open'",
+    (st.session_state.case_id,),
+).fetchone()[0]
 conn.close()
 
-m1, m2, m3, m4, m5 = st.columns(5)
+m1, m2, m3, m4, m5, m6 = st.columns(6)
 m1.metric("Legacy Targets", t_count)
 m2.metric("Case Entities", entity_count)
 m3.metric("Relationships", relationship_count)
 m4.metric("Observations", observation_count)
-m5.metric("Legacy Logs", s_count)
+m5.metric("Open Findings", open_findings_count)
+m6.metric("Legacy Logs", s_count)
 
 st.divider()
 
@@ -412,6 +419,7 @@ st.header("📂 Archive")
     tab_relationships,
     tab_observations,
     tab_operations,
+    tab_findings,
     tab_graph,
 ) = st.tabs(
     [
@@ -422,6 +430,7 @@ st.header("📂 Archive")
         "Relationships",
         "Observations",
         "Operations",
+        "Findings",
         "Graph",
     ]
 )
@@ -482,6 +491,78 @@ with tab_operations:
     conn.close()
     st.caption(f"Showing operations for case #{st.session_state.case_id}.")
     st.dataframe(pd.DataFrame(operations), width="stretch")
+
+with tab_findings:
+    conn = get_db_conn()
+    entities = list_entities(case_id=st.session_state.case_id, conn=conn)
+    entity_lookup = {
+        entity["id"]: entity.get("label") or entity.get("value", entity["id"])
+        for entity in entities
+    }
+    findings = list_findings(case_id=st.session_state.case_id, conn=conn)
+    conn.close()
+
+    st.caption(
+        f"Showing findings for case #{st.session_state.case_id}. "
+        "Findings are analyst aids, not final proof of risk."
+    )
+
+    filter_col1, filter_col2 = st.columns(2)
+    with filter_col1:
+        severity_filter = st.selectbox(
+            "Filter by severity",
+            ["All", "critical", "high", "medium", "low", "info"],
+            key="findings_severity_filter",
+        )
+    with filter_col2:
+        status_filter = st.selectbox(
+            "Filter by status",
+            ["All", "open", "reviewed", "closed"],
+            key="findings_status_filter",
+        )
+
+    filtered_findings = findings
+    if severity_filter != "All":
+        filtered_findings = [f for f in filtered_findings if f.get("severity") == severity_filter]
+    if status_filter != "All":
+        filtered_findings = [f for f in filtered_findings if f.get("status") == status_filter]
+
+    if not filtered_findings:
+        st.info("No findings recorded for this case yet.")
+    else:
+        summary_rows = []
+        for finding in filtered_findings:
+            summary_rows.append(
+                {
+                    "id": finding["id"],
+                    "severity": finding.get("severity"),
+                    "confidence": finding.get("confidence"),
+                    "module": finding.get("module_id"),
+                    "entity": entity_lookup.get(finding.get("entity_id"), finding.get("entity_id") or "-"),
+                    "title": finding.get("title"),
+                    "status": finding.get("status"),
+                    "created_at": finding.get("created_at"),
+                }
+            )
+        st.dataframe(pd.DataFrame(summary_rows), width="stretch")
+
+        for finding in filtered_findings:
+            severity = (finding.get("severity") or "info").upper()
+            entity_label = entity_lookup.get(finding.get("entity_id"), finding.get("entity_id") or "-")
+            expander_label = (
+                f"[{severity}] {finding.get('title', 'Finding')} · "
+                f"{finding.get('module_id')} · {entity_label} · {finding.get('status', 'open')}"
+            )
+            with st.expander(expander_label, expanded=False):
+                st.write(finding.get("explanation", ""))
+                try:
+                    suggested_actions = json.loads(finding.get("suggested_actions_json") or "[]")
+                except json.JSONDecodeError:
+                    suggested_actions = []
+                if suggested_actions:
+                    st.markdown("**Suggested next actions**")
+                    for action in suggested_actions:
+                        st.markdown(f"- {action}")
 
 with tab_graph:
     conn = get_db_conn()

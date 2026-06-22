@@ -9,12 +9,14 @@ from pathlib import Path
 from typing import Any
 
 from database.db_setup import (
+    create_finding,
     create_observation,
     create_operation_log,
     create_or_get_entity,
     create_relationship,
 )
 from modules.module_registry import get_module, is_executable
+from utils.domain_intel_interpreter import interpret_domain_intel_results
 from utils.nmap_interpreter import interpret_nmap_results
 from utils.nmap_options import SCRIPT_VULN, build_nmap_flags, normalize_options
 from utils.nmap_parser import build_service_entity_label, build_service_entity_value
@@ -176,6 +178,31 @@ def _persist_nmap_services_and_relationships(
         )
 
 
+def _persist_module_findings(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int | None,
+    observation_id: int | None,
+    module_id: str,
+    interpreter_findings: list[dict[str, Any]],
+) -> None:
+    """Save structured interpreter findings, skipping exact duplicates."""
+    for finding in interpreter_findings:
+        create_finding(
+            case_id,
+            module_id,
+            finding.get("title", "Finding"),
+            finding.get("severity", "info"),
+            int(finding.get("confidence", 50)),
+            finding.get("explanation", ""),
+            finding.get("suggested_actions") or [],
+            entity_id=entity_id,
+            observation_id=observation_id,
+            conn=conn,
+        )
+
+
 def _persist_investigation_records(
     conn: sqlite3.Connection,
     *,
@@ -215,7 +242,7 @@ def _persist_investigation_records(
         )
 
     selected_options = result.get("selected_options") or options.get("nmap_options", {})
-    create_observation(
+    observation = create_observation(
         case_id,
         entity_id,
         module_id,
@@ -242,6 +269,17 @@ def _persist_investigation_records(
         raw_output=result["raw_output"],
         conn=conn,
     )
+
+    interpreter_findings = result.get("interpreter_findings") or []
+    if interpreter_findings:
+        _persist_module_findings(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation["id"],
+            module_id=module_id,
+            interpreter_findings=interpreter_findings,
+        )
 
 
 def _persist_domain_intel_records(
@@ -331,7 +369,7 @@ def _persist_domain_intel_records(
             conn=conn,
         )
 
-    create_observation(
+    observation = create_observation(
         case_id,
         domain_entity_id,
         module_id,
@@ -344,6 +382,7 @@ def _persist_domain_intel_records(
                 "success": result["success"],
                 "status": result["status"],
                 "findings": result.get("findings", []),
+                "interpreter_findings": result.get("interpreter_findings", []),
                 "domain": parsed_data.get("domain"),
                 "input": parsed_data.get("input"),
                 "dns": parsed_data.get("dns", {}),
@@ -356,6 +395,17 @@ def _persist_domain_intel_records(
         raw_output=result["raw_output"],
         conn=conn,
     )
+
+    interpreter_findings = result.get("interpreter_findings") or []
+    if interpreter_findings:
+        _persist_module_findings(
+            conn,
+            case_id=case_id,
+            entity_id=domain_entity_id,
+            observation_id=observation["id"],
+            module_id=module_id,
+            interpreter_findings=interpreter_findings,
+        )
 
 
 def _scan_output_text(scan_data: dict[str, Any]) -> str:
@@ -544,6 +594,7 @@ def _execute_domain_intel(
 
     parsed_data = intel_data.get("parsed_data") or {}
     domain = parsed_data.get("domain") or target
+    interpreter_findings = interpret_domain_intel_results(parsed_data)
     result = make_result(
         module_id,
         success=True,
@@ -552,6 +603,7 @@ def _execute_domain_intel(
         raw_output=intel_data.get("raw_output", ""),
         findings=intel_data.get("findings", []),
         parsed_data=parsed_data,
+        interpreter_findings=interpreter_findings,
     )
 
     if db_context is not None and case_id is not None:
@@ -678,7 +730,7 @@ def execute_module(
             entity_id,
         )
 
-    # TODO(v0.8): Route additional implemented modules here.
+    # TODO(v0.9): Route additional implemented modules through the findings pipeline.
     return make_result(
         module_id,
         success=False,
