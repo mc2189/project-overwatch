@@ -128,6 +128,9 @@ def build_operation_plan(
     target: str,
     selected_module_ids: list[str],
     authorisation_confirmed: bool,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+    recommendation_reason: str | None = None,
 ) -> dict:
     """Build a pre-launch operation plan summary for the dashboard."""
     target_type = get_target_type(target)
@@ -167,6 +170,9 @@ def build_operation_plan(
         "normalized_target": normalized_target,
         "target_type": target_type,
         "target_type_label": target_type_label(target_type),
+        "run_mode_id": run_mode_id,
+        "run_mode_label": run_mode_label,
+        "recommendation_reason": recommendation_reason,
         "selected_modules": [module.display_name for module in modules],
         "active_modules": active_modules,
         "passive_modules": passive_modules,

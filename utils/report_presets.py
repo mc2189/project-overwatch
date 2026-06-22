@@ -24,6 +24,7 @@ class ReportPreset:
     redact_ips: bool
     redact_emails: bool
     redact_domains: bool
+    suggested_run_mode_id: str | None = None
 
 
 REPORT_PRESETS: dict[str, ReportPreset] = {
@@ -38,6 +39,46 @@ REPORT_PRESETS: dict[str, ReportPreset] = {
         redact_ips=False,
         redact_emails=False,
         redact_domains=False,
+        suggested_run_mode_id="quick_check",
+    ),
+    "quick_check_overview": ReportPreset(
+        preset_id="quick_check_overview",
+        label="Quick Check overview",
+        description="Executive summary suited to Quick Check investigations.",
+        template="executive",
+        include_closed_findings=False,
+        include_raw_appendix=False,
+        include_graph_appendix=False,
+        redact_ips=False,
+        redact_emails=False,
+        redact_domains=False,
+        suggested_run_mode_id="quick_check",
+    ),
+    "domain_footprint_summary": ReportPreset(
+        preset_id="domain_footprint_summary",
+        label="Domain footprint summary",
+        description="Executive summary focused on passive domain and certificate findings.",
+        template="executive",
+        include_closed_findings=False,
+        include_raw_appendix=False,
+        include_graph_appendix=True,
+        redact_ips=False,
+        redact_emails=False,
+        redact_domains=False,
+        suggested_run_mode_id="website_footprint",
+    ),
+    "local_ip_technical": ReportPreset(
+        preset_id="local_ip_technical",
+        label="Local IP technical",
+        description="Full technical report for IPv4 service-check investigations.",
+        template="full",
+        include_closed_findings=False,
+        include_raw_appendix=False,
+        include_graph_appendix=True,
+        redact_ips=False,
+        redact_emails=False,
+        redact_domains=False,
+        suggested_run_mode_id="local_ip_check",
     ),
     "full_technical": ReportPreset(
         preset_id="full_technical",
@@ -78,6 +119,30 @@ REPORT_PRESETS: dict[str, ReportPreset] = {
 }
 
 
+def presets_for_run_mode(run_mode_id: str | None) -> list[str]:
+    """Return preset IDs suggested for a run mode."""
+    if not run_mode_id:
+        return []
+    return [
+        preset_id
+        for preset_id, preset in REPORT_PRESETS.items()
+        if preset.suggested_run_mode_id == run_mode_id
+    ]
+
+
+def suggest_preset_for_run_mode(run_mode_id: str | None) -> str | None:
+    """Return the primary preset ID for a run mode, if any."""
+    matches = presets_for_run_mode(run_mode_id)
+    return matches[0] if matches else None
+
+
+def preset_select_options(run_mode_id: str | None = None) -> list[str]:
+    """Order preset keys with run-mode matches first."""
+    suggested = presets_for_run_mode(run_mode_id)
+    general = [preset_id for preset_id in REPORT_PRESETS if preset_id not in suggested]
+    return ["custom", *suggested, *general]
+
+
 def apply_preset_to_session(preset_id: str) -> None:
     """Write preset widget defaults into Streamlit session state."""
     import streamlit as st
@@ -90,6 +155,7 @@ def apply_preset_to_session(preset_id: str) -> None:
     st.session_state["redact_ips"] = preset.redact_ips
     st.session_state["redact_emails"] = preset.redact_emails
     st.session_state["redact_domains"] = preset.redact_domains
+    st.session_state["report_preset_choice"] = preset_id
 
 
 def build_report_options_from_state(

@@ -150,6 +150,15 @@ FINDING_COLUMN_MIGRATIONS: tuple[tuple[str, str], ...] = (
     ("updated_at", "TIMESTAMP"),
 )
 
+CASE_COLUMN_MIGRATIONS: tuple[tuple[str, str], ...] = (
+    ("default_run_mode", "TEXT"),
+)
+
+OPERATION_COLUMN_MIGRATIONS: tuple[tuple[str, str], ...] = (
+    ("run_mode_id", "TEXT"),
+    ("run_mode_label", "TEXT"),
+)
+
 ALL_SCHEMAS = (
     TARGETS_SCHEMA,
     RECON_DATA_SCHEMA,
@@ -185,6 +194,8 @@ def get_db_conn() -> sqlite3.Connection:
     for schema in ALL_SCHEMAS:
         conn.execute(schema)
     _migrate_findings_table(conn)
+    _migrate_cases_table(conn)
+    _migrate_operations_table(conn)
     return conn
 
 
@@ -209,6 +220,74 @@ def _migrate_findings_table(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE findings ADD COLUMN {column_name} {column_type}")
     conn.execute("UPDATE findings SET status = 'in_review' WHERE status = 'reviewed'")
     conn.commit()
+
+
+def _migrate_cases_table(conn: sqlite3.Connection) -> None:
+    """Add optional case columns safely."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(cases)").fetchall()}
+    for column_name, column_type in CASE_COLUMN_MIGRATIONS:
+        if column_name not in columns:
+            conn.execute(f"ALTER TABLE cases ADD COLUMN {column_name} {column_type}")
+    conn.commit()
+
+
+def _migrate_operations_table(conn: sqlite3.Connection) -> None:
+    """Add optional operation columns safely."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(operations)").fetchall()}
+    for column_name, column_type in OPERATION_COLUMN_MIGRATIONS:
+        if column_name not in columns:
+            conn.execute(f"ALTER TABLE operations ADD COLUMN {column_name} {column_type}")
+    conn.commit()
+
+
+def update_case_run_mode(
+    case_id: int,
+    run_mode_id: str,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any] | None:
+    """Persist the last-used run mode for a case."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        conn.execute(
+            """
+            UPDATE cases
+            SET default_run_mode = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (run_mode_id, case_id),
+        )
+        conn.commit()
+        return get_case(case_id, conn=conn)
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def operation_run_mode_counts(
+    case_id: int,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, int]:
+    """Count operations grouped by run mode label for a case."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT COALESCE(run_mode_label, 'Unknown') AS mode_label, COUNT(*) AS total
+            FROM operations
+            WHERE case_id = ?
+            GROUP BY COALESCE(run_mode_label, 'Unknown')
+            ORDER BY total DESC, mode_label ASC
+            """,
+            (case_id,),
+        ).fetchall()
+        return {str(row["mode_label"]): int(row["total"]) for row in rows}
+    finally:
+        if own_conn:
+            conn.close()
 
 
 def infer_entity_type(value: str) -> str:
@@ -420,6 +499,8 @@ def create_operation_log(
     status: str,
     authorisation_confirmed: bool = False,
     summary: str | None = None,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
     own_conn = conn is None
@@ -431,8 +512,9 @@ def create_operation_log(
         cursor.execute(
             """
             INSERT INTO operations (
-                case_id, module_id, target, status, authorisation_confirmed, summary, completed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                case_id, module_id, target, status, authorisation_confirmed,
+                summary, completed_at, run_mode_id, run_mode_label
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 case_id,
@@ -442,6 +524,8 @@ def create_operation_log(
                 1 if authorisation_confirmed else 0,
                 summary,
                 completed_at,
+                run_mode_id,
+                run_mode_label,
             ),
         )
         conn.commit()

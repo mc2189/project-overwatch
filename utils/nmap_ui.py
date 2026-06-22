@@ -43,53 +43,73 @@ def render_privilege_status() -> bool:
     return root_available
 
 
-def render_nmap_options(enabled: bool) -> dict[str, Any]:
+def render_nmap_options(
+    enabled: bool,
+    *,
+    initial_profile: str | None = None,
+    collapse_settings: bool = False,
+) -> dict[str, Any]:
     """Render guided Nmap profile/options UI and return the selected option set."""
+    from utils.nmap_options import PROFILE_QUICK_CHECK
+
     root_available = has_root_privileges()
+    default_profile = initial_profile or "Standard service scan"
+    if default_profile not in PROFILES:
+        default_profile = "Standard service scan"
+    profile_index = PROFILES.index(default_profile)
 
-    profile = st.selectbox(
-        "Nmap scan profile",
-        options=PROFILES,
-        index=PROFILES.index("Standard service scan"),
-        disabled=not enabled,
-        help="Choose a guided scan profile. Custom guided scan exposes individual options.",
-    )
-
-    if not root_available:
-        st.caption(
-            "OS detection and traceroute may require elevated privileges and are unavailable in this session."
+    def _render_profile_ui() -> dict[str, Any]:
+        profile = st.selectbox(
+            "Nmap scan profile",
+            options=PROFILES,
+            index=profile_index,
+            disabled=not enabled,
+            help="Choose a guided scan profile. Custom guided scan exposes individual options.",
+            key="nmap_profile_select",
         )
 
-    options = default_options_for_profile(profile)
-    options["profile"] = profile
+        if not root_available:
+            st.caption(
+                "OS detection and traceroute may require elevated privileges and are unavailable "
+                "in this session."
+            )
 
-    if profile == PROFILE_CUSTOM:
-        options = _render_custom_options(options, enabled, root_available)
-    else:
+        options = default_options_for_profile(profile)
+        options["profile"] = profile
+
+        if profile == PROFILE_CUSTOM:
+            options = _render_custom_options(options, enabled, root_available)
+        else:
+            normalized = normalize_options(options)
+            active = [
+                f"{key}={value}"
+                for key, value in normalized.items()
+                if key
+                not in ("profile", "os_detection_requested", "os_detection_skipped")
+                and value not in (None, "", False)
+            ]
+            st.caption("Profile settings: " + (", ".join(active) if active else "defaults"))
+            if normalized.get("os_detection_skipped"):
+                st.caption(
+                    "OS detection was requested by this profile but will be skipped because elevated "
+                    "privileges are not available. The rest of the scan will still run."
+                )
+            if normalized.get("traceroute_skipped"):
+                st.caption(
+                    "Traceroute was requested but will be skipped because elevated privileges "
+                    "are not available."
+                )
+
         normalized = normalize_options(options)
-        active = [
-            f"{key}={value}"
-            for key, value in normalized.items()
-            if key
-            not in ("profile", "os_detection_requested", "os_detection_skipped")
-            and value not in (None, "", False)
-        ]
-        st.caption("Profile settings: " + (", ".join(active) if active else "defaults"))
-        if normalized.get("os_detection_skipped"):
-            st.caption(
-                "OS detection was requested by this profile but will be skipped because elevated "
-                "privileges are not available. The rest of the scan will still run."
-            )
-        if normalized.get("traceroute_skipped"):
-            st.caption(
-                "Traceroute was requested but will be skipped because elevated privileges are not available."
-            )
+        for message in validation_messages(options):
+            st.caption(message)
+        return normalized
 
-    normalized = normalize_options(options)
-    for message in validation_messages(options):
-        st.caption(message)
-
-    return normalized
+    if collapse_settings:
+        with st.expander("Nmap scan settings", expanded=False):
+            st.caption(f"Default profile: {initial_profile or PROFILE_QUICK_CHECK}")
+            return _render_profile_ui()
+    return _render_profile_ui()
 
 
 def _render_custom_options(

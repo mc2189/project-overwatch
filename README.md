@@ -1,4 +1,4 @@
-# Project Overwatch v1.5
+# Project Overwatch v1.6
 
 Project Overwatch is a **local** Python/Streamlit dashboard for defensive security intelligence. It helps analysts organise investigations into **cases**, collect data with authorised **active** scans and **passive** lookups, interpret results as advisory **findings**, and export **reports** — all stored in a local SQLite database on your machine.
 
@@ -25,18 +25,36 @@ The sidebar provides case selection and main navigation:
 1. **Select or create a case** in the sidebar.
 2. Open **Run Operation**.
 3. **Step 1 — Target:** enter IPv4, domain, URL, email, or username. The app shows detected type and normalised host for URLs.
-4. **Step 2 — Module Selection:** choose from implemented module cards (compatible first, incompatible below with reasons). Planned modules are on the **Roadmap** page only.
-5. **Step 3 — Module Configuration:** configure selected modules (Nmap profile/options in an expander when Nmap is selected).
-6. **Step 4 — Operation Plan:** review case, target, modules, authorisation requirement, and expected outputs.
-7. Confirm **authorisation** if an active module is selected, then click **Run selected modules**.
-8. Review **Latest Results** (summary plus Summary / Interpretation / Output / Raw / Structured tabs).
-9. Move to **Findings**, **Graph**, **Report**, or **Backup** as needed.
+4. **Choose a run mode** (“What do you want to do?”): Quick Check, Website / Domain Footprint, Local Device / IP Check, or Custom Module Selection.
+5. **Step 2 — Module Selection:** review recommended modules for your mode and target, or pick modules manually in Custom mode. Planned modules are on the **Roadmap** page only.
+6. **Step 3 — Module Configuration:** configure selected modules (Nmap uses a conservative profile by default for IP-focused modes).
+7. **Step 4 — Operation Plan:** review case, target, run mode, module recommendations, authorisation requirement, and expected outputs.
+8. Confirm **authorisation** if an active module is selected, then click **Run selected modules**.
+9. Review **Latest Results** (summary plus Summary / Interpretation / Output / Raw / Structured tabs).
+10. Move to **Findings**, **Graph**, **Report**, or **Backup** as needed.
 
 ### Module cards on Run Operation
 
 - **Network Service Check, powered by Nmap** — active; IPv4 or domain only (not URL — enter hostname separately for port scans).
 - **Domain Intelligence** — passive DNS/HTTP/TLS/Wayback for domain or URL.
 - **Certificate & Subdomain Intelligence** — passive certificate transparency names for domain or URL.
+
+### Guided run modes (v1.5)
+
+After entering a target, choose **What do you want to do?** on Run Operation:
+
+| Run mode | Purpose | Typical recommendations |
+|----------|---------|-------------------------|
+| **Quick Check** | Simple default | IPv4 → Network Service Check only; domain/URL → Domain Intelligence + Certificate & Subdomain Intelligence; email/username/unknown → none |
+| **Website / Domain Footprint** | Passive domain footprint | Domain Intelligence + Certificate & Subdomain Intelligence (no Nmap by default) |
+| **Local Device / IP Check** | Conservative active IP scan | Network Service Check with Quick check Nmap profile; authorisation required |
+| **Custom Module Selection** | Power-user manual pick | All compatible modules shown; no automatic preselection when you change target |
+
+Recommendations are deterministic and local — they filter by target type and run mode only. **Compatibility checks and the authorisation gate still apply**; passive-only runs do not require authorisation.
+
+Module cards are grouped as **Recommended for this target**, **Available but not recommended by this mode** (in an expander), and **Not available for this target**. The **Module Lab / Advanced** expander shows full metadata without bypassing the normal executor flow.
+
+The **Operation Plan** includes the selected run mode and an explanation of why modules were recommended.
 
 ## Quick start
 
@@ -123,7 +141,7 @@ Module cards on Run Operation show mode, risk, compatible target types, expected
 
 ### Operation Plan and Latest Results
 
-The **Operation Plan** on Run Operation summarises case, original and normalised target, detected type, selected modules, authorisation requirement, and expected outputs immediately before launch.
+The **Operation Plan** on Run Operation summarises case, original and normalised target, detected type, **run mode**, **why modules were recommended**, selected modules, active/passive split, authorisation requirement, and expected outputs immediately before launch.
 
 After a run, **Latest Results** shows per-module status, finding counts, highest severity, and tabbed detail (Summary, Analyst Interpretation, Module Output, Raw Output, Structured Data). Raw output is collapsed by default.
 
@@ -138,6 +156,22 @@ The **Report** page includes built-in presets (Executive brief, Full technical, 
 ### Stale finding reopen (v1.5)
 
 When a module re-scan observes the same finding again, terminal findings (closed, accepted, false positive) are automatically reopened to `open` with an analyst note explaining the re-observation.
+
+### Run mode persistence (v1.6)
+
+Each case remembers its last-used run mode (`default_run_mode`). Switching cases restores that case's mode on **Run Operation**. The mode is saved when you change it or launch modules.
+
+### Quick Check optional port scan (v1.6)
+
+For domain or URL targets in **Quick Check**, you can optionally enable **Include light port scan** to add Network Service Check with a conservative profile. Authorisation is still required.
+
+### Mode-aware report presets (v1.6)
+
+The **Report** page suggests export presets based on the case's run mode (e.g. Domain footprint summary for Website / Domain Footprint). Presets marked with ★ match the active run mode.
+
+### Operation run mode analytics (v1.6)
+
+Each operation log records `run_mode_id` and `run_mode_label`. The **Operations** page shows counts by run mode and supports filtering. Case reports include an operations-by-run-mode summary.
 
 ## Investigation model
 
@@ -259,7 +293,7 @@ config/                    Local report settings (gitignored)
 
 Check **Sidebar → System status** for Nmap, modules, and optional dependency readiness.
 
-## v1.6 roadmap
+## v1.7 roadmap
 
 - Additional passive collection modules wired through the findings pipeline
 - Configurable stale-reopen behaviour per finding status

@@ -252,6 +252,8 @@ def _persist_investigation_records(
     result: dict[str, Any],
     authorisation_confirmed: bool,
     options: dict[str, Any],
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
 ) -> None:
     """Save operation and observation records for a completed module run."""
     create_operation_log(
@@ -261,6 +263,8 @@ def _persist_investigation_records(
         result["status"],
         authorisation_confirmed=authorisation_confirmed,
         summary=result["summary"],
+        run_mode_id=run_mode_id,
+        run_mode_label=run_mode_label,
         conn=conn,
     )
 
@@ -330,6 +334,8 @@ def _persist_domain_intel_records(
     target: str,
     result: dict[str, Any],
     authorisation_confirmed: bool,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
 ) -> None:
     """Save domain intelligence operations, observations, entities, and relationships."""
     create_operation_log(
@@ -339,6 +345,8 @@ def _persist_domain_intel_records(
         result["status"],
         authorisation_confirmed=authorisation_confirmed,
         summary=result["summary"],
+        run_mode_id=run_mode_id,
+        run_mode_label=run_mode_label,
         conn=conn,
     )
 
@@ -456,6 +464,8 @@ def _persist_cert_subdomain_records(
     target: str,
     result: dict[str, Any],
     authorisation_confirmed: bool,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
 ) -> None:
     """Save certificate/subdomain operations, observations, entities, and relationships."""
     create_operation_log(
@@ -465,6 +475,8 @@ def _persist_cert_subdomain_records(
         result["status"],
         authorisation_confirmed=authorisation_confirmed,
         summary=result["summary"],
+        run_mode_id=run_mode_id,
+        run_mode_label=run_mode_label,
         conn=conn,
     )
 
@@ -610,6 +622,8 @@ def _execute_nmap(
     authorisation_confirmed: bool,
     case_id: int | None,
     entity_id: int | None,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
 ) -> dict[str, Any]:
     _load_nmap_handlers()
     if _nmap_handlers is None:
@@ -687,6 +701,8 @@ def _execute_nmap(
                 result=result,
                 authorisation_confirmed=authorisation_confirmed,
                 options=options,
+                run_mode_id=run_mode_id,
+                run_mode_label=run_mode_label,
             )
 
     return result
@@ -721,6 +737,8 @@ def _execute_domain_intel(
     authorisation_confirmed: bool,
     case_id: int | None,
     entity_id: int | None,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
 ) -> dict[str, Any]:
     _load_domain_intel_handler()
     if _domain_intel_handler is None:
@@ -781,6 +799,8 @@ def _execute_domain_intel(
             target=domain,
             result=result,
             authorisation_confirmed=authorisation_confirmed,
+            run_mode_id=run_mode_id,
+            run_mode_label=run_mode_label,
         )
 
     return result
@@ -793,6 +813,8 @@ def _execute_cert_subdomain(
     authorisation_confirmed: bool,
     case_id: int | None,
     entity_id: int | None,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
 ) -> dict[str, Any]:
     _load_cert_subdomain_handler()
     if _cert_subdomain_handler is None:
@@ -849,6 +871,8 @@ def _execute_cert_subdomain(
             target=domain,
             result=result,
             authorisation_confirmed=authorisation_confirmed,
+            run_mode_id=run_mode_id,
+            run_mode_label=run_mode_label,
         )
 
     return result
@@ -862,6 +886,8 @@ def execute_module(
     authorisation_confirmed: bool = False,
     case_id: int | None = None,
     entity_id: int | None = None,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
 ) -> dict[str, Any]:
     """
     Execute a registered module and return a structured result dictionary.
@@ -926,6 +952,8 @@ def execute_module(
                 "blocked",
                 authorisation_confirmed=authorisation_confirmed,
                 summary=reason,
+                run_mode_id=run_mode_id,
+                run_mode_label=run_mode_label,
                 conn=db_context,
             )
         return result
@@ -957,6 +985,8 @@ def execute_module(
             authorisation_confirmed,
             case_id,
             entity_id,
+            run_mode_id,
+            run_mode_label,
         )
 
     if module_id == "infra_domain_intel":
@@ -976,6 +1006,8 @@ def execute_module(
             authorisation_confirmed,
             case_id,
             entity_id,
+            run_mode_id,
+            run_mode_label,
         )
 
     if module_id == "infra_cert_subdomain":
@@ -995,6 +1027,8 @@ def execute_module(
             authorisation_confirmed,
             case_id,
             entity_id,
+            run_mode_id,
+            run_mode_label,
         )
 
     # Additional modules: register an interpreter in utils/findings_registry.py and wire execution here.

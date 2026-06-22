@@ -17,6 +17,7 @@ from database.db_setup import (
     list_observations,
     list_operations,
     list_relationships,
+    operation_run_mode_counts,
 )
 from ui.metrics import render_compact_metrics
 from utils.case_backup import export_case_bundle_json, import_case_bundle, parse_case_bundle_json
@@ -33,7 +34,14 @@ from utils.report_export import (
     save_report_html,
     save_report_pdf,
 )
-from utils.report_presets import REPORT_PRESETS, apply_preset_to_session, build_report_options_from_state
+from utils.report_presets import (
+    REPORT_PRESETS,
+    apply_preset_to_session,
+    build_report_options_from_state,
+    preset_select_options,
+    suggest_preset_for_run_mode,
+)
+from utils.run_modes import get_run_mode_label
 from utils.report_redaction import parse_custom_terms
 from utils.report_scheduler import maybe_run_scheduled_exports
 from utils.report_settings import (
@@ -127,9 +135,34 @@ def render_operations_page(case_id: int, metrics: dict[str, int]) -> None:
 
     conn = get_db_conn()
     operations = list_operations(case_id=case_id, conn=conn)
+    mode_counts = operation_run_mode_counts(case_id, conn=conn)
     conn.close()
     st.caption(f"Showing operations for case #{case_id}.")
-    st.dataframe(pd.DataFrame(operations), width="stretch")
+    if mode_counts:
+        summary = ", ".join(f"{label}: {count}" for label, count in mode_counts.items())
+        st.markdown(f"**Operations by run mode:** {summary}")
+
+    run_mode_labels = sorted(
+        {operation.get("run_mode_label") or "Unknown" for operation in operations}
+    )
+    if run_mode_labels:
+        selected_modes = st.multiselect(
+            "Filter by run mode",
+            options=run_mode_labels,
+            default=run_mode_labels,
+            key="operations_run_mode_filter",
+        )
+        if selected_modes:
+            operations = [
+                operation
+                for operation in operations
+                if (operation.get("run_mode_label") or "Unknown") in selected_modes
+            ]
+
+    if operations:
+        st.dataframe(pd.DataFrame(operations), width="stretch")
+    else:
+        st.info("No operations recorded for this case yet.")
 
 
 def render_graph_page(case_id: int, metrics: dict[str, int]) -> None:
@@ -255,15 +288,37 @@ def render_report_page(case_id: int, metrics: dict[str, int]) -> None:
             )
             st.success("Schedule settings saved. Exports run when the Report page is opened.")
 
+    active_run_mode = st.session_state.get("operation_run_mode")
+    case = get_case(case_id)
+    if case and case.get("default_run_mode"):
+        active_run_mode = case.get("default_run_mode")
+
+    suggested_preset = suggest_preset_for_run_mode(active_run_mode)
+    if suggested_preset:
+        suggested = REPORT_PRESETS[suggested_preset]
+        mode_label = get_run_mode_label(active_run_mode) if active_run_mode else "this investigation"
+        st.info(
+            f"Suggested export preset for **{mode_label}**: **{suggested.label}** — "
+            f"{suggested.description}"
+        )
+        if st.button("Apply suggested preset", key="apply_suggested_report_preset"):
+            apply_preset_to_session(suggested_preset)
+            st.rerun()
+
     preset_col1, preset_col2 = st.columns([2, 1])
     with preset_col1:
+        preset_options = preset_select_options(active_run_mode)
         preset_choice = st.selectbox(
             "Export preset",
-            options=["custom", *REPORT_PRESETS.keys()],
+            options=preset_options,
             format_func=lambda value: (
                 "Custom settings"
                 if value == "custom"
-                else REPORT_PRESETS[value].label
+                else (
+                    f"{REPORT_PRESETS[value].label} ★"
+                    if REPORT_PRESETS[value].suggested_run_mode_id == active_run_mode
+                    else REPORT_PRESETS[value].label
+                )
             ),
             key="report_preset_choice",
         )

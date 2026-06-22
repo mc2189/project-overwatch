@@ -2,6 +2,15 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v1.6.0 — Run mode persistence, analytics, and report presets
+
+- Guided run modes (v1.5): Quick Check, Website / Domain Footprint, Local Device / IP Check, Custom Module Selection
+- Case `default_run_mode` persistence — each case remembers its last run mode
+- Operation logs record `run_mode_id` and `run_mode_label` for analytics
+- Operations page: counts and filter by run mode; reports include operations-by-run-mode summary
+- Mode-aware report presets (Domain footprint summary, Local IP technical, Quick Check overview)
+- Quick Check optional light port scan for domain/URL targets (conservative Nmap profile, auth required)
+
 ## v1.5.0 — Stale findings, graph filters, report presets
 
 - Terminal findings (closed, accepted, false positive) reopen to `open` when re-observed on module re-scan

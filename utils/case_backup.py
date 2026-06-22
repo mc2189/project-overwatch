@@ -122,6 +122,8 @@ def import_case_bundle(bundle: dict[str, Any], *, new_case_name: str | None = No
                 operation.get("status", "imported"),
                 authorisation_confirmed=bool(operation.get("authorisation_confirmed")),
                 summary=operation.get("summary"),
+                run_mode_id=operation.get("run_mode_id"),
+                run_mode_label=operation.get("run_mode_label"),
                 conn=conn,
             )
 

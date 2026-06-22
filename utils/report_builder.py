@@ -70,6 +70,16 @@ def _module_display(module_id: str | None) -> str:
     return module.display_name if module else module_id
 
 
+def _format_operation_run_modes(operations: list[dict[str, Any]]) -> str:
+    if not operations:
+        return "None recorded"
+    counts: dict[str, int] = defaultdict(int)
+    for operation in operations:
+        label = operation.get("run_mode_label") or "Unknown"
+        counts[str(label)] += 1
+    return ", ".join(f"{label}: {count}" for label, count in sorted(counts.items())) or "None recorded"
+
+
 def _highest_severity(findings: list[dict[str, Any]]) -> str | None:
     if not findings:
         return None
@@ -267,6 +277,7 @@ def build_case_report(
         f"- Total relationships: {len(relationships)}",
         f"- Total observations: {len(observations)}",
         f"- Total operations: {len(operations)}",
+        f"- Operations by run mode: {_format_operation_run_modes(operations)}",
         f"- Total findings: {len(all_findings)}",
         f"- Open findings: {len(open_findings)}",
         f"- Finding status summary: {status_summary}",

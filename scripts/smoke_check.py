@@ -276,6 +276,113 @@ def _check_target_compatibility() -> None:
         raise AssertionError("executor should block incompatible domain intel on IPv4")
 
 
+def _check_run_modes() -> None:
+    run_modes = __import__(
+        "utils.run_modes",
+        fromlist=[
+            "list_run_modes",
+            "get_recommended_modules_for_mode",
+            "get_run_mode_description",
+            "get_run_mode_expected_outputs",
+            "get_recommendation_reason",
+            "QUICK_CHECK",
+            "WEBSITE_FOOTPRINT",
+            "LOCAL_IP_CHECK",
+            "CUSTOM",
+        ],
+    )
+    modes = run_modes.list_run_modes()
+    if len(modes) < 4:
+        raise AssertionError("expected at least four run modes")
+    for mode_id, label in modes:
+        if not label or not run_modes.get_run_mode_description(mode_id):
+            raise AssertionError(f"missing description for run mode {mode_id}")
+
+    ip_recommended = run_modes.get_recommended_modules_for_mode(
+        run_modes.LOCAL_IP_CHECK, "ipv4"
+    )
+    if ip_recommended != ["infra_nmap"]:
+        raise AssertionError(f"IPv4 local check should recommend Nmap only, got {ip_recommended}")
+
+    domain_quick = run_modes.get_recommended_modules_for_mode(
+        run_modes.QUICK_CHECK, "domain"
+    )
+    if set(domain_quick) != {"infra_domain_intel", "infra_cert_subdomain"}:
+        raise AssertionError(f"domain quick check recommendations unexpected: {domain_quick}")
+
+    url_footprint = run_modes.get_recommended_modules_for_mode(
+        run_modes.WEBSITE_FOOTPRINT, "url"
+    )
+    if set(url_footprint) != {"infra_domain_intel", "infra_cert_subdomain"}:
+        raise AssertionError(f"URL footprint recommendations unexpected: {url_footprint}")
+
+    for unsupported in ("email", "username", "unknown"):
+        quick = run_modes.get_recommended_modules_for_mode(run_modes.QUICK_CHECK, unsupported)
+        if quick:
+            raise AssertionError(f"Quick Check should not recommend modules for {unsupported}")
+        custom = run_modes.get_recommended_modules_for_mode(run_modes.CUSTOM, unsupported)
+        if custom:
+            raise AssertionError("Custom mode should not auto-recommend modules")
+
+    outputs = run_modes.get_run_mode_expected_outputs(run_modes.QUICK_CHECK, "domain")
+    if not outputs or "Domain Intelligence" not in outputs[0]:
+        raise AssertionError("expected domain module output in quick check plan")
+
+    reason = run_modes.get_recommendation_reason(run_modes.LOCAL_IP_CHECK, "ipv4")
+    if "authorisation" not in reason.lower():
+        raise AssertionError("local IP check reason should mention authorisation")
+
+    with_port_scan = run_modes.resolve_recommended_modules_for_mode(
+        run_modes.QUICK_CHECK,
+        "domain",
+        quick_check_include_port_scan=True,
+    )
+    if "infra_nmap" not in with_port_scan:
+        raise AssertionError("Quick Check port scan option should include Nmap for domains")
+
+    presets = __import__(
+        "utils.report_presets",
+        fromlist=["suggest_preset_for_run_mode", "presets_for_run_mode"],
+    )
+    if not presets.suggest_preset_for_run_mode(run_modes.WEBSITE_FOOTPRINT):
+        raise AssertionError("expected report preset for website footprint mode")
+    if "domain_footprint_summary" not in presets.presets_for_run_mode(run_modes.WEBSITE_FOOTPRINT):
+        raise AssertionError("domain footprint preset missing")
+
+    db = __import__(
+        "database.db_setup",
+        fromlist=[
+            "create_case",
+            "get_case",
+            "update_case_run_mode",
+            "create_operation_log",
+            "operation_run_mode_counts",
+            "get_or_create_default_case",
+            "get_db_conn",
+        ],
+    )
+    case = db.create_case("Smoke run mode case", "temporary")
+    updated = db.update_case_run_mode(case["id"], run_modes.LOCAL_IP_CHECK)
+    if not updated or updated.get("default_run_mode") != run_modes.LOCAL_IP_CHECK:
+        raise AssertionError("update_case_run_mode did not persist default_run_mode")
+    conn = db.get_db_conn()
+    try:
+        db.create_operation_log(
+            case["id"],
+            "infra_nmap",
+            "192.168.1.1",
+            "completed",
+            run_mode_id=run_modes.LOCAL_IP_CHECK,
+            run_mode_label="Local Device / IP Check",
+            conn=conn,
+        )
+        counts = db.operation_run_mode_counts(case["id"], conn=conn)
+        if counts.get("Local Device / IP Check") != 1:
+            raise AssertionError("operation_run_mode_counts unexpected")
+    finally:
+        conn.close()
+
+
 def main() -> int:
     print(f"Project Overwatch smoke check (root: {PROJECT_ROOT})")
     errors = 0
@@ -320,6 +427,11 @@ def main() -> int:
     run(
         "target compatibility",
         lambda: _check_target_compatibility(),
+    )
+
+    run(
+        "run modes",
+        lambda: _check_run_modes(),
     )
 
     run(

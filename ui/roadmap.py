@@ -28,7 +28,10 @@ def render_roadmap_page() -> None:
             continue
         with st.expander(category_label, expanded=False):
             for module in category_modules:
-                st.markdown(f"**{module.display_name}** · {module.mode.title()} · {module.risk_level.title()} risk")
+                st.markdown(
+                    f"**{module.display_name}** · {module.mode.title()} · "
+                    f"{module.risk_level.title()} risk · Status: {module.status}"
+                )
                 st.write(module_short_help(module))
                 st.caption(module_detailed_help(module))
                 if module.accepted_target_types:
