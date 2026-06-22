@@ -2,6 +2,15 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v1.2.0 — Target compatibility and launch planner
+
+- Central target type detection (`ipv4`, `domain`, `url`, `email`, `username`, `unknown`)
+- Module registry metadata: accepted target types, help text, examples, outputs, cautions
+- Sidebar compatibility: disable incompatible modules with clear reasons and module expanders
+- Operation Plan summary on the dashboard before launch
+- Executor blocks incompatible module/target pairs and logs a `blocked` operation without observations
+- README documentation for target types, active vs passive modules, and greyed-out modules
+
 ## v1.1.0 — Findings workflow and triage
 
 - Extended finding statuses: `open`, `in_review`, `action_required`, `accepted`, `false_positive`, `closed`

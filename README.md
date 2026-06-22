@@ -1,8 +1,8 @@
-# Project Overwatch v1.0
+# Project Overwatch v1.2
 
 Project Overwatch is a **local** Python/Streamlit dashboard for defensive security intelligence. It helps analysts organise investigations into **cases**, collect data with authorised **active** scans and **passive** lookups, interpret results as advisory **findings**, and export **reports** — all stored in a local SQLite database on your machine.
 
-**v1.0 executable modules:** Nmap (active port scan) and Domain Intelligence (passive domain lookup).
+**v1.2 executable modules:** Nmap (active port scan) and Domain Intelligence (passive domain lookup). The sidebar guides which modules are compatible with each target type.
 
 Use only on systems you own, lab environments, or targets with **written permission**.
 
@@ -61,24 +61,54 @@ python scripts/smoke_check.py
 ## Typical workflow
 
 1. **Select or create a case** in the sidebar (investigation container).
-2. **Enter a target** (IP or domain) and click **Acquire Target**.
-3. **Enable modules** under **Modules**:
-   - **Nmap [Active]** — port/service scan; requires authorisation checkbox.
-   - **Domain Intelligence [Passive]** — DNS, HTTP, TLS, Wayback; no authorisation needed.
-4. Click **Run selected modules**.
+2. **Enter a target** (IPv4, domain, URL, email, or username) — the app detects the target type.
+3. **Enable compatible modules** under **Modules** (incompatible modules are greyed out with a reason):
+   - **Nmap [Active]** — port/service scan for IPv4 or domain; requires authorisation checkbox.
+   - **Domain Intelligence [Passive]** — DNS, HTTP, TLS, Wayback for domain or URL; no authorisation needed.
+4. Review the **Operation Plan** on the dashboard, then click **Run selected modules**.
 5. Review results in the main panel (raw output stays in expanders).
 6. Browse **Archive** tabs: Cases (backup/restore), Entities, Relationships, Graph, Observations, Operations, Findings, Report.
 7. Legacy v0.1 target tables are under **Legacy (v0.1)**.
 
-Planned modules appear in the sidebar but are **disabled** — they are not available in v1.0.
+Planned modules appear in the sidebar but are **disabled** — they are not available in this release.
 
-## Active vs passive modules
+## Target types and module compatibility
+
+Project Overwatch detects the target type from your sidebar input:
+
+| Type | Examples |
+|------|----------|
+| IPv4 address | `192.168.1.10` |
+| Domain | `example.com` |
+| URL | `https://example.com/path` |
+| Email | `analyst@example.com` |
+| Username-like | `johndoe` |
+| Unknown | Unrecognised input |
+
+Each module declares which target types it accepts. Incompatible modules are **greyed out** in the sidebar with a short reason (for example, Domain Intelligence requires a domain or URL, not a plain IP address).
+
+### Active vs passive modules
 
 | Mode | Behaviour | Authorisation |
 |------|-----------|---------------|
-| **Active** | Sends probes (e.g. Nmap) | Required |
-| **Passive** | Public/read-only lookups | Not required by default |
+| **Active** | Sends probes (e.g. Nmap port scan) | Required — confirm in sidebar |
+| **Passive** | Public DNS/HTTP lookups only | Not required by default |
 | **Analysis** | Local file analysis (planned) | If registry requires it |
+
+Implemented modules include expandable help in the sidebar: what they collect, example inputs, expected outputs, and caution notes.
+
+### Operation Plan
+
+Before you click **Run selected modules**, the dashboard **Operation Plan** shows:
+
+- Active case and target
+- Detected target type
+- Selected active/passive modules
+- Whether authorisation is required
+- Expected outputs
+- Compatibility warnings if a selected module cannot run against the target
+
+The executor also blocks incompatible runs as a second safety layer and records a `blocked` operation without creating observations or findings.
 
 ## Investigation model
 
@@ -149,7 +179,7 @@ Saved reports go to `reports/` (gitignored). Encrypted exports go to `exports/`.
 
 ```
 main.py                    Streamlit entry point
-version.py                 PROJECT_VERSION = "1.1.0"
+version.py                 PROJECT_VERSION = "1.2.0"
 scripts/smoke_check.py     Local sanity checks
 requirements-optional.txt  kaleido, weasyprint (optional)
 database/db_setup.py       SQLite schema and helpers
@@ -184,7 +214,7 @@ config/                    Local report settings (gitignored)
 
 Check **Sidebar → System status** for Nmap, modules, and optional dependency readiness.
 
-## v1.1 roadmap
+## v1.3 roadmap
 
 - Additional passive collection modules wired through the findings pipeline
 - Stale finding handling on re-scan (reopen terminal findings when the same issue is observed again)

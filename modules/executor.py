@@ -18,6 +18,8 @@ from database.db_setup import (
 from modules.module_registry import get_module, is_executable
 from utils.findings_registry import interpret_module_findings
 from utils.findings_sync import sync_module_findings
+from utils.module_compatibility import get_incompatible_reason, module_accepts_target
+from utils.target_detection import get_target_type
 from utils.nmap_options import SCRIPT_VULN, build_nmap_flags, normalize_options
 from utils.nmap_parser import build_service_entity_label, build_service_entity_value
 from utils.nmap_xml_parser import parse_nmap_results
@@ -715,6 +717,28 @@ def execute_module(
             summary=f"{module.display_name} is not executable.",
             errors=["not_executable"],
         )
+
+    target_type = get_target_type(target)
+    if not module_accepts_target(module, target_type):
+        reason = get_incompatible_reason(module, target_type)
+        result = make_result(
+            module_id,
+            success=False,
+            status="blocked",
+            summary=reason,
+            errors=["target_incompatible"],
+        )
+        if db_context is not None and case_id is not None:
+            create_operation_log(
+                case_id,
+                module_id,
+                target,
+                "blocked",
+                authorisation_confirmed=authorisation_confirmed,
+                summary=reason,
+                conn=db_context,
+            )
+        return result
 
     if module.requires_authorisation and not authorisation_confirmed:
         return make_result(

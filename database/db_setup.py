@@ -208,18 +208,9 @@ def _migrate_findings_table(conn: sqlite3.Connection) -> None:
 
 def infer_entity_type(value: str) -> str:
     """Infer a basic entity type from user input."""
-    cleaned = value.strip()
+    from utils.target_detection import get_target_type, target_type_to_entity_type
 
-    if re.match(r"^(?:\d{1,3}\.){3}\d{1,3}$", cleaned):
-        return "ip_address"
-    if re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", cleaned):
-        return "email"
-    if re.match(
-        r"^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)+$",
-        cleaned,
-    ):
-        return "domain"
-    return "unknown"
+    return target_type_to_entity_type(get_target_type(value))
 
 
 def list_cases(conn: sqlite3.Connection | None = None) -> list[dict[str, Any]]:

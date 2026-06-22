@@ -22,6 +22,12 @@ class ModuleEntry:
     requires_authorisation: bool
     requires_api_key: bool
     implemented: bool
+    accepted_target_types: tuple[str, ...] = ()
+    short_help: str = ""
+    detailed_help: str = ""
+    example_inputs: tuple[str, ...] = ()
+    output_summary: str = ""
+    caution_notes: tuple[str, ...] = ()
 
 
 CATEGORIES: list[dict[str, str | bool]] = [
@@ -52,6 +58,11 @@ MODULES: list[ModuleEntry] = [
         requires_authorisation=False,
         requires_api_key=False,
         implemented=False,
+        accepted_target_types=("username",),
+        short_help="Search public platforms for a username (planned).",
+        detailed_help="Planned passive username enumeration across public sites.",
+        example_inputs=("johndoe", "acme_admin"),
+        output_summary="Platform matches and profile links.",
     ),
     ModuleEntry(
         module_id="ident_holehe",
@@ -64,6 +75,11 @@ MODULES: list[ModuleEntry] = [
         requires_authorisation=False,
         requires_api_key=False,
         implemented=False,
+        accepted_target_types=("email",),
+        short_help="Check email registration on public services (planned).",
+        detailed_help="Planned passive email registration checks using public APIs.",
+        example_inputs=("analyst@example.com",),
+        output_summary="Registered-service hints for an email address.",
     ),
     # Infrastructure
     ModuleEntry(
@@ -77,6 +93,20 @@ MODULES: list[ModuleEntry] = [
         requires_authorisation=True,
         requires_api_key=False,
         implemented=True,
+        accepted_target_types=("ipv4", "domain"),
+        short_help="Active scan of reachable network services on an IPv4 address or domain.",
+        detailed_help=(
+            "Runs Nmap against an IPv4 address or domain to discover open ports, services, and optional "
+            "script output. Results are stored as observations and advisory findings — they indicate what "
+            "was reachable at scan time, not proof of exploitability or business risk."
+        ),
+        example_inputs=("192.168.1.10", "example.com"),
+        output_summary="Open ports, service banners, optional OS/script notes, entities and relationships.",
+        caution_notes=(
+            "Authorisation is required before running this active module.",
+            "Use only on systems you own, lab environments, or targets with written permission.",
+            "Findings are analyst aids based on scan output, not confirmed vulnerabilities.",
+        ),
     ),
     ModuleEntry(
         module_id="infra_domain_intel",
@@ -89,6 +119,20 @@ MODULES: list[ModuleEntry] = [
         requires_authorisation=False,
         requires_api_key=False,
         implemented=True,
+        accepted_target_types=("domain", "url"),
+        short_help="Passive DNS, HTTP/TLS, security headers, and Wayback checks for a domain or URL.",
+        detailed_help=(
+            "Collects public DNS records, HTTP/HTTPS responses, TLS certificate details, security headers, "
+            "and Wayback availability for a domain or URL. This module does not run port scans or send "
+            "intrusive probes. Missing headers or TLS notes are review points for analysts, not confirmed issues."
+        ),
+        example_inputs=("example.com", "https://example.com/path"),
+        output_summary="DNS records, HTTP/TLS metadata, header review points, Wayback snapshot hints.",
+        caution_notes=(
+            "Does not perform port scanning or active exploitation checks.",
+            "Missing security headers are observations for review, not confirmed misconfigurations.",
+            "Results depend on public DNS/HTTP responses at lookup time.",
+        ),
     ),
     ModuleEntry(
         module_id="infra_amass",
@@ -407,3 +451,4 @@ def module_ui_label(module: ModuleEntry) -> str:
         )
         return f"{module.display_name} [{mode_label}]"
     return f"{module.display_name} (planned)"
+

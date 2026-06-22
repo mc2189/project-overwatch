@@ -90,6 +90,85 @@ def _check_finding_workflow_helpers() -> None:
         conn.close()
 
 
+def _check_target_compatibility() -> None:
+    target_detection = __import__(
+        "utils.target_detection",
+        fromlist=["get_target_type"],
+    )
+    compatibility = __import__(
+        "utils.module_compatibility",
+        fromlist=[
+            "get_compatible_modules",
+            "get_incompatible_reason",
+            "module_accepts_target",
+            "build_operation_plan",
+        ],
+    )
+    registry = __import__(
+        "modules.module_registry",
+        fromlist=["get_module", "MODULES"],
+    )
+
+    cases = {
+        "192.168.68.124": "ipv4",
+        "example.com": "domain",
+        "https://example.com/path": "url",
+        "analyst@example.com": "email",
+        "johndoe": "username",
+    }
+    for value, expected in cases.items():
+        if target_detection.get_target_type(value) != expected:
+            raise AssertionError(f"get_target_type({value!r}) expected {expected}")
+
+    nmap = registry.get_module("infra_nmap")
+    domain_intel = registry.get_module("infra_domain_intel")
+    if nmap is None or domain_intel is None:
+        raise AssertionError("expected implemented modules missing from registry")
+
+    for field in (
+        "accepted_target_types",
+        "short_help",
+        "detailed_help",
+        "example_inputs",
+        "output_summary",
+    ):
+        if not getattr(nmap, field):
+            raise AssertionError(f"infra_nmap missing registry metadata: {field}")
+        if not getattr(domain_intel, field):
+            raise AssertionError(f"infra_domain_intel missing registry metadata: {field}")
+
+    if not compatibility.module_accepts_target(nmap, "ipv4"):
+        raise AssertionError("Nmap should accept IPv4 targets")
+    if compatibility.module_accepts_target(domain_intel, "ipv4"):
+        raise AssertionError("Domain Intelligence should not accept IPv4 targets")
+    if not compatibility.module_accepts_target(domain_intel, "url"):
+        raise AssertionError("Domain Intelligence should accept URL targets")
+
+    ip_reason = compatibility.get_incompatible_reason(domain_intel, "ipv4")
+    if "domain" not in ip_reason.lower():
+        raise AssertionError("expected domain requirement in incompatible reason")
+
+    compatible = compatibility.get_compatible_modules("example.com")
+    module_ids = {module.module_id for module in compatible}
+    if "infra_nmap" not in module_ids or "infra_domain_intel" not in module_ids:
+        raise AssertionError("example.com should be compatible with both implemented modules")
+
+    plan = compatibility.build_operation_plan(
+        case_name="Smoke",
+        case_id=1,
+        target="example.com",
+        selected_module_ids=["infra_domain_intel"],
+        authorisation_confirmed=False,
+    )
+    if plan["target_type"] != "domain" or not plan["expected_outputs"]:
+        raise AssertionError("operation plan missing expected fields")
+
+    executor = __import__("modules.executor", fromlist=["execute_module"])
+    blocked = executor.execute_module("infra_domain_intel", "192.168.68.124")
+    if blocked.get("status") != "blocked":
+        raise AssertionError("executor should block incompatible domain intel on IPv4")
+
+
 def main() -> int:
     print(f"Project Overwatch smoke check (root: {PROJECT_ROOT})")
     errors = 0
@@ -124,6 +203,11 @@ def main() -> int:
     run(
         "finding workflow helpers",
         lambda: _check_finding_workflow_helpers(),
+    )
+
+    run(
+        "target compatibility",
+        lambda: _check_target_compatibility(),
     )
 
     run(

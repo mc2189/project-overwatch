@@ -61,7 +61,15 @@ from utils.nmap_options import SCRIPT_VULN
 from utils.nmap_ui import render_nmap_options, render_privilege_status
 from utils.case_backup import export_case_bundle_json, import_case_bundle, parse_case_bundle_json
 from utils.local_auth import local_auth_enabled, render_local_auth_gate
+from utils.module_compatibility import (
+    build_operation_plan,
+    get_module_disable_reason,
+    module_detailed_help,
+    module_is_selectable,
+    module_short_help,
+)
 from utils.runtime_health import collect_health_checks
+from utils.target_detection import get_target_type, target_type_label
 from version import PROJECT_VERSION
 
 if "case_id" not in st.session_state:
@@ -86,15 +94,36 @@ domain_intel_ready = is_runtime_ready("infra_domain_intel")
 domain_intel_error = get_runtime_error("infra_domain_intel")
 
 
-def module_selectable(module) -> bool:
-    """A module can be selected in the UI only if it is executable and runtime-ready."""
-    if not is_executable(module):
-        return False
-    if module.module_id == "infra_nmap":
+def module_runtime_ready(module_id: str) -> bool:
+    if module_id == "infra_nmap":
         return nmap_runtime_ready
-    if module.module_id == "infra_domain_intel":
+    if module_id == "infra_domain_intel":
         return domain_intel_ready
-    return True
+    return False
+
+
+def module_runtime_error(module_id: str) -> str | None:
+    if module_id == "infra_nmap":
+        return nmap_module_error
+    if module_id == "infra_domain_intel":
+        return domain_intel_error
+    return None
+
+
+def module_selectable(module, target: str) -> bool:
+    """A module can be selected when executable, runtime-ready, and target-compatible."""
+    return module_is_selectable(
+        module,
+        target,
+        runtime_ready=module_runtime_ready(module.module_id),
+    )
+
+
+def default_module_checked(module, target: str) -> bool:
+    """Default sidebar selection for compatible implemented modules."""
+    if module.module_id == "infra_nmap":
+        return module_selectable(module, target)
+    return False
 
 
 def selected_module_ids() -> list[str]:
@@ -433,7 +462,14 @@ with st.sidebar:
         st.error("Domain Intelligence module unavailable")
         st.caption(domain_intel_error)
 
-    target_ip = st.text_input("Target IP/Domain:", placeholder="e.g. 192.168.1.1 or example.com")
+    target_ip = st.text_input(
+        "Target",
+        placeholder="e.g. 192.168.1.1, example.com, or https://example.com",
+        help="IPv4 address, domain, URL, email, or username-like value.",
+    )
+    detected_target_type = get_target_type(target_ip or "")
+    if target_ip.strip():
+        st.caption(f"Detected target type: **{target_type_label(detected_target_type)}**")
 
     if st.button("Acquire Target", width="stretch"):
         if not target_ip.strip():
@@ -481,25 +517,45 @@ with st.sidebar:
                 continue
 
             for module in category_modules:
-                selectable = module_selectable(module)
-                default_checked = module.module_id == "infra_nmap" and selectable
+                runtime_ready = module_runtime_ready(module.module_id)
+                selectable = module_selectable(module, target_ip)
+                enabled = is_executable(module) and selectable
+                disable_reason = get_module_disable_reason(
+                    module,
+                    target_ip,
+                    runtime_ready=runtime_ready,
+                    runtime_error=module_runtime_error(module.module_id),
+                )
+                default_checked = default_module_checked(module, target_ip) and enabled
 
                 selected_modules[module.module_id] = st.checkbox(
                     module_ui_label(module),
                     value=default_checked,
-                    disabled=not selectable,
-                    help=module.description,
+                    disabled=not enabled,
+                    help=module_short_help(module),
                 )
 
-                if not selectable and not is_executable(module):
+                if is_executable(module):
+                    with st.expander(f"About {module.display_name}", expanded=False):
+                        st.write(module_detailed_help(module))
+                        if module.example_inputs:
+                            st.markdown("**Example inputs:** " + ", ".join(f"`{item}`" for item in module.example_inputs))
+                        if module.output_summary:
+                            st.markdown(f"**Outputs:** {module.output_summary}")
+                        if module.caution_notes:
+                            st.markdown("**Notes:**")
+                            for note in module.caution_notes:
+                                st.markdown(f"- {note}")
+                    if disable_reason and not selectable:
+                        st.caption(disable_reason)
+                elif not is_executable(module):
                     st.caption(
-                        f"Planned · {module.mode.title()} · {module.risk_level.title()} risk — not available in v1.0"
+                        f"Planned · {module.mode.title()} · {module.risk_level.title()} risk — "
+                        f"{module_short_help(module)}"
                     )
-                elif not selectable and is_executable(module):
-                    st.caption("Unavailable — check runtime error above.")
 
-                if module.module_id == "infra_nmap" and selectable:
-                    nmap_options = render_nmap_options(selectable)
+                if module.module_id == "infra_nmap" and enabled:
+                    nmap_options = render_nmap_options(enabled)
 
     selected_ids = selected_module_ids()
     auth_required = selection_requires_authorisation(selected_ids)
@@ -579,6 +635,49 @@ f2.metric("Action required", action_required_count)
 f3.metric("Closed", closed_findings_count)
 f4.metric("Accepted / false positive", resolved_findings_count)
 f5.metric("Total findings", sum(finding_counts.values()))
+
+st.divider()
+
+operation_plan = build_operation_plan(
+    case_name=current_case["name"],
+    case_id=current_case["id"],
+    target=target_ip or "",
+    selected_module_ids=selected_module_ids(),
+    authorisation_confirmed=authorisation_confirmed,
+)
+
+with st.expander("Operation Plan", expanded=True):
+    if not operation_plan["target"]:
+        st.info("Enter a target in the sidebar to see module compatibility and expected outputs.")
+    elif not operation_plan["selected_modules"]:
+        st.info("Select one or more modules in the sidebar to build an operation plan.")
+    else:
+        st.markdown(f"**Case:** {operation_plan['case_name']} (#{operation_plan['case_id']})")
+        st.markdown(f"**Target:** `{operation_plan['target']}`")
+        st.markdown(f"**Detected type:** {operation_plan['target_type_label']}")
+        st.markdown("**Selected modules:** " + ", ".join(operation_plan["selected_modules"]))
+        if operation_plan["active_modules"]:
+            st.markdown("**Active modules:** " + ", ".join(operation_plan["active_modules"]))
+        if operation_plan["passive_modules"]:
+            st.markdown("**Passive modules:** " + ", ".join(operation_plan["passive_modules"]))
+        if operation_plan["analysis_modules"]:
+            st.markdown("**Analysis modules:** " + ", ".join(operation_plan["analysis_modules"]))
+        st.markdown(
+            "**Authorisation required:** "
+            + ("Yes — confirm in the sidebar before launch." if operation_plan["authorisation_required"] else "No")
+        )
+        if operation_plan["expected_outputs"]:
+            st.markdown("**Expected outputs:**")
+            for line in operation_plan["expected_outputs"]:
+                st.markdown(f"- {line}")
+        if operation_plan["incompatible_modules"]:
+            st.warning("Some selected modules are incompatible with this target:")
+            for line in operation_plan["incompatible_modules"]:
+                st.markdown(f"- {line}")
+        elif operation_plan["authorisation_required"] and not operation_plan["authorisation_confirmed"]:
+            st.warning("Authorisation confirmation is required before active modules can run.")
+        elif operation_plan["ready_to_run"]:
+            st.success("Ready to run. Use **Run selected modules** in the sidebar when you are ready.")
 
 st.divider()
 
