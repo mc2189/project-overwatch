@@ -27,6 +27,14 @@ from database.db_setup import (
 )
 from modules.module_registry import get_module
 from utils.finding_interpreter import is_source_notice
+from utils.evidence_model import (
+    CONFIDENCE_GUIDANCE,
+    EVIDENCE_TYPES,
+    RELIABILITY_LEVELS,
+    evidence_type_label,
+    evidence_wording,
+    reliability_label,
+)
 from utils.report_redaction import (
     RedactionOption,
     apply_redactions,
@@ -363,9 +371,15 @@ def build_case_report(
                 rel_type = relationship.get("relationship_type", "related")
                 module = relationship.get("source_module") or "unknown"
                 confidence = relationship.get("confidence", 50)
+                evidence_bits = []
+                if relationship.get("evidence_type"):
+                    evidence_bits.append(f"evidence: {evidence_type_label(relationship.get('evidence_type'))}")
+                if relationship.get("reliability"):
+                    evidence_bits.append(f"reliability: {reliability_label(relationship.get('reliability'))}")
+                evidence_suffix = f", {', '.join(evidence_bits)}" if evidence_bits else ""
                 lines.append(
                     f"- {source} → `{rel_type}` → {target} "
-                    f"(module: {module}, confidence: {confidence})"
+                    f"(module: {module}, confidence: {confidence}{evidence_suffix})"
                 )
             lines.append("")
 
@@ -391,6 +405,18 @@ def build_case_report(
                     lines.append(f"- Entity: {entity}")
                     lines.append(f"- Type: {observation.get('observation_type', '-')}")
                     lines.append(f"- Created: {observation.get('created_at', '-')}")
+                    if observation.get("evidence_type"):
+                        lines.append(
+                            f"- Evidence: {evidence_type_label(observation.get('evidence_type'))} "
+                            f"({reliability_label(observation.get('reliability'))})"
+                        )
+                        if observation.get("source_name"):
+                            lines.append(f"- Source: `{observation.get('source_name')}`")
+                        if observation.get("collection_method"):
+                            lines.append(f"- Collection method: {observation.get('collection_method')}")
+                        if observation.get("collected_at"):
+                            lines.append(f"- Collected at: {observation.get('collected_at')}")
+                        lines.append(f"- Note: {evidence_wording(observation.get('evidence_type'))}")
                     lines.append(f"- Summary: {observation.get('summary') or '_No summary._'}")
                     lines.append("")
             lines.append("")
@@ -430,6 +456,34 @@ def build_case_report(
             lines.append(f"- {notice}")
         lines.append("")
 
+    lines.extend(["## Evidence and Reliability Notes", ""])
+    lines.append(
+        "_Project Overwatch distinguishes how information was collected. "
+        "Evidence type describes the origin of a record; reliability describes how much weight "
+        "to give it before analyst review. Confidence scores on findings are separate — they reflect "
+        "interpreter strength, not automatic proof._"
+    )
+    lines.append("")
+    lines.append("**Evidence types:** " + ", ".join(sorted(EVIDENCE_TYPES)))
+    lines.append("")
+    lines.append("**Reliability levels:** " + ", ".join(RELIABILITY_LEVELS))
+    lines.append("")
+    for low, high, guidance in CONFIDENCE_GUIDANCE:
+        lines.append(f"- Confidence {low}–{high}: {guidance}")
+    lines.append("")
+    lines.append(
+        "- Third-party sources (for example crt.sh or public DNS) provide leads, not confirmed live state."
+    )
+    lines.append(
+        "- Unavailable sources during a run are **not** evidence that data does not exist — "
+        "only that Overwatch could not retrieve it at that time."
+    )
+    lines.append(
+        "- Parser-inferred relationships are derived from module output and should be validated "
+        "before treating them as confirmed links."
+    )
+    lines.append("")
+
     lines.extend(["## Findings", ""])
     if not report_findings:
         if not options.include_closed_findings:
@@ -466,6 +520,14 @@ def build_case_report(
                 else:
                     lines.append(f"- Effective severity: {display_severity}")
                 lines.append(f"- Confidence: {finding.get('confidence', 50)}")
+                if finding.get("evidence_type") or finding.get("reliability"):
+                    lines.append(
+                        f"- Evidence: {evidence_type_label(finding.get('evidence_type'))} "
+                        f"({reliability_label(finding.get('reliability'))})"
+                    )
+                    if finding.get("source_name"):
+                        lines.append(f"- Source: `{finding.get('source_name')}`")
+                    lines.append(f"- Evidence note: {evidence_wording(finding.get('evidence_type'))}")
                 lines.append(f"- Affected entity: {entity}")
                 lines.append(f"- Module: `{finding.get('module_id', '-')}`")
                 if finding.get("reviewed_at"):

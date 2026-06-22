@@ -2,6 +2,17 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v1.11.0 — Source reliability, confidence and evidence model
+
+- **`utils/evidence_model.py`** — evidence types, reliability levels, confidence guidance, module defaults
+- Database columns on observations, findings, and relationships (`ensure_evidence_columns`, safe ALTER TABLE)
+- Helpers: `normalise_evidence_type`, `normalise_reliability`, `default_evidence_for_module`, `attach_evidence_metadata`
+- Executor persistence attaches evidence metadata to observations; relationships inherit module/relationship defaults
+- Findings sync stores evidence type, source name, and reliability on upsert
+- UI: Observations, Findings detail, and Relationships pages show evidence fields
+- Reports: evidence on observations/findings/relationships plus **Evidence and Reliability Notes** section
+- README documents evidence types, reliability vs confidence, and third-party source handling
+
 ## v1.10.0 — Settings, API key manager and module configuration
 
 - **Settings page** — masked API key status, module configuration readiness, general settings summary

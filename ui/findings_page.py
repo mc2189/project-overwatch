@@ -20,6 +20,7 @@ from database.db_setup import (
 )
 from ui.constants import FINDING_SEVERITY_OPTIONS, FINDING_SEVERITY_ORDER, FINDING_STATUS_LABELS
 from ui.metrics import render_compact_metrics
+from utils.evidence_model import evidence_type_label, evidence_wording, reliability_label
 
 
 def finding_status_label(status: str | None) -> str:
@@ -123,6 +124,14 @@ def render_finding_detail(finding: dict, entity_lookup: dict) -> None:
         st.markdown(f"**Analyst severity override:** {finding.get('user_severity')}")
     st.markdown(f"**Effective severity:** {effective_finding_severity(finding)}")
     st.markdown(f"**Confidence:** {finding.get('confidence', 50)}")
+    if finding.get("evidence_type") or finding.get("reliability"):
+        st.markdown(
+            f"**Evidence:** {evidence_type_label(finding.get('evidence_type'))} · "
+            f"Reliability: {reliability_label(finding.get('reliability'))}"
+        )
+        if finding.get("source_name"):
+            st.markdown(f"**Source:** `{finding.get('source_name')}`")
+        st.caption(evidence_wording(finding.get("evidence_type")))
     st.markdown(f"**Status:** {finding_status_label(finding.get('status'))}")
     st.markdown("**Explanation**")
     st.write(finding.get("explanation") or "_No explanation provided._")

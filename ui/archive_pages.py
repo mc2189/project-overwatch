@@ -20,6 +20,7 @@ from database.db_setup import (
     operation_run_mode_counts,
 )
 from ui.metrics import render_compact_metrics
+from utils.evidence_model import evidence_type_label, reliability_label
 from utils.case_backup import export_case_bundle_json, import_case_bundle, parse_case_bundle_json
 from utils.graph_view import entity_graph_figure
 from utils.report_builder import build_case_report, save_report_markdown
@@ -69,6 +70,8 @@ def enrich_relationships_for_display(
                 **relationship,
                 "source_entity": source.get("label") or source.get("value", relationship["source_entity_id"]),
                 "target_entity": target.get("label") or target.get("value", relationship["target_entity_id"]),
+                "evidence_type": evidence_type_label(relationship.get("evidence_type")),
+                "reliability": reliability_label(relationship.get("reliability")),
             }
         )
 
@@ -113,12 +116,35 @@ def render_observations_page(case_id: int, metrics: dict[str, int]) -> None:
     st.caption(f"Showing observations for case #{case_id}.")
     if observations:
         display_rows = []
+        evidence_columns = (
+            "evidence_type",
+            "source_name",
+            "reliability",
+            "collection_method",
+            "collected_at",
+        )
         for observation in observations:
             row = observation.copy()
             if row.get("raw_output") and len(row["raw_output"]) > 200:
                 row["raw_output"] = row["raw_output"][:200] + "..."
+            if row.get("evidence_type"):
+                row["evidence_type"] = evidence_type_label(row["evidence_type"])
+            if row.get("reliability"):
+                row["reliability"] = reliability_label(row["reliability"])
             display_rows.append(row)
-        st.dataframe(pd.DataFrame(display_rows), width="stretch")
+        column_order = [
+            "id",
+            "module_id",
+            "observation_type",
+            "title",
+            *evidence_columns,
+            "summary",
+            "created_at",
+        ]
+        frame = pd.DataFrame(display_rows)
+        visible = [column for column in column_order if column in frame.columns]
+        remaining = [column for column in frame.columns if column not in visible]
+        st.dataframe(frame[visible + remaining], width="stretch")
     else:
         st.info("No observations recorded for this case yet.")
 

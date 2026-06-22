@@ -28,6 +28,7 @@ from utils.result_status import (
     STATUS_COMPLETED_WITH_WARNINGS,
     should_persist_observation,
 )
+from utils.evidence_model import observation_evidence_for_module
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 NMAP_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_nmap.py"
@@ -47,6 +48,24 @@ _cert_subdomain_load_attempted = False
 _website_metadata_handler: Any | None = None
 _website_metadata_load_error: str | None = None
 _website_metadata_load_attempted = False
+
+
+def _observation_evidence_kwargs(module_id: str, result: dict[str, Any]) -> dict[str, Any]:
+    """Build observation evidence fields from module defaults and run result."""
+    meta = observation_evidence_for_module(module_id, result)
+    return {
+        key: meta[key]
+        for key in (
+            "evidence_type",
+            "source_name",
+            "source_url",
+            "reliability",
+            "collection_method",
+            "collected_at",
+            "module_version",
+        )
+        if meta.get(key) is not None
+    }
 
 
 def make_result(
@@ -350,6 +369,7 @@ def _persist_investigation_records(
             }
         ),
         raw_output=result["raw_output"],
+        **_observation_evidence_kwargs(module_id, result),
         conn=conn,
     )
 
@@ -481,6 +501,7 @@ def _persist_domain_intel_records(
             }
         ),
         raw_output=result["raw_output"],
+        **_observation_evidence_kwargs(module_id, result),
         conn=conn,
     )
 
@@ -575,6 +596,7 @@ def _persist_cert_subdomain_records(
             }
         ),
         raw_output=result["raw_output"],
+        **_observation_evidence_kwargs(module_id, result),
         conn=conn,
     )
 
@@ -690,6 +712,7 @@ def _persist_website_metadata_records(
             }
         ),
         raw_output=result["raw_output"],
+        **_observation_evidence_kwargs(module_id, result),
         conn=conn,
     )
 

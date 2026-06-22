@@ -210,6 +210,27 @@ OPERATION_COLUMN_MIGRATIONS: tuple[tuple[str, str], ...] = (
     ("run_mode_label", "TEXT"),
 )
 
+OBSERVATION_EVIDENCE_MIGRATIONS: tuple[tuple[str, str], ...] = (
+    ("evidence_type", "TEXT"),
+    ("source_name", "TEXT"),
+    ("source_url", "TEXT"),
+    ("reliability", "TEXT"),
+    ("collection_method", "TEXT"),
+    ("collected_at", "TIMESTAMP"),
+    ("module_version", "TEXT"),
+)
+
+FINDING_EVIDENCE_MIGRATIONS: tuple[tuple[str, str], ...] = (
+    ("evidence_type", "TEXT"),
+    ("source_name", "TEXT"),
+    ("reliability", "TEXT"),
+)
+
+RELATIONSHIP_EVIDENCE_MIGRATIONS: tuple[tuple[str, str], ...] = (
+    ("evidence_type", "TEXT"),
+    ("reliability", "TEXT"),
+)
+
 ALL_SCHEMAS = (
     TARGETS_SCHEMA,
     RECON_DATA_SCHEMA,
@@ -250,6 +271,7 @@ def get_db_conn() -> sqlite3.Connection:
     _migrate_findings_table(conn)
     _migrate_cases_table(conn)
     _migrate_operations_table(conn)
+    ensure_evidence_columns(conn)
     return conn
 
 
@@ -292,6 +314,61 @@ def _migrate_operations_table(conn: sqlite3.Connection) -> None:
         if column_name not in columns:
             conn.execute(f"ALTER TABLE operations ADD COLUMN {column_name} {column_type}")
     conn.commit()
+
+
+def _add_missing_columns(
+    conn: sqlite3.Connection,
+    table_name: str,
+    migrations: tuple[tuple[str, str], ...],
+) -> None:
+    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+    for column_name, column_type in migrations:
+        if column_name not in columns:
+            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+
+
+def ensure_evidence_columns(conn: sqlite3.Connection | None = None) -> None:
+    """Add evidence metadata columns to observations, findings, and relationships."""
+    own_conn = conn is None
+    if own_conn:
+        conn = sqlite3.connect(str(DB_PATH), timeout=5.0)
+    try:
+        _add_missing_columns(conn, "observations", OBSERVATION_EVIDENCE_MIGRATIONS)
+        _add_missing_columns(conn, "findings", FINDING_EVIDENCE_MIGRATIONS)
+        _add_missing_columns(conn, "relationships", RELATIONSHIP_EVIDENCE_MIGRATIONS)
+        conn.commit()
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def normalise_evidence_type(value: str | None) -> str | None:
+    from utils.evidence_model import normalise_evidence_type as _normalise_evidence_type
+
+    return _normalise_evidence_type(value)
+
+
+def normalise_reliability(value: str | None) -> str | None:
+    from utils.evidence_model import normalise_reliability as _normalise_reliability
+
+    return _normalise_reliability(value)
+
+
+def default_evidence_for_module(module_id: str) -> dict[str, Any]:
+    from utils.evidence_model import default_evidence_for_module as _default_evidence_for_module
+
+    return _default_evidence_for_module(module_id)
+
+
+def attach_evidence_metadata(
+    record_data: dict[str, Any],
+    module_id: str,
+    source_name: str | None = None,
+    source_url: str | None = None,
+) -> dict[str, Any]:
+    from utils.evidence_model import attach_evidence_metadata as _attach_evidence_metadata
+
+    return _attach_evidence_metadata(record_data, module_id, source_name, source_url)
 
 
 def update_case_run_mode(
@@ -879,6 +956,13 @@ def create_observation(
     summary: str | None = None,
     data_json: str | None = None,
     raw_output: str | None = None,
+    evidence_type: str | None = None,
+    source_name: str | None = None,
+    source_url: str | None = None,
+    reliability: str | None = None,
+    collection_method: str | None = None,
+    collected_at: str | None = None,
+    module_version: str | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
     own_conn = conn is None
@@ -888,14 +972,44 @@ def create_observation(
         if data_json is not None and not isinstance(data_json, str):
             data_json = json.dumps(data_json)
 
+        evidence = attach_evidence_metadata({}, module_id, source_name, source_url)
+        if evidence_type is not None:
+            evidence["evidence_type"] = normalise_evidence_type(evidence_type)
+        if reliability is not None:
+            evidence["reliability"] = normalise_reliability(reliability)
+        if collection_method is not None:
+            evidence["collection_method"] = collection_method
+        if collected_at is not None:
+            evidence["collected_at"] = collected_at
+        if module_version is not None:
+            evidence["module_version"] = module_version
+
         cursor = conn.cursor()
         cursor.execute(
             """
             INSERT INTO observations (
-                case_id, entity_id, module_id, observation_type, title, summary, data_json, raw_output
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                case_id, entity_id, module_id, observation_type, title, summary, data_json,
+                raw_output, evidence_type, source_name, source_url, reliability,
+                collection_method, collected_at, module_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (case_id, entity_id, module_id, observation_type, title, summary, data_json, raw_output),
+            (
+                case_id,
+                entity_id,
+                module_id,
+                observation_type,
+                title,
+                summary,
+                data_json,
+                raw_output,
+                evidence.get("evidence_type"),
+                evidence.get("source_name"),
+                evidence.get("source_url"),
+                evidence.get("reliability"),
+                evidence.get("collection_method"),
+                evidence.get("collected_at"),
+                evidence.get("module_version"),
+            ),
         )
         conn.commit()
         observation = _row_to_dict(
@@ -1035,6 +1149,8 @@ def create_relationship(
     target_entity_id: int,
     source_module: str | None = None,
     confidence: int = 50,
+    evidence_type: str | None = None,
+    reliability: str | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
     """Create a relationship, returning the existing row if it already exists."""
@@ -1052,14 +1168,33 @@ def create_relationship(
         if existing:
             return dict(existing)
 
+        rel_evidence_type = normalise_evidence_type(evidence_type)
+        rel_reliability = normalise_reliability(reliability)
+        if source_module and (rel_evidence_type is None or rel_reliability is None):
+            from utils.evidence_model import default_relationship_evidence
+
+            defaults = default_relationship_evidence(source_module, relationship_type)
+            rel_evidence_type = rel_evidence_type or defaults.get("evidence_type")
+            rel_reliability = rel_reliability or defaults.get("reliability")
+
         cursor = conn.cursor()
         cursor.execute(
             """
             INSERT INTO relationships (
-                case_id, source_entity_id, relationship_type, target_entity_id, source_module, confidence
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                case_id, source_entity_id, relationship_type, target_entity_id,
+                source_module, confidence, evidence_type, reliability
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (case_id, source_entity_id, relationship_type, target_entity_id, source_module, confidence),
+            (
+                case_id,
+                source_entity_id,
+                relationship_type,
+                target_entity_id,
+                source_module,
+                confidence,
+                rel_evidence_type,
+                rel_reliability,
+            ),
         )
         conn.commit()
         relationship = _row_to_dict(
@@ -1130,6 +1265,9 @@ def create_finding(
     entity_id: int | None = None,
     observation_id: int | None = None,
     status: str = "open",
+    evidence_type: str | None = None,
+    source_name: str | None = None,
+    reliability: str | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
     """Create a finding, returning the existing row when a duplicate should not be recreated."""
@@ -1145,6 +1283,13 @@ def create_finding(
                 return existing
             return existing
 
+        from utils.evidence_model import default_finding_evidence
+
+        finding_evidence = default_finding_evidence(module_id)
+        resolved_evidence_type = normalise_evidence_type(evidence_type) or finding_evidence.get("evidence_type")
+        resolved_source_name = source_name or finding_evidence.get("source_name")
+        resolved_reliability = normalise_reliability(reliability) or finding_evidence.get("reliability")
+
         actions_json = json.dumps(suggested_actions or [])
         now = datetime.now(timezone.utc).isoformat()
         cursor = conn.cursor()
@@ -1152,8 +1297,9 @@ def create_finding(
             """
             INSERT INTO findings (
                 case_id, entity_id, observation_id, module_id, title, severity,
-                confidence, explanation, suggested_actions_json, status, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                confidence, explanation, suggested_actions_json, status, updated_at,
+                evidence_type, source_name, reliability
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 case_id,
@@ -1167,6 +1313,9 @@ def create_finding(
                 actions_json,
                 normalize_finding_status(status),
                 now,
+                resolved_evidence_type,
+                resolved_source_name,
+                resolved_reliability,
             ),
         )
         conn.commit()
@@ -1189,6 +1338,9 @@ def upsert_finding(
     suggested_actions: list[str] | None = None,
     entity_id: int | None = None,
     observation_id: int | None = None,
+    evidence_type: str | None = None,
+    source_name: str | None = None,
+    reliability: str | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
     """Create or refresh a finding without changing analyst-closed terminal status."""
@@ -1196,6 +1348,20 @@ def upsert_finding(
     if own_conn:
         conn = get_db_conn()
     try:
+        from utils.evidence_model import default_finding_evidence
+
+        finding_evidence = default_finding_evidence(
+            module_id,
+            {
+                "evidence_type": evidence_type,
+                "source_name": source_name,
+                "reliability": reliability,
+            },
+        )
+        resolved_evidence_type = normalise_evidence_type(evidence_type) or finding_evidence.get("evidence_type")
+        resolved_source_name = source_name or finding_evidence.get("source_name")
+        resolved_reliability = normalise_reliability(reliability) or finding_evidence.get("reliability")
+
         existing = _finding_exists(case_id, entity_id, module_id, title, conn)
         actions_json = json.dumps(suggested_actions or [])
         now = datetime.now(timezone.utc).isoformat()
@@ -1216,6 +1382,7 @@ def upsert_finding(
                     UPDATE findings
                     SET status = 'open', observation_id = ?, severity = ?, confidence = ?,
                         explanation = ?, suggested_actions_json = ?, analyst_notes = ?,
+                        evidence_type = ?, source_name = ?, reliability = ?,
                         closed_at = NULL, updated_at = ?
                     WHERE id = ?
                     """,
@@ -1226,6 +1393,9 @@ def upsert_finding(
                         explanation,
                         actions_json,
                         analyst_notes,
+                        resolved_evidence_type,
+                        resolved_source_name,
+                        resolved_reliability,
                         now,
                         existing["id"],
                     ),
@@ -1235,7 +1405,8 @@ def upsert_finding(
                     """
                     UPDATE findings
                     SET observation_id = ?, severity = ?, confidence = ?, explanation = ?,
-                        suggested_actions_json = ?, updated_at = ?
+                        suggested_actions_json = ?, evidence_type = ?, source_name = ?,
+                        reliability = ?, updated_at = ?
                     WHERE id = ?
                     """,
                     (
@@ -1244,6 +1415,9 @@ def upsert_finding(
                         confidence,
                         explanation,
                         actions_json,
+                        resolved_evidence_type,
+                        resolved_source_name,
+                        resolved_reliability,
                         now,
                         existing["id"],
                     ),
@@ -1261,8 +1435,9 @@ def upsert_finding(
             """
             INSERT INTO findings (
                 case_id, entity_id, observation_id, module_id, title, severity,
-                confidence, explanation, suggested_actions_json, status, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
+                confidence, explanation, suggested_actions_json, status, updated_at,
+                evidence_type, source_name, reliability
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)
             """,
             (
                 case_id,
@@ -1275,6 +1450,9 @@ def upsert_finding(
                 explanation,
                 actions_json,
                 now,
+                resolved_evidence_type,
+                resolved_source_name,
+                resolved_reliability,
             ),
         )
         conn.commit()

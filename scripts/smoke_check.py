@@ -848,6 +848,160 @@ def _check_website_metadata_module() -> None:
         raise AssertionError("executor cannot load infra_website_metadata backend")
 
 
+def _check_evidence_model() -> None:
+    evidence = __import__(
+        "utils.evidence_model",
+        fromlist=[
+            "EVIDENCE_TYPES",
+            "RELIABILITY_LEVELS",
+            "CONFIDENCE_GUIDANCE",
+            "EVIDENCE_DIRECT_OBSERVATION",
+            "EVIDENCE_THIRD_PARTY_SOURCE",
+            "EVIDENCE_PARSER_INFERRED",
+            "EVIDENCE_ANALYST_NOTE",
+            "EVIDENCE_USER_SUPPLIED",
+            "EVIDENCE_UNAVAILABLE_SOURCE",
+            "EVIDENCE_SYSTEM_GENERATED",
+            "RELIABILITY_HIGH",
+            "RELIABILITY_MEDIUM",
+            "RELIABILITY_LOW",
+            "RELIABILITY_UNKNOWN",
+            "default_evidence_for_module",
+            "attach_evidence_metadata",
+            "observation_evidence_for_module",
+            "default_relationship_evidence",
+        ],
+    )
+    expected_types = {
+        "direct_observation",
+        "third_party_source",
+        "parser_inferred",
+        "analyst_note",
+        "user_supplied",
+        "unavailable_source",
+        "system_generated",
+    }
+    if set(evidence.EVIDENCE_TYPES) != expected_types:
+        raise AssertionError(f"EVIDENCE_TYPES mismatch: {evidence.EVIDENCE_TYPES}")
+    expected_reliability = {"high", "medium", "low", "unknown"}
+    if set(evidence.RELIABILITY_LEVELS) != expected_reliability:
+        raise AssertionError(f"RELIABILITY_LEVELS mismatch: {evidence.RELIABILITY_LEVELS}")
+    if len(evidence.CONFIDENCE_GUIDANCE) < 4:
+        raise AssertionError("CONFIDENCE_GUIDANCE should define four bands")
+
+    nmap_defaults = evidence.default_evidence_for_module("infra_nmap")
+    if nmap_defaults.get("evidence_type") != evidence.EVIDENCE_DIRECT_OBSERVATION:
+        raise AssertionError("Nmap evidence defaults unexpected")
+    if nmap_defaults.get("reliability") != evidence.RELIABILITY_HIGH:
+        raise AssertionError("Nmap reliability should be high")
+
+    attached = evidence.attach_evidence_metadata({}, "infra_cert_subdomain")
+    if attached.get("source_name") != "crt.sh":
+        raise AssertionError("attach_evidence_metadata did not apply crt.sh defaults")
+
+    rel = evidence.default_relationship_evidence("infra_nmap", "exposes_service")
+    if rel.get("evidence_type") != evidence.EVIDENCE_DIRECT_OBSERVATION:
+        raise AssertionError("Nmap exposes_service relationship evidence unexpected")
+
+    db = __import__(
+        "database.db_setup",
+        fromlist=[
+            "ensure_evidence_columns",
+            "create_observation",
+            "create_relationship",
+            "create_finding",
+            "create_or_get_entity",
+            "get_or_create_default_case",
+            "get_db_conn",
+            "normalise_evidence_type",
+            "normalise_reliability",
+        ],
+    )
+    if not callable(db.ensure_evidence_columns):
+        raise AssertionError("ensure_evidence_columns missing")
+    conn = db.get_db_conn()
+    try:
+        db.ensure_evidence_columns(conn)
+        obs_columns = {row[1] for row in conn.execute("PRAGMA table_info(observations)").fetchall()}
+        for column in (
+            "evidence_type",
+            "source_name",
+            "source_url",
+            "reliability",
+            "collection_method",
+            "collected_at",
+            "module_version",
+        ):
+            if column not in obs_columns:
+                raise AssertionError(f"observations missing column: {column}")
+        finding_columns = {row[1] for row in conn.execute("PRAGMA table_info(findings)").fetchall()}
+        for column in ("evidence_type", "source_name", "reliability"):
+            if column not in finding_columns:
+                raise AssertionError(f"findings missing column: {column}")
+        rel_columns = {row[1] for row in conn.execute("PRAGMA table_info(relationships)").fetchall()}
+        for column in ("evidence_type", "reliability"):
+            if column not in rel_columns:
+                raise AssertionError(f"relationships missing column: {column}")
+
+        if db.normalise_evidence_type("direct_lookup") != "third_party_source":
+            raise AssertionError("normalise_evidence_type alias failed")
+        if db.normalise_reliability("HIGH") != "high":
+            raise AssertionError("normalise_reliability failed")
+
+        case = db.get_or_create_default_case()
+        entity = db.create_or_get_entity(
+            case["id"],
+            "domain",
+            "evidence-smoke.example",
+            source="smoke_check",
+            conn=conn,
+        )
+        observation = db.create_observation(
+            case["id"],
+            entity["id"],
+            "infra_nmap",
+            "network_scan",
+            "Evidence smoke observation",
+            summary="Smoke test",
+            conn=conn,
+        )
+        if not observation.get("evidence_type"):
+            raise AssertionError("create_observation did not store evidence_type")
+        relationship = db.create_relationship(
+            case["id"],
+            entity["id"],
+            "exposes_service",
+            entity["id"],
+            source_module="infra_nmap",
+            conn=conn,
+        )
+        if relationship.get("evidence_type") != "direct_observation":
+            raise AssertionError("create_relationship did not store evidence defaults")
+        finding = db.create_finding(
+            case["id"],
+            "infra_cert_subdomain",
+            "Evidence smoke finding",
+            "info",
+            55,
+            "Smoke test finding with evidence defaults.",
+            entity_id=entity["id"],
+            conn=conn,
+        )
+        if not finding.get("source_name"):
+            raise AssertionError("create_finding did not store source_name")
+    finally:
+        conn.close()
+
+    registry = __import__("modules.module_registry", fromlist=["MODULES", "get_module"])
+    if not registry.MODULES:
+        raise AssertionError("module registry empty")
+    if registry.get_module("infra_domain_intel") is None:
+        raise AssertionError("infra_domain_intel missing from registry")
+
+    __import__("modules.executor", fromlist=["execute_module"])
+    __import__("utils.report_builder", fromlist=["build_case_report"])
+
+
 def _check_result_quality() -> None:
     result_status = __import__(
         "utils.result_status",
@@ -1028,6 +1182,11 @@ def main() -> int:
     run(
         "run modes",
         lambda: _check_run_modes(),
+    )
+
+    run(
+        "evidence model",
+        lambda: _check_evidence_model(),
     )
 
     run(

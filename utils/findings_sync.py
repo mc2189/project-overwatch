@@ -44,6 +44,9 @@ def sync_module_findings(
                 finding.get("suggested_actions") or [],
                 entity_id=entity_id,
                 observation_id=observation_id,
+                evidence_type=finding.get("evidence_type"),
+                source_name=finding.get("source_name"),
+                reliability=finding.get("reliability"),
                 conn=conn,
             )
         )
