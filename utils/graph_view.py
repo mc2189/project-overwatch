@@ -24,8 +24,10 @@ def entity_max_severity(
     findings: list[dict[str, Any]],
     *,
     statuses: tuple[str, ...] = ("open", "in_review", "action_required"),
+    min_severity: str | None = None,
 ) -> dict[int, str]:
-    """Map entity IDs to their highest active finding severity."""
+    """Map entity IDs to their highest matching finding severity."""
+    min_rank = SEVERITY_ORDER.get(min_severity, 0) if min_severity else 0
     entity_severity: dict[int, str] = {}
     for finding in findings:
         status = normalize_finding_status(finding.get("status"))
@@ -35,10 +37,32 @@ def entity_max_severity(
         if entity_id is None:
             continue
         severity = effective_finding_severity(finding)
+        if SEVERITY_ORDER.get(severity, 0) < min_rank:
+            continue
         current = entity_severity.get(entity_id, "none")
         if SEVERITY_ORDER.get(severity, 0) > SEVERITY_ORDER.get(current, 0):
             entity_severity[entity_id] = severity
     return entity_severity
+
+
+def filter_findings_for_graph(
+    findings: list[dict[str, Any]],
+    *,
+    statuses: tuple[str, ...],
+    min_severity: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return findings that match graph display filters."""
+    min_rank = SEVERITY_ORDER.get(min_severity, 0) if min_severity else 0
+    filtered: list[dict[str, Any]] = []
+    for finding in findings:
+        status = normalize_finding_status(finding.get("status"))
+        if status not in statuses:
+            continue
+        severity = effective_finding_severity(finding)
+        if SEVERITY_ORDER.get(severity, 0) < min_rank:
+            continue
+        filtered.append(finding)
+    return filtered
 
 
 def build_entity_graph(
@@ -75,13 +99,28 @@ def entity_graph_figure(
     entities: list[dict[str, Any]],
     relationships: list[dict[str, Any]],
     findings: list[dict[str, Any]] | None = None,
+    *,
+    finding_statuses: tuple[str, ...] = ("open", "in_review", "action_required"),
+    min_severity: str | None = None,
+    hide_entities_without_findings: bool = False,
 ) -> go.Figure | None:
     """Create a simple Plotly figure for the entity graph."""
-    graph = build_entity_graph(entities, relationships)
+    all_findings = findings or []
+    severity_by_entity = entity_max_severity(
+        all_findings,
+        statuses=finding_statuses,
+        min_severity=min_severity,
+    )
+
+    display_entities = list(entities)
+    if hide_entities_without_findings:
+        visible_ids = set(severity_by_entity.keys())
+        display_entities = [entity for entity in entities if entity["id"] in visible_ids]
+
+    graph = build_entity_graph(display_entities, relationships)
     if graph.number_of_nodes() == 0:
         return None
 
-    severity_by_entity = entity_max_severity(findings or [])
     labels = nx.get_node_attributes(graph, "label")
     positions = nx.spring_layout(graph, seed=42)
 
@@ -164,7 +203,7 @@ def entity_graph_figure(
         )
     annotations.append(
         dict(
-            text="Node colour: highest open/reviewed finding severity (grey = none)",
+            text="Node colour: highest matching finding severity (grey = none)",
             xref="paper",
             yref="paper",
             x=0,

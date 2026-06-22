@@ -1,4 +1,4 @@
-# Project Overwatch v1.4
+# Project Overwatch v1.5
 
 Project Overwatch is a **local** Python/Streamlit dashboard for defensive security intelligence. It helps analysts organise investigations into **cases**, collect data with authorised **active** scans and **passive** lookups, interpret results as advisory **findings**, and export **reports** — all stored in a local SQLite database on your machine.
 
@@ -127,6 +127,18 @@ The **Operation Plan** on Run Operation summarises case, original and normalised
 
 After a run, **Latest Results** shows per-module status, finding counts, highest severity, and tabbed detail (Summary, Analyst Interpretation, Module Output, Raw Output, Structured Data). Raw output is collapsed by default.
 
+### Graph finding filters (v1.5)
+
+The **Graph** page can filter node colouring by finding status and minimum severity, and optionally hide entities without matching findings.
+
+### Report export presets (v1.5)
+
+The **Report** page includes built-in presets (Executive brief, Full technical, Shareable redacted, Archive complete). Apply a preset, then adjust individual options if needed.
+
+### Stale finding reopen (v1.5)
+
+When a module re-scan observes the same finding again, terminal findings (closed, accepted, false positive) are automatically reopened to `open` with an analyst note explaining the re-observation.
+
 ## Investigation model
 
 | Concept | Description |
@@ -213,7 +225,7 @@ Saved reports go to `reports/` (gitignored). Encrypted exports go to `exports/`.
 ```
 main.py                    Streamlit entry point and navigation router
 ui/                        Run Operation, archive pages, findings, metrics
-version.py                 PROJECT_VERSION = "1.4.0"
+version.py                 PROJECT_VERSION = "1.5.0"
 scripts/smoke_check.py     Local sanity checks
 requirements-optional.txt  kaleido, weasyprint (optional)
 database/db_setup.py       SQLite schema and helpers
@@ -247,12 +259,12 @@ config/                    Local report settings (gitignored)
 
 Check **Sidebar → System status** for Nmap, modules, and optional dependency readiness.
 
-## v1.5 roadmap
+## v1.6 roadmap
 
-- Stale finding handling on re-scan (reopen terminal findings when the same issue is observed again)
-- Finding-driven graph filters and export presets
 - Additional passive collection modules wired through the findings pipeline
-- Hardening for long-running local deployments
+- Configurable stale-reopen behaviour per finding status
+- Scheduled export as a background helper script
+- Multi-case dashboard and comparison views
 
 Previously planned case backup is **available now** on the **Backup** page.
 

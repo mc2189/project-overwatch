@@ -2,6 +2,13 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v1.5.0 — Stale findings, graph filters, report presets
+
+- Terminal findings (closed, accepted, false positive) reopen to `open` when re-observed on module re-scan
+- Graph page filters: finding status, minimum severity, hide entities without matching findings
+- Report export presets: Executive brief, Full technical, Shareable (redacted), Archive complete
+- SQLite WAL mode and busy timeout for long-running local deployments
+
 ## v1.4.0 — Investigation workflow UI
 
 - Sidebar simplified to case selection and page navigation

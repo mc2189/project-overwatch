@@ -145,6 +145,49 @@ def _check_cert_subdomain_module() -> None:
         raise AssertionError("findings pipeline not registered for infra_cert_subdomain")
 
 
+def _check_stale_finding_reopen() -> None:
+    db = __import__(
+        "database.db_setup",
+        fromlist=[
+            "create_finding",
+            "upsert_finding",
+            "close_finding",
+            "normalize_finding_status",
+            "get_or_create_default_case",
+            "get_db_conn",
+            "STALE_REOPEN_NOTE",
+        ],
+    )
+    case = db.get_or_create_default_case()
+    conn = db.get_db_conn()
+    try:
+        finding = db.create_finding(
+            case["id"],
+            "smoke_test",
+            "Stale reopen smoke finding",
+            "low",
+            60,
+            "Original explanation.",
+            conn=conn,
+        )
+        db.close_finding(finding["id"], conn=conn)
+        reopened = db.upsert_finding(
+            case["id"],
+            "smoke_test",
+            "Stale reopen smoke finding",
+            "medium",
+            70,
+            "Re-observed explanation.",
+            conn=conn,
+        )
+        if db.normalize_finding_status(reopened.get("status")) != "open":
+            raise AssertionError("upsert_finding did not reopen terminal finding")
+        if db.STALE_REOPEN_NOTE not in (reopened.get("analyst_notes") or ""):
+            raise AssertionError("stale reopen note missing from analyst_notes")
+    finally:
+        conn.close()
+
+
 def _check_target_compatibility() -> None:
     target_detection = __import__(
         "utils.target_detection",
@@ -267,6 +310,11 @@ def main() -> int:
     run(
         "finding workflow helpers",
         lambda: _check_finding_workflow_helpers(),
+    )
+
+    run(
+        "stale finding reopen",
+        lambda: _check_stale_finding_reopen(),
     )
 
     run(

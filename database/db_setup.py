@@ -172,11 +172,16 @@ def _rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+STALE_REOPEN_NOTE = "[Reopened automatically: same issue re-observed on module re-scan.]"
+
+
 def get_db_conn() -> sqlite3.Connection:
     """Open the Overwatch database, creating the folder and tables if needed."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), timeout=5.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     for schema in ALL_SCHEMAS:
         conn.execute(schema)
     _migrate_findings_table(conn)
@@ -664,34 +669,59 @@ def upsert_finding(
         now = datetime.now(timezone.utc).isoformat()
         if existing:
             existing_status = normalize_finding_status(existing.get("status"))
-            conn.execute(
-                """
-                UPDATE findings
-                SET observation_id = ?, severity = ?, confidence = ?, explanation = ?,
-                    suggested_actions_json = ?, updated_at = ?
-                WHERE id = ?
-                """,
-                (
-                    observation_id,
-                    severity,
-                    confidence,
-                    explanation,
-                    actions_json,
-                    now,
-                    existing["id"],
-                ),
-            )
+            reopen_terminal = existing_status in TERMINAL_FINDING_STATUSES
+            analyst_notes = existing.get("analyst_notes") or ""
+            if reopen_terminal and STALE_REOPEN_NOTE not in analyst_notes:
+                analyst_notes = (
+                    f"{analyst_notes}\n{STALE_REOPEN_NOTE}".strip()
+                    if analyst_notes
+                    else STALE_REOPEN_NOTE
+                )
+
+            if reopen_terminal:
+                conn.execute(
+                    """
+                    UPDATE findings
+                    SET status = 'open', observation_id = ?, severity = ?, confidence = ?,
+                        explanation = ?, suggested_actions_json = ?, analyst_notes = ?,
+                        closed_at = NULL, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        observation_id,
+                        severity,
+                        confidence,
+                        explanation,
+                        actions_json,
+                        analyst_notes,
+                        now,
+                        existing["id"],
+                    ),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE findings
+                    SET observation_id = ?, severity = ?, confidence = ?, explanation = ?,
+                        suggested_actions_json = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        observation_id,
+                        severity,
+                        confidence,
+                        explanation,
+                        actions_json,
+                        now,
+                        existing["id"],
+                    ),
+                )
             conn.commit()
             updated = _row_to_dict(
                 conn.execute("SELECT * FROM findings WHERE id = ?", (existing["id"],)).fetchone()
             )
             if updated is None:
                 raise RuntimeError("Failed to update finding.")
-            # TODO(v1.2): stale finding handling — optionally reopen terminal findings when re-observed.
-            if existing_status in TERMINAL_FINDING_STATUSES:
-                return updated
-            if existing_status in ACTIVE_FINDING_STATUSES:
-                return updated
             return updated
 
         cursor = conn.cursor()

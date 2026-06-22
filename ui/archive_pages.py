@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from database.db_setup import (
+    FINDING_STATUSES,
     get_case,
     get_db_conn,
     list_cases,
@@ -20,7 +21,7 @@ from database.db_setup import (
 from ui.metrics import render_compact_metrics
 from utils.case_backup import export_case_bundle_json, import_case_bundle, parse_case_bundle_json
 from utils.graph_view import entity_graph_figure
-from utils.report_builder import ReportOptions, build_case_report, save_report_markdown
+from utils.report_builder import build_case_report, save_report_markdown
 from utils.report_encryption import is_encryption_available
 from utils.report_export import (
     batch_export_reports,
@@ -32,6 +33,7 @@ from utils.report_export import (
     save_report_html,
     save_report_pdf,
 )
+from utils.report_presets import REPORT_PRESETS, apply_preset_to_session, build_report_options_from_state
 from utils.report_redaction import parse_custom_terms
 from utils.report_scheduler import maybe_run_scheduled_exports
 from utils.report_settings import (
@@ -140,12 +142,43 @@ def render_graph_page(case_id: int, metrics: dict[str, int]) -> None:
     relationships = list_relationships(case_id=case_id, conn=conn)
     findings = list_findings(case_id=case_id, conn=conn)
     conn.close()
+
+    filter_col1, filter_col2, filter_col3 = st.columns(3)
+    with filter_col1:
+        status_filter = st.multiselect(
+            "Finding statuses for node colour",
+            options=list(FINDING_STATUSES),
+            default=["open", "in_review", "action_required"],
+            key="graph_finding_statuses",
+        )
+    with filter_col2:
+        min_severity = st.selectbox(
+            "Minimum severity",
+            options=["All", "info", "low", "medium", "high", "critical"],
+            key="graph_min_severity",
+        )
+    with filter_col3:
+        hide_without_findings = st.checkbox(
+            "Hide entities without matching findings",
+            value=False,
+            key="graph_hide_without_findings",
+        )
+
+    statuses = tuple(status_filter) if status_filter else ("open", "in_review", "action_required")
+    min_sev = None if min_severity == "All" else min_severity
+
     st.caption(
-        "Graph built from stored entities and relationships for the active case. "
-        "Node colour reflects the highest active finding severity (open, in review, action required). "
-        "This view does not perform new scanning."
+        "Graph built from stored entities and relationships. "
+        "Node colour reflects the highest finding severity matching the filters above."
     )
-    figure = entity_graph_figure(entities, relationships, findings)
+    figure = entity_graph_figure(
+        entities,
+        relationships,
+        findings,
+        finding_statuses=statuses,
+        min_severity=min_sev,
+        hide_entities_without_findings=hide_without_findings,
+    )
     if figure is None:
         st.info(
             "No graph data yet. Run Domain Intelligence or Nmap against a target to populate "
@@ -220,7 +253,42 @@ def render_report_page(case_id: int, metrics: dict[str, int]) -> None:
                     last_run_at=schedule.last_run_at,
                 )
             )
-            st.success("Schedule settings saved. Exports run when this tab is opened.")
+            st.success("Schedule settings saved. Exports run when the Report page is opened.")
+
+    preset_col1, preset_col2 = st.columns([2, 1])
+    with preset_col1:
+        preset_choice = st.selectbox(
+            "Export preset",
+            options=["custom", *REPORT_PRESETS.keys()],
+            format_func=lambda value: (
+                "Custom settings"
+                if value == "custom"
+                else REPORT_PRESETS[value].label
+            ),
+            key="report_preset_choice",
+        )
+        if preset_choice != "custom":
+            st.caption(REPORT_PRESETS[preset_choice].description)
+    with preset_col2:
+        st.write("")
+        if st.button("Apply preset", width="stretch", disabled=preset_choice == "custom"):
+            apply_preset_to_session(preset_choice)
+            st.rerun()
+
+    if "report_template" not in st.session_state:
+        st.session_state.report_template = "full"
+    if "include_closed_findings" not in st.session_state:
+        st.session_state.include_closed_findings = False
+    if "include_raw_appendix" not in st.session_state:
+        st.session_state.include_raw_appendix = False
+    if "include_graph_appendix" not in st.session_state:
+        st.session_state.include_graph_appendix = False
+    if "redact_ips" not in st.session_state:
+        st.session_state.redact_ips = False
+    if "redact_emails" not in st.session_state:
+        st.session_state.redact_emails = False
+    if "redact_domains" not in st.session_state:
+        st.session_state.redact_domains = False
 
     report_col1, report_col2 = st.columns(2)
     with report_col1:
@@ -229,26 +297,27 @@ def render_report_page(case_id: int, metrics: dict[str, int]) -> None:
             options=["full", "executive"],
             format_func=lambda value: "Full technical" if value == "full" else "Executive summary",
             help="Executive omits detailed entities, relationships, and observations.",
+            key="report_template",
         )
         include_closed_findings = st.checkbox(
             "Include closed / accepted / false positive findings",
-            value=False,
             help="When unchecked, only active findings (open, in review, action required) are included.",
+            key="include_closed_findings",
         )
         include_raw_appendix = st.checkbox(
             "Include raw output appendix",
-            value=False,
             help="When enabled, observation raw output is appended in fenced code blocks.",
+            key="include_raw_appendix",
         )
     with report_col2:
         include_graph_appendix = st.checkbox(
             "Include entity graph snapshot",
-            value=False,
             help="Embeds a PNG graph in the appendix when kaleido is available.",
+            key="include_graph_appendix",
         )
-        redact_ips = st.checkbox("Redact IP addresses", value=False)
-        redact_emails = st.checkbox("Redact email addresses", value=False)
-        redact_domains = st.checkbox("Redact domain names", value=False)
+        redact_ips = st.checkbox("Redact IP addresses", key="redact_ips")
+        redact_emails = st.checkbox("Redact email addresses", key="redact_emails")
+        redact_domains = st.checkbox("Redact domain names", key="redact_domains")
 
     with st.expander("Advanced redaction", expanded=False):
         custom_terms_text = st.text_area(
@@ -263,23 +332,10 @@ def render_report_page(case_id: int, metrics: dict[str, int]) -> None:
         )
         st.caption("Lines starting with # are ignored. Custom redaction runs after built-in patterns.")
 
-    report_options = ReportOptions(
-        include_closed_findings=include_closed_findings,
-        include_raw_appendix=include_raw_appendix,
-        include_graph_appendix=include_graph_appendix,
-        template=report_template,
-        redactions={
-            option
-            for option, enabled in (
-                ("ipv4", redact_ips),
-                ("email", redact_emails),
-                ("domain", redact_domains),
-            )
-            if enabled
-        },
-        branding=branding,
-        custom_redaction_terms=parse_custom_terms(custom_terms_text),
-        custom_redaction_regex=custom_regex_text,
+    report_options = build_report_options_from_state(
+        branding,
+        custom_terms_text=custom_terms_text,
+        custom_regex_text=custom_regex_text,
     )
 
     if "case_report_markdown" not in st.session_state:
