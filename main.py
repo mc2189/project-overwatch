@@ -3,7 +3,17 @@ import sqlite3
 import pandas as pd
 import streamlit as st
 
-from database.db_setup import get_db_conn
+from database.db_setup import (
+    create_case,
+    create_or_get_entity,
+    get_or_create_default_case,
+    get_db_conn,
+    infer_entity_type,
+    list_cases,
+    list_entities,
+    list_observations,
+    list_operations,
+)
 from modules.executor import execute_module, get_runtime_error, is_runtime_ready
 from modules.module_registry import (
     CATEGORIES,
@@ -12,6 +22,9 @@ from modules.module_registry import (
     is_executable,
     module_ui_label,
 )
+
+if "case_id" not in st.session_state:
+    st.session_state.case_id = get_or_create_default_case()["id"]
 
 modules_by_category = get_modules_by_category()
 selected_modules: dict[str, bool] = {}
@@ -43,6 +56,16 @@ def selection_requires_authorisation(module_ids: list[str]) -> bool:
     )
 
 
+def get_current_case() -> dict:
+    cases = list_cases()
+    for case in cases:
+        if case["id"] == st.session_state.case_id:
+            return case
+    default_case = get_or_create_default_case()
+    st.session_state.case_id = default_case["id"]
+    return default_case
+
+
 def render_execution_result(result: dict) -> None:
     """Display a structured executor result in the main panel."""
     module = get_module(result["module_id"])
@@ -72,9 +95,36 @@ def render_execution_result(result: dict) -> None:
             st.warning(f"**Finding:** {finding}")
 
 
+current_case = get_current_case()
+
 # --- Sidebar ---
 with st.sidebar:
     st.title("🛡️ Arsenal Control")
+
+    st.subheader("Case")
+    cases = list_cases()
+    case_labels = {f"{case['name']} (#{case['id']})": case["id"] for case in cases}
+    selected_case_label = st.selectbox(
+        "Active case",
+        options=list(case_labels.keys()),
+        index=list(case_labels.values()).index(st.session_state.case_id)
+        if st.session_state.case_id in case_labels.values()
+        else 0,
+        label_visibility="collapsed",
+    )
+    st.session_state.case_id = case_labels[selected_case_label]
+
+    with st.expander("Create new case", expanded=False):
+        new_case_name = st.text_input("Case name", placeholder="e.g. Acme Corp assessment")
+        new_case_description = st.text_area("Description", placeholder="Optional notes")
+        if st.button("Create case", width="stretch"):
+            if not new_case_name.strip():
+                st.warning("Enter a case name.")
+            else:
+                created = create_case(new_case_name.strip(), new_case_description.strip() or None)
+                st.session_state.case_id = created["id"]
+                st.success(f"Case '{created['name']}' created.")
+                st.rerun()
 
     nmap_entry = get_module("infra_nmap")
     if nmap_entry and is_executable(nmap_entry) and nmap_module_error:
@@ -84,15 +134,34 @@ with st.sidebar:
     target_ip = st.text_input("Target IP/Domain:", placeholder="e.g. 192.168.1.1")
 
     if st.button("Acquire Target", width="stretch"):
-        conn = get_db_conn()
-        try:
-            conn.execute("INSERT INTO targets (domain_or_ip) VALUES (?)", (target_ip,))
-            conn.commit()
-            st.success("Target Locked.")
-        except sqlite3.IntegrityError:
-            st.warning("Target exists in database.")
-        finally:
-            conn.close()
+        if not target_ip.strip():
+            st.warning("Enter a target value.")
+        else:
+            conn = get_db_conn()
+            try:
+                conn.execute("INSERT INTO targets (domain_or_ip) VALUES (?)", (target_ip.strip(),))
+                conn.commit()
+                entity = create_or_get_entity(
+                    st.session_state.case_id,
+                    infer_entity_type(target_ip),
+                    target_ip.strip(),
+                    label=target_ip.strip(),
+                    source="manual_acquire",
+                    conn=conn,
+                )
+                st.success(f"Target locked as {entity['entity_type']}: {entity['value']}")
+            except sqlite3.IntegrityError:
+                create_or_get_entity(
+                    st.session_state.case_id,
+                    infer_entity_type(target_ip),
+                    target_ip.strip(),
+                    label=target_ip.strip(),
+                    source="manual_acquire",
+                    conn=conn,
+                )
+                st.warning("Target exists in legacy archive; entity linked to current case.")
+            finally:
+                conn.close()
 
     st.divider()
     st.subheader("Select Modules")
@@ -153,17 +222,29 @@ with st.sidebar:
 
 # --- Main Dashboard ---
 st.title("Project Overwatch")
-st.caption("Intelligence Command Centre")
+st.caption(
+    f"Intelligence Command Centre · Case: **{current_case['name']}** (#{current_case['id']}) · "
+    f"Status: {current_case['status']}"
+)
 
 conn = get_db_conn()
 t_count = conn.execute("SELECT count(*) FROM targets").fetchone()[0]
 s_count = conn.execute("SELECT count(*) FROM recon_data").fetchone()[0]
+entity_count = conn.execute(
+    "SELECT count(*) FROM entities WHERE case_id = ?",
+    (st.session_state.case_id,),
+).fetchone()[0]
+observation_count = conn.execute(
+    "SELECT count(*) FROM observations WHERE case_id = ?",
+    (st.session_state.case_id,),
+).fetchone()[0]
 conn.close()
 
-m1, m2, m3 = st.columns(3)
-m1.metric("Targets", t_count)
-m2.metric("Logs", s_count)
-m3.metric("System", "Operational")
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("Legacy Targets", t_count)
+m2.metric("Case Entities", entity_count)
+m3.metric("Observations", observation_count)
+m4.metric("Legacy Logs", s_count)
 
 st.divider()
 
@@ -183,6 +264,16 @@ if execute_btn:
             else:
                 conn = get_db_conn()
                 try:
+                    target_value = target_ip.strip()
+                    entity = create_or_get_entity(
+                        st.session_state.case_id,
+                        infer_entity_type(target_value),
+                        target_value,
+                        label=target_value,
+                        source="operation",
+                        conn=conn,
+                    )
+
                     for module_id in selected_ids:
                         module = get_module(module_id)
                         if module is None or not is_executable(module):
@@ -199,10 +290,12 @@ if execute_btn:
 
                         result = execute_module(
                             module_id,
-                            target_ip,
+                            target_value,
                             options=options,
                             db_context=conn,
                             authorisation_confirmed=authorisation_confirmed,
+                            case_id=st.session_state.case_id,
+                            entity_id=entity["id"],
                         )
                         render_execution_result(result)
                 finally:
@@ -212,12 +305,56 @@ if execute_btn:
 
 # --- Archive ---
 st.header("📂 Archive")
-tab1, tab2 = st.tabs(["Manifest", "History"])
-with tab1:
+(
+    tab_manifest,
+    tab_history,
+    tab_cases,
+    tab_entities,
+    tab_observations,
+    tab_operations,
+) = st.tabs(["Manifest", "History", "Cases", "Entities", "Observations", "Operations"])
+
+with tab_manifest:
     conn = get_db_conn()
     st.dataframe(pd.read_sql_query("SELECT * FROM targets", conn), width="stretch")
     conn.close()
-with tab2:
+
+with tab_history:
     conn = get_db_conn()
     st.dataframe(pd.read_sql_query("SELECT * FROM recon_data", conn), width="stretch")
     conn.close()
+
+with tab_cases:
+    conn = get_db_conn()
+    st.dataframe(pd.read_sql_query("SELECT * FROM cases", conn), width="stretch")
+    conn.close()
+
+with tab_entities:
+    conn = get_db_conn()
+    entities = list_entities(case_id=st.session_state.case_id, conn=conn)
+    conn.close()
+    st.caption(f"Showing entities for case #{st.session_state.case_id}.")
+    st.dataframe(pd.DataFrame(entities), width="stretch")
+
+with tab_observations:
+    conn = get_db_conn()
+    observations = list_observations(case_id=st.session_state.case_id, conn=conn)
+    conn.close()
+    st.caption(f"Showing observations for case #{st.session_state.case_id}.")
+    if observations:
+        display_rows = []
+        for observation in observations:
+            row = observation.copy()
+            if row.get("raw_output") and len(row["raw_output"]) > 200:
+                row["raw_output"] = row["raw_output"][:200] + "..."
+            display_rows.append(row)
+        st.dataframe(pd.DataFrame(display_rows), width="stretch")
+    else:
+        st.info("No observations recorded for this case yet.")
+
+with tab_operations:
+    conn = get_db_conn()
+    operations = list_operations(case_id=st.session_state.case_id, conn=conn)
+    conn.close()
+    st.caption(f"Showing operations for case #{st.session_state.case_id}.")
+    st.dataframe(pd.DataFrame(operations), width="stretch")

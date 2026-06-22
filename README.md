@@ -1,6 +1,6 @@
 # Project Overwatch
 
-Defensive security intelligence dashboard built with Python and Streamlit. Project Overwatch v0.3 provides target tracking, reconnaissance logging, a central module registry, an execution dispatcher, and manual Nmap integration for authorised assessments only.
+Defensive security intelligence dashboard built with Python and Streamlit. Project Overwatch v0.4 provides investigation cases, entity tracking, structured observations, an execution dispatcher, and manual Nmap integration for authorised assessments only.
 
 ## Requirements
 
@@ -39,11 +39,12 @@ Streamlit opens the dashboard in your browser, typically at `http://localhost:85
 
 ## Usage
 
-1. Enter a target IP or domain in the sidebar and click **Acquire Target** to add it to the archive.
-2. Select modules under **Select Modules**. The sidebar is generated from `modules/module_registry.py`.
-3. If you select an **active** module that requires authorisation (such as Nmap), tick the authorisation checkbox in the sidebar.
-4. Click **LAUNCH OPERATION** to run selected modules. Scans are never started automatically.
-5. Review results in the main panel and browse stored data under **Archive** (Manifest / History tabs).
+1. Select or create a **case** in the sidebar (a container for an investigation).
+2. Enter a target IP or domain and click **Acquire Target** to add it to the legacy archive and create an **entity** in the active case.
+3. Select modules under **Select Modules**. The sidebar is generated from `modules/module_registry.py`.
+4. If you select an **active** module that requires authorisation (such as Nmap), tick the authorisation checkbox in the sidebar.
+5. Click **LAUNCH OPERATION** to run selected modules. Scans are never started automatically.
+6. Review results in the main panel and browse stored data under **Archive** tabs.
 
 Only modules marked **active** and **implemented** in the registry can be executed. Planned modules appear in the UI but are disabled.
 
@@ -124,6 +125,49 @@ When any **selected** module has `requires_authorisation=True`, the sidebar show
 
 Selecting Nmap **Vuln Scripts** (`--script vuln`) shows an additional high-risk warning. Vuln scripts also require the authorisation checkbox even if other checks pass.
 
+## Investigation data model
+
+Project Overwatch v0.4 stores investigation data in a structured model alongside the legacy `targets` / `recon_data` tables.
+
+| Table | Purpose |
+|-------|---------|
+| `cases` | Investigation containers (name, description, status) |
+| `entities` | Things under investigation: IPs, domains, emails, usernames, companies, documents, etc. |
+| `observations` | Module results linked to a case and entity |
+| `relationships` | Links between entities (reserved for future graph/network analysis) |
+| `operations` | Audit log of module runs (module, target, status, authorisation) |
+
+### Cases
+
+A **case** groups everything related to one investigation. A default case is created automatically on first run if none exists. Select a case in the sidebar or create a new one.
+
+### Entities
+
+An **entity** is a concrete item being investigated within a case. When you acquire a target, Overwatch infers a basic type:
+
+| Input pattern | Entity type |
+|---------------|-------------|
+| IPv4 address | `ip_address` |
+| Domain name | `domain` |
+| Email address | `email` |
+| Other | `unknown` |
+
+### Observations
+
+An **observation** is a structured module result. When Nmap completes, the executor saves:
+
+- `title`: "Nmap scan result"
+- `observation_type`: "network_scan"
+- `summary`: executor result summary
+- `raw_output`: full Nmap text output
+- `data_json`: basic structured metadata (findings count, options used)
+
+Legacy `recon_data` rows are still written for backwards compatibility.
+
+### Relationships
+
+The `relationships` table is created now but not yet used in the UI. It will support entity graph and network analysis in a future release.
+
 ## Lawful use
 
 Project Overwatch is intended for **lawful OSINT**, **systems you own**, **lab environments**, and **authorised security assessments** only. Do not use it to scan, probe, or investigate targets without permission.
@@ -133,8 +177,8 @@ Project Overwatch is intended for **lawful OSINT**, **systems you own**, **lab e
 ```
 main.py                          Streamlit entry point
 database/
-  db_setup.py                    SQLite connection and schema setup
-  overwatch.db                   Local target and recon data (auto-created)
+  db_setup.py                    SQLite schema, cases/entities/observations helpers
+  overwatch.db                   Local investigation and legacy data (auto-created)
 modules/
   module_registry.py           Module metadata and helpers
   executor.py                  Execution dispatcher and result format

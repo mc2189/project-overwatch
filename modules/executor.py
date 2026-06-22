@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any
 
+from database.db_setup import create_observation, create_operation_log
 from modules.module_registry import get_module, is_executable
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -90,12 +92,64 @@ def _save_recon_output(conn: sqlite3.Connection, target: str, raw_output: str) -
         conn.commit()
 
 
+def _persist_investigation_records(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int | None,
+    module_id: str,
+    target: str,
+    result: dict[str, Any],
+    authorisation_confirmed: bool,
+    options: dict[str, Any],
+) -> None:
+    """Save operation and observation records for a completed module run."""
+    create_operation_log(
+        case_id,
+        module_id,
+        target,
+        result["status"],
+        authorisation_confirmed=authorisation_confirmed,
+        summary=result["summary"],
+        conn=conn,
+    )
+
+    if entity_id is None or result["status"] != "completed":
+        return
+
+    create_observation(
+        case_id,
+        entity_id,
+        module_id,
+        "network_scan",
+        "Nmap scan result",
+        summary=result["summary"],
+        data_json=json.dumps(
+            {
+                "module_id": module_id,
+                "success": result["success"],
+                "status": result["status"],
+                "findings_count": len(result["findings"]),
+                "findings": result["findings"],
+                "options": {
+                    "nmap_fast": bool(options.get("nmap_fast", False)),
+                    "nmap_scripts": bool(options.get("nmap_scripts", False)),
+                },
+            }
+        ),
+        raw_output=result["raw_output"],
+        conn=conn,
+    )
+
+
 def _execute_nmap(
     module_id: str,
     target: str,
     options: dict[str, Any],
     db_context: sqlite3.Connection | None,
     authorisation_confirmed: bool,
+    case_id: int | None,
+    entity_id: int | None,
 ) -> dict[str, Any]:
     _load_nmap_handlers()
     if _nmap_handlers is None:
@@ -130,11 +184,8 @@ def _execute_nmap(
     raw_output, findings = run_nmap_scan(target, flags)
     is_error = raw_output.startswith("Error")
 
-    if not is_error and db_context is not None:
-        _save_recon_output(db_context, target, raw_output)
-
     if is_error:
-        return make_result(
+        result = make_result(
             module_id,
             success=False,
             status="error",
@@ -143,15 +194,32 @@ def _execute_nmap(
             findings=findings,
             errors=[raw_output],
         )
+    else:
+        result = make_result(
+            module_id,
+            success=True,
+            status="completed",
+            summary=f"Nmap scan completed for {target}.",
+            raw_output=raw_output,
+            findings=findings,
+        )
 
-    return make_result(
-        module_id,
-        success=True,
-        status="completed",
-        summary=f"Nmap scan completed for {target}.",
-        raw_output=raw_output,
-        findings=findings,
-    )
+    if db_context is not None:
+        if not is_error:
+            _save_recon_output(db_context, target, raw_output)
+        if case_id is not None:
+            _persist_investigation_records(
+                db_context,
+                case_id=case_id,
+                entity_id=entity_id,
+                module_id=module_id,
+                target=target,
+                result=result,
+                authorisation_confirmed=authorisation_confirmed,
+                options=options,
+            )
+
+    return result
 
 
 def execute_module(
@@ -160,6 +228,8 @@ def execute_module(
     options: dict[str, Any] | None = None,
     db_context: sqlite3.Connection | None = None,
     authorisation_confirmed: bool = False,
+    case_id: int | None = None,
+    entity_id: int | None = None,
 ) -> dict[str, Any]:
     """
     Execute a registered module and return a structured result dictionary.
@@ -225,9 +295,17 @@ def execute_module(
                 summary="Nmap module is not available.",
                 errors=[error_message],
             )
-        return _execute_nmap(module_id, target, options, db_context, authorisation_confirmed)
+        return _execute_nmap(
+            module_id,
+            target,
+            options,
+            db_context,
+            authorisation_confirmed,
+            case_id,
+            entity_id,
+        )
 
-    # TODO(v0.4): Route additional implemented modules here.
+    # TODO(v0.5): Route additional implemented modules here.
     return make_result(
         module_id,
         success=False,
