@@ -358,28 +358,29 @@ def _render_pivot_queue(case_id: int, entity_by_id: dict[int, dict]) -> None:
             st.rerun()
 
         queued_entities = [entity_by_id[row["entity_id"]] for row in queue_rows if row["entity_id"] in entity_by_id]
-        passive_module_ids: set[str] = set()
-        for queued in queued_entities:
-            pivot = build_pivot_recommendations(queued)
-            for module in pivot["compatible_modules"]:
-                if module.mode == "passive":
-                    passive_module_ids.add(module.module_id)
+        if queued_entities:
+            st.markdown("**Send to Batch Queue**")
+            batch_col1, batch_col2 = st.columns(2)
+            with batch_col1:
+                if st.button(
+                    "Add passive modules for queued entities",
+                    key="pivot_send_passive_batch_queue",
+                    width="stretch",
+                ):
+                    from ui.batch_queue_page import import_pivot_queue_entities
 
-        if queued_entities and passive_module_ids:
-            st.markdown("**Batch passive run (queued items)**")
-            batch_modules = st.multiselect(
-                "Passive modules",
-                options=sorted(passive_module_ids),
-                format_func=lambda mid: MODULE_CARD_TITLES.get(mid, mid),
-                key="pivot_queue_passive_modules",
-            )
-            if st.button("Run passive modules on queue", key="pivot_queue_run_passive"):
-                _run_modules_for_entities(
-                    case_id,
-                    queued_entities,
-                    batch_modules,
-                    authorisation_confirmed=False,
-                )
+                    added, skipped = import_pivot_queue_entities(case_id, entity_by_id)
+                    if added:
+                        st.success(f"Added {added} item(s) to Batch Queue.")
+                    else:
+                        st.info("No new passive items added.")
+                    st.rerun()
+            with batch_col2:
+                if st.button("Open Batch Queue", key="pivot_open_batch_queue", width="stretch"):
+                    from ui.batch_queue_page import navigate_to_batch_queue
+
+                    navigate_to_batch_queue()
+                    st.rerun()
 
 
 def _render_pivot_actions(
@@ -463,6 +464,36 @@ def _render_pivot_actions(
     if launch_blocked:
         st.caption(launch_blocked)
 
+    st.divider()
+    st.markdown("**Batch Queue**")
+    batch_col1, batch_col2 = st.columns(2)
+    with batch_col1:
+        if st.button(
+            "Add compatible passive modules to Batch Queue",
+            key=f"entity_batch_queue_add_{entity['id']}",
+            width="stretch",
+        ):
+            from ui.batch_queue_page import add_entity_passive_modules_to_batch_queue
+
+            added, skipped = add_entity_passive_modules_to_batch_queue(case_id, entity)
+            if added:
+                st.success(f"Added {added} passive module(s) to Batch Queue.")
+            elif skipped:
+                st.info("Nothing new added. " + "; ".join(skipped[:3]))
+            else:
+                st.info("No compatible passive modules for this entity.")
+            st.rerun()
+    with batch_col2:
+        if st.button(
+            "Open Batch Queue",
+            key=f"entity_open_batch_queue_{entity['id']}",
+            width="stretch",
+        ):
+            from ui.batch_queue_page import navigate_to_batch_queue
+
+            navigate_to_batch_queue()
+            st.rerun()
+
 
 def render_entity_workspace_page(case_id: int, metrics: dict, *, case_name: str = "") -> None:
     st.title("Entity Workspace")
@@ -507,7 +538,7 @@ def render_entity_workspace_page(case_id: int, metrics: dict, *, case_name: str 
         )
         entity = entity_by_id[selected_id]
 
-        queue_col1, queue_col2 = st.columns([1, 3])
+        queue_col1, queue_col2, queue_col3 = st.columns([1, 1, 2])
         with queue_col1:
             already_queued = pivot_queue_contains(case_id, selected_id, conn=conn)
             if st.button(
@@ -520,8 +551,27 @@ def render_entity_workspace_page(case_id: int, metrics: dict, *, case_name: str 
                     st.success("Added to pivot queue.")
                     st.rerun()
         with queue_col2:
+            if st.button(
+                "Passive → Batch Queue",
+                key="entity_passive_batch_queue",
+                width="stretch",
+            ):
+                from ui.batch_queue_page import add_entity_passive_modules_to_batch_queue
+
+                added, skipped = add_entity_passive_modules_to_batch_queue(case_id, entity)
+                if added:
+                    st.success(f"Added {added} passive module(s) to Batch Queue.")
+                else:
+                    st.info("No new passive items added.")
+                st.rerun()
+        with queue_col3:
             if already_queued:
-                st.caption("This entity is already in the pivot queue.")
+                st.caption("This entity is in the pivot queue.")
+            if st.button("Open Batch Queue", key="entity_header_batch_queue"):
+                from ui.batch_queue_page import navigate_to_batch_queue
+
+                navigate_to_batch_queue()
+                st.rerun()
 
         pivot = build_pivot_recommendations(entity, entities_by_value=entities_by_value)
         findings = list_findings(case_id=case_id, entity_id=selected_id, conn=conn)

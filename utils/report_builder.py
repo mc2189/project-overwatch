@@ -21,6 +21,7 @@ from database.db_setup import (
     list_findings,
     list_observations,
     list_operations,
+    list_batch_queue_runs,
     list_relationships,
     normalize_finding_status,
 )
@@ -127,6 +128,7 @@ def _load_case_data(case_id: int, conn) -> dict[str, Any]:
         "observations": list_observations(case_id=case_id, conn=conn),
         "operations": list_operations(case_id=case_id, conn=conn),
         "findings": list_findings(case_id=case_id, conn=conn),
+        "batch_queue_runs": list_batch_queue_runs(case_id, limit=10, conn=conn),
     }
 
 
@@ -237,6 +239,7 @@ def build_case_report(
     observations = data["observations"]
     operations = data["operations"]
     all_findings = data["findings"]
+    batch_queue_runs = data.get("batch_queue_runs") or []
 
     entity_by_id = {entity["id"]: entity for entity in entities}
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -307,6 +310,7 @@ def build_case_report(
         f"- Finding status summary: {status_summary}",
         f"- Highest severity finding: {highest or 'None recorded'}",
         f"- Main modules used: {modules_summary}",
+        f"- Batch queue runs recorded: {len(batch_queue_runs)}",
         "",
         "## Scope and Notes",
         "",
@@ -389,6 +393,29 @@ def build_case_report(
                     lines.append(f"- Created: {observation.get('created_at', '-')}")
                     lines.append(f"- Summary: {observation.get('summary') or '_No summary._'}")
                     lines.append("")
+            lines.append("")
+
+    if batch_queue_runs:
+        lines.extend(["## Batch queue runs", ""])
+        lines.append(
+            "_Controlled batch pivot runs executed from the Batch Queue page. "
+            "Individual module results are also stored as operations and observations._"
+        )
+        lines.append("")
+        for run in batch_queue_runs:
+            lines.append(
+                f"### Run #{run.get('id')} · {run.get('completed_at') or run.get('started_at') or '-'}"
+            )
+            lines.append("")
+            lines.append(
+                f"- Processed: {run.get('items_processed', 0)} · "
+                f"Completed: {run.get('items_completed', 0)} · "
+                f"Warnings: {run.get('items_warnings', 0)} · "
+                f"Failed: {run.get('items_failed', 0)}"
+            )
+            if run.get("run_summary"):
+                lines.append("")
+                lines.append(run["run_summary"])
             lines.append("")
 
     lookup_notices = _lookup_notices_from_observations(observations)

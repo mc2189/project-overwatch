@@ -6,6 +6,7 @@ NAV_PAGES: tuple[str, ...] = (
     "Run Operation",
     "Findings",
     "Entity Workspace",
+    "Batch Queue",
     "Relationships",
     "Observations",
     "Operations",

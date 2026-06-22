@@ -20,7 +20,9 @@ from database.db_setup import (
     list_observations,
     list_operations,
     list_pivot_queue,
+    list_batch_queue_items,
     list_relationships,
+    sync_batch_queue_items,
     get_case,
 )
 
@@ -42,6 +44,7 @@ def export_case_bundle(case_id: int) -> dict[str, Any]:
             "operations": list_operations(case_id=case_id, conn=conn),
             "findings": list_findings(case_id=case_id, conn=conn),
             "pivot_queue": list_pivot_queue(case_id=case_id, conn=conn),
+            "batch_queue_items": list_batch_queue_items(case_id=case_id, conn=conn),
         }
     finally:
         conn.close()
@@ -158,6 +161,21 @@ def import_case_bundle(bundle: dict[str, Any], *, new_case_name: str | None = No
             entity_id = id_map.get(queue_item.get("entity_id"))
             if entity_id is not None:
                 add_to_pivot_queue(case_id, entity_id, conn=conn)
+
+        imported_batch_items = []
+        for batch_item in bundle.get("batch_queue_items", []):
+            mapped_entity_id = id_map.get(batch_item.get("entity_id"))
+            if mapped_entity_id is None:
+                continue
+            imported_batch_items.append(
+                {
+                    **batch_item,
+                    "case_id": case_id,
+                    "entity_id": mapped_entity_id,
+                }
+            )
+        if imported_batch_items:
+            sync_batch_queue_items(case_id, imported_batch_items, conn=conn)
 
         return new_case
     finally:

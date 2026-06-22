@@ -118,6 +118,44 @@ CREATE TABLE IF NOT EXISTS pivot_queue_items (
 )
 """
 
+BATCH_QUEUE_ITEMS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS batch_queue_items (
+    queue_id TEXT PRIMARY KEY,
+    case_id INTEGER NOT NULL,
+    entity_id INTEGER NOT NULL,
+    entity_value TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    execution_target TEXT,
+    module_id TEXT NOT NULL,
+    module_display_name TEXT,
+    mode TEXT,
+    compatibility_status TEXT,
+    status TEXT DEFAULT 'queued',
+    position INTEGER DEFAULT 0,
+    summary TEXT,
+    recent_run_warning TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP,
+    FOREIGN KEY(case_id) REFERENCES cases(id),
+    FOREIGN KEY(entity_id) REFERENCES entities(id)
+)
+"""
+
+BATCH_QUEUE_RUNS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS batch_queue_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER NOT NULL,
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP,
+    items_processed INTEGER DEFAULT 0,
+    items_completed INTEGER DEFAULT 0,
+    items_warnings INTEGER DEFAULT 0,
+    items_failed INTEGER DEFAULT 0,
+    run_summary TEXT,
+    FOREIGN KEY(case_id) REFERENCES cases(id)
+)
+"""
+
 FINDINGS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS findings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -182,6 +220,8 @@ ALL_SCHEMAS = (
     OPERATIONS_SCHEMA,
     FINDINGS_SCHEMA,
     PIVOT_QUEUE_SCHEMA,
+    BATCH_QUEUE_ITEMS_SCHEMA,
+    BATCH_QUEUE_RUNS_SCHEMA,
 )
 
 
@@ -655,6 +695,176 @@ def clear_pivot_queue(
         cursor = conn.execute("DELETE FROM pivot_queue_items WHERE case_id = ?", (case_id,))
         conn.commit()
         return cursor.rowcount
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def list_batch_queue_items(
+    case_id: int,
+    conn: sqlite3.Connection | None = None,
+) -> list[dict[str, Any]]:
+    """Return batch queue items for a case ordered by position."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT * FROM batch_queue_items
+            WHERE case_id = ?
+            ORDER BY position ASC, created_at ASC
+            """,
+            (case_id,),
+        ).fetchall()
+        return _rows_to_dicts(rows)
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def sync_batch_queue_items(
+    case_id: int,
+    items: list[dict[str, Any]],
+    conn: sqlite3.Connection | None = None,
+) -> None:
+    """Replace persisted batch queue items for a case with the provided list."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        conn.execute("DELETE FROM batch_queue_items WHERE case_id = ?", (case_id,))
+        for index, item in enumerate(items):
+            conn.execute(
+                """
+                INSERT INTO batch_queue_items (
+                    queue_id, case_id, entity_id, entity_value, entity_type, execution_target,
+                    module_id, module_display_name, mode, compatibility_status, status,
+                    position, summary, recent_run_warning, created_at, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    item["queue_id"],
+                    case_id,
+                    item["entity_id"],
+                    item.get("entity_value") or "",
+                    item.get("entity_type") or "unknown",
+                    item.get("execution_target"),
+                    item["module_id"],
+                    item.get("module_display_name"),
+                    item.get("mode"),
+                    item.get("compatibility_status"),
+                    item.get("status", "queued"),
+                    item.get("position", index),
+                    item.get("summary"),
+                    item.get("recent_run_warning"),
+                    item.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                    item.get("completed_at"),
+                ),
+            )
+        conn.commit()
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def batch_queue_item_counts(
+    conn: sqlite3.Connection | None = None,
+) -> dict[int, dict[str, int]]:
+    """Return per-case batch queue counts: total and queued items."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT case_id,
+                   COUNT(*) AS total,
+                   SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) AS queued
+            FROM batch_queue_items
+            GROUP BY case_id
+            """
+        ).fetchall()
+        return {
+            int(row["case_id"]): {"total": int(row["total"]), "queued": int(row["queued"] or 0)}
+            for row in rows
+        }
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def create_batch_queue_run(
+    case_id: int,
+    *,
+    items_processed: int,
+    items_completed: int,
+    items_warnings: int,
+    items_failed: int,
+    run_summary: str,
+    started_at: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any]:
+    """Persist a batch queue run summary for reporting."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        completed_at = datetime.now(timezone.utc).isoformat()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO batch_queue_runs (
+                case_id, started_at, completed_at,
+                items_processed, items_completed, items_warnings, items_failed, run_summary
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                case_id,
+                started_at or completed_at,
+                completed_at,
+                items_processed,
+                items_completed,
+                items_warnings,
+                items_failed,
+                run_summary,
+            ),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM batch_queue_runs WHERE id = ?",
+            (cursor.lastrowid,),
+        ).fetchone()
+        result = _row_to_dict(row)
+        if result is None:
+            raise RuntimeError("Failed to create batch queue run record.")
+        return result
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def list_batch_queue_runs(
+    case_id: int,
+    *,
+    limit: int = 10,
+    conn: sqlite3.Connection | None = None,
+) -> list[dict[str, Any]]:
+    """Return recent batch queue runs for a case."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT * FROM batch_queue_runs
+            WHERE case_id = ?
+            ORDER BY completed_at DESC, id DESC
+            LIMIT ?
+            """,
+            (case_id, limit),
+        ).fetchall()
+        return _rows_to_dicts(rows)
     finally:
         if own_conn:
             conn.close()

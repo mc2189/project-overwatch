@@ -171,6 +171,203 @@ def _check_entity_helpers() -> None:
         raise AssertionError("email entity should not recommend modules yet")
 
 
+def _check_batch_queue_helpers() -> None:
+    bq = __import__(
+        "utils.batch_queue",
+        fromlist=[
+            "build_queue_item",
+            "add_queue_item",
+            "add_passive_modules_for_entity",
+            "is_duplicate_queue_item",
+            "find_recent_operation",
+            "map_result_to_queue_status",
+            "passive_queued_items",
+            "clear_completed_items",
+            "PASSIVE_BATCH_MODULE_IDS",
+        ],
+    )
+    db = __import__(
+        "database.db_setup",
+        fromlist=["get_or_create_default_case", "create_or_get_entity", "get_db_conn"],
+    )
+
+    case = db.get_or_create_default_case()
+    entity = {
+        "id": 1,
+        "entity_type": "domain",
+        "value": "batch-queue.example",
+        "label": "Batch queue smoke",
+    }
+    module = __import__("modules.module_registry", fromlist=["get_module"]).get_module(
+        "infra_domain_intel"
+    )
+    if module is None:
+        raise AssertionError("infra_domain_intel missing")
+
+    item = bq.build_queue_item(case["id"], entity, module)
+    for field in (
+        "case_id",
+        "entity_id",
+        "entity_value",
+        "entity_type",
+        "module_id",
+        "module_display_name",
+        "mode",
+        "compatibility_status",
+        "status",
+        "created_at",
+    ):
+        if field not in item:
+            raise AssertionError(f"queue item missing field: {field}")
+    if item["compatibility_status"] != "compatible":
+        raise AssertionError("domain should be compatible with domain intel")
+    if item["mode"] != "passive":
+        raise AssertionError("domain intel should be passive")
+
+    items: list = []
+    items, added, reason = bq.add_queue_item(items, case["id"], entity, "infra_domain_intel")
+    if not added or reason:
+        raise AssertionError("first add_queue_item failed")
+    items, dup, dup_reason = bq.add_queue_item(items, case["id"], entity, "infra_domain_intel")
+    if dup or not dup_reason:
+        raise AssertionError("duplicate queue item should be skipped")
+
+    items, added_list, skipped = bq.add_passive_modules_for_entity(items, case["id"], entity)
+    if not isinstance(added_list, list):
+        raise AssertionError("add_passive_modules_for_entity did not return added list")
+    passive = bq.passive_queued_items(items)
+    if not all(row.get("mode") == "passive" for row in passive):
+        raise AssertionError("passive_queued_items included non-passive row")
+
+    recent = bq.find_recent_operation(
+        [
+            {
+                "module_id": "infra_domain_intel",
+                "target": "batch-queue.example",
+                "started_at": "2099-01-01T00:00:00+00:00",
+            }
+        ],
+        module_id="infra_domain_intel",
+        target="batch-queue.example",
+    )
+    if recent is None:
+        raise AssertionError("find_recent_operation should match future-dated operation")
+
+    status = bq.map_result_to_queue_status({"status": "completed_with_warnings", "success": True})
+    if status != "completed_with_warnings":
+        raise AssertionError("map_result_to_queue_status failed")
+    blocked = bq.map_result_to_queue_status({"status": "blocked", "success": False})
+    if blocked != "blocked":
+        raise AssertionError("blocked status mapping failed")
+
+    cleared = bq.clear_completed_items(
+        [{"status": "completed"}, {"status": "queued"}, {"status": "error"}]
+    )
+    if len(cleared) != 1 or cleared[0]["status"] != "queued":
+        raise AssertionError("clear_completed_items failed")
+
+    if "infra_nmap" in bq.PASSIVE_BATCH_MODULE_IDS:
+        raise AssertionError("Nmap must not be in passive batch defaults")
+
+
+def _check_batch_queue_persistence() -> None:
+    db = __import__(
+        "database.db_setup",
+        fromlist=[
+            "get_or_create_default_case",
+            "create_or_get_entity",
+            "get_db_conn",
+            "list_batch_queue_items",
+            "sync_batch_queue_items",
+            "create_batch_queue_run",
+            "list_batch_queue_runs",
+            "batch_queue_item_counts",
+        ],
+    )
+    store = __import__(
+        "utils.batch_queue_store",
+        fromlist=["move_queue_item", "record_batch_queue_run"],
+    )
+    case = db.get_or_create_default_case()
+    conn = db.get_db_conn()
+    try:
+        entity = db.create_or_get_entity(
+            case["id"],
+            "domain",
+            "batch-persist.example",
+            label="Persist smoke",
+            source="smoke_check",
+            conn=conn,
+        )
+        items = [
+            {
+                "queue_id": "smoke-q1",
+                "case_id": case["id"],
+                "entity_id": entity["id"],
+                "entity_value": entity["value"],
+                "entity_type": "domain",
+                "execution_target": entity["value"],
+                "module_id": "infra_domain_intel",
+                "module_display_name": "Domain Intelligence",
+                "mode": "passive",
+                "compatibility_status": "compatible",
+                "status": "queued",
+                "position": 0,
+                "summary": "",
+                "recent_run_warning": None,
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "completed_at": None,
+            },
+            {
+                "queue_id": "smoke-q2",
+                "case_id": case["id"],
+                "entity_id": entity["id"],
+                "entity_value": entity["value"],
+                "entity_type": "domain",
+                "execution_target": entity["value"],
+                "module_id": "infra_cert_subdomain",
+                "module_display_name": "Certificate & Subdomain Intelligence",
+                "mode": "passive",
+                "compatibility_status": "compatible",
+                "status": "queued",
+                "position": 1,
+                "summary": "",
+                "recent_run_warning": None,
+                "created_at": "2026-01-01T00:00:01+00:00",
+                "completed_at": None,
+            },
+        ]
+        db.sync_batch_queue_items(case["id"], items, conn=conn)
+        loaded = db.list_batch_queue_items(case["id"], conn=conn)
+        if len(loaded) != 2:
+            raise AssertionError("list_batch_queue_items did not persist items")
+        moved = store.move_queue_item(loaded, "smoke-q2", "up")
+        if moved[0].get("queue_id") != "smoke-q2":
+            raise AssertionError("move_queue_item up failed")
+        run = db.create_batch_queue_run(
+            case["id"],
+            items_processed=1,
+            items_completed=1,
+            items_warnings=0,
+            items_failed=0,
+            run_summary="Smoke batch run",
+            conn=conn,
+        )
+        if not run or not run.get("id"):
+            raise AssertionError("create_batch_queue_run failed")
+        runs = db.list_batch_queue_runs(case["id"], limit=5, conn=conn)
+        if not runs:
+            raise AssertionError("list_batch_queue_runs empty")
+        counts = db.batch_queue_item_counts(conn=conn)
+        if case["id"] not in counts:
+            raise AssertionError("batch_queue_item_counts missing case")
+        conn.execute("DELETE FROM batch_queue_items WHERE case_id = ?", (case["id"],))
+        conn.execute("DELETE FROM batch_queue_runs WHERE case_id = ?", (case["id"],))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _check_pivot_queue_helpers() -> None:
     db = __import__(
         "database.db_setup",
@@ -743,6 +940,16 @@ def main() -> int:
     run(
         "entity workspace helpers",
         lambda: _check_entity_helpers(),
+    )
+
+    run(
+        "batch queue helpers",
+        lambda: _check_batch_queue_helpers(),
+    )
+
+    run(
+        "batch queue persistence",
+        lambda: _check_batch_queue_persistence(),
     )
 
     run(

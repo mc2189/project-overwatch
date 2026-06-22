@@ -1,4 +1,4 @@
-# Project Overwatch v1.9
+# Project Overwatch v2.0
 
 Project Overwatch is a **local** Python/Streamlit dashboard for defensive security intelligence. It helps analysts organise investigations into **cases**, collect data with authorised **active** scans and **passive** lookups, interpret results as advisory **findings**, and export **reports** — all stored in a local SQLite database on your machine.
 
@@ -15,6 +15,7 @@ The sidebar provides case selection and main navigation:
 | **Run Operation** | Target entry, module cards, configuration, operation plan, launch |
 | **Findings** | Triage advisory findings |
 | **Entity Workspace** | Inspect entities, pivot to compatible modules, edit analyst notes |
+| **Batch Queue** | Queue passive follow-up modules for multiple entities; controlled batch runner |
 | **Relationships / Observations / Operations** | Investigation archive |
 | **Graph** | Entity relationship view; open neighbours in Entity Workspace |
 | **Report** | Generate and export case reports |
@@ -48,10 +49,27 @@ After collection populates entities, open **Entity Workspace** to pivot between 
    - **Email / username** → no implemented modules yet
 4. **Run compatible modules** from the workspace using the same executor path as Run Operation. Active modules still require the authorisation checkbox; passive modules do not.
 5. **Analyst fields** — edit entity notes, label, and confidence without deleting stored data.
-6. **Pivot queue** — persisted per case in the database; add entities from relationships, findings, or the Graph page; batch passive runs on queued items.
-7. From **Graph**, click a node or select a focus entity to see neighbours with **Open** / **Queue** actions, or **Open in Entity Workspace**.
+6. **Pivot queue** — persisted per case; stage entities from relationships, findings, or Graph; import into **Batch Queue**.
+7. **Batch Queue shortcuts** — **Passive → Batch Queue** or **Add compatible passive modules to Batch Queue**, then **Open Batch Queue**.
+8. From **Graph**, click a node or select a focus entity to see neighbours with **Open** / **Queue** actions.
 
 Entity notes appear in generated reports where entities are listed.
+
+### Batch Queue (v1.9)
+
+The **Batch Queue** page runs compatible follow-up modules for multiple entities in a controlled, visible way:
+
+1. **Select entities** (filter by type) and review compatible module suggestions.
+2. **Add passive modules for selection** — queues Domain Intelligence, Certificate & Subdomain Intelligence, and Website Metadata Review where compatible.
+3. **Duplicate protection** — the same entity/module pair cannot be queued twice while still queued.
+4. **Recent-run warning** — warns if the same module ran against that target within 24 hours.
+5. **Run passive queue** — one item at a time via the normal executor, with a configurable courtesy delay (default 1.5 s) between passive lookups.
+6. **Run selected queue items** — subset runs; **Nmap is never included** in passive batch runs and requires authorisation if manually queued.
+7. **Stop after current item**, **Clear completed items**, and per-item status/summary tracking.
+
+Results appear automatically in Operations, Observations, Findings, Relationships, Graph, and Reports.
+
+**v2.0 persistence:** queue items and run summaries are stored in the local database per case. Use **Move up** / **Move down** to reorder before running. Recent runs appear on the Batch Queue page and in generated reports.
 
 ### Module cards on Run Operation
 

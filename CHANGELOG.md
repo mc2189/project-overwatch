@@ -2,13 +2,29 @@
 
 All notable changes to Project Overwatch are documented here.
 
-## v1.9.0 — Persistent pivot queue and graph pivot links
+## v2.0.0 — Batch queue persistence and reporting
 
+- Batch queue items persisted in SQLite (`batch_queue_items`) — survives refresh and restarts
+- Queue item **reordering** (move up / down) via position field
+- Batch run history stored in `batch_queue_runs` with per-run summaries
+- Reports include a **Batch queue runs** section (full template)
+- **Multi-case summary** expander on Batch Queue page for queues in other cases
+- Session-state batch queue migrated to database on first load
+- Case backup export/import includes batch queue items
+
+## v1.9.0 — Batch Queue and controlled pivot runner
+
+- **Batch Queue** page: select entities, filter by type, queue compatible entity/module pairs, run passively in batch
+- Passive-first defaults: Domain Intelligence, Certificate & Subdomain Intelligence, Website Metadata Review
+- Nmap shown as active-only — never included in **Run passive queue**; authorisation required if manually queued
+- Queue items track status (queued → running → completed / warnings / blocked / error), summary, and timestamps
+- One item at a time via `execute_module`; failures do not stop the rest of the queue
+- Configurable courtesy delay (0–5 s) between passive external lookups
+- Duplicate entity/module pairs blocked; recent-operation warning when the same module ran recently
+- Entity Workspace wired to Batch Queue (add passive modules, open Batch Queue, import pivot queue entities)
 - Pivot queue persisted per case in SQLite (`pivot_queue_items` table)
-- Add to pivot queue from relationship rows, findings, graph neighbours, and focus entity
-- Graph node click selection focuses entity and lists neighbour actions (Open / Queue)
-- Case backup export/import includes pivot queue items
-- Fixed Entity Workspace crash when rendering relationships (`entity_lookup` undefined)
+- Graph node selection and neighbour queue/open actions
+- Fixed Entity Workspace relationship rendering crash (`entity_lookup`)
 
 ## v1.8.0 — Entity Workspace and pivot actions
 

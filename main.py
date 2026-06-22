@@ -13,6 +13,7 @@ from ui.archive_pages import (
     render_relationships_page,
     render_report_page,
 )
+from ui.batch_queue_page import render_batch_queue_page
 from ui.entity_workspace import render_entity_workspace_page
 from ui.findings_page import render_findings_page
 from ui.metrics import load_case_metrics
@@ -70,6 +71,8 @@ elif nav_page == "Entity Workspace":
         metrics,
         case_name=current_case.get("name") or "",
     )
+elif nav_page == "Batch Queue":
+    render_batch_queue_page(st.session_state.case_id, metrics)
 elif nav_page == "Relationships":
     render_relationships_page(st.session_state.case_id, metrics)
 elif nav_page == "Observations":
