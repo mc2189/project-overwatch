@@ -24,14 +24,15 @@ from modules.module_registry import (
     module_ui_label,
 )
 from utils.graph_view import entity_graph_figure
+from utils.nmap_options import SCRIPT_VULN
+from utils.nmap_ui import render_nmap_options
 
 if "case_id" not in st.session_state:
     st.session_state.case_id = get_or_create_default_case()["id"]
 
 modules_by_category = get_modules_by_category()
 selected_modules: dict[str, bool] = {}
-nmap_fast = False
-nmap_scripts = False
+nmap_options: dict = {}
 authorisation_confirmed = False
 
 nmap_runtime_ready = is_runtime_ready("infra_nmap")
@@ -103,19 +104,42 @@ def render_execution_result(result: dict) -> None:
     if result["status"] == "error" or not result["success"]:
         st.error(f"**{display_name}:** {result['summary']}")
         if result["raw_output"]:
-            st.code(result["raw_output"], language="bash")
+            with st.expander("Raw Nmap output", expanded=False):
+                st.code(result["raw_output"], language="bash")
         return
 
     st.write(f"🛰️ **{display_name}:** {result['summary']}")
 
-    if result["raw_output"]:
-        st.write("### 📜 Live Console: Nmap Output")
-        st.code(result["raw_output"], language="bash")
+    interpreter_findings = result.get("interpreter_findings") or []
+    if interpreter_findings:
+        st.write("### Analyst Interpretation")
+        st.caption("Advisory defensive analysis only. This is not a definitive vulnerability assessment.")
+        for finding in interpreter_findings:
+            severity = finding.get("severity", "info").upper()
+            st.markdown(f"**[{severity}] {finding.get('title', 'Finding')}** · confidence {finding.get('confidence', 0)}")
+            st.write(finding.get("explanation", ""))
+            actions = finding.get("suggested_actions") or []
+            if actions:
+                for action in actions:
+                    st.markdown(f"- {action}")
 
-    if result["findings"]:
-        st.error(f"🚨 {len(result['findings'])} Critical Problems Found!")
+    if result.get("findings"):
+        st.error(f"🚨 {len(result['findings'])} keyword matches in raw output")
         for finding in result["findings"]:
-            st.warning(f"**Finding:** {finding}")
+            st.warning(f"**Match:** {finding}")
+
+    if result.get("raw_output"):
+        with st.expander("Raw Nmap output", expanded=False):
+            st.code(result["raw_output"], language="bash")
+
+    if result.get("parsed_data") or result.get("selected_options"):
+        with st.expander("Structured scan data", expanded=False):
+            st.json(
+                {
+                    "selected_options": result.get("selected_options"),
+                    "parsed_data": result.get("parsed_data"),
+                }
+            )
 
 
 current_case = get_current_case()
@@ -215,8 +239,7 @@ with st.sidebar:
                     st.caption(f"{module.mode.title()} · {module.risk_level.title()} risk · planned")
 
                 if module.module_id == "infra_nmap" and selectable:
-                    nmap_fast = st.checkbox("Fast Scan (-F)", disabled=not selectable)
-                    nmap_scripts = st.checkbox("Vuln Scripts (--script vuln)", disabled=not selectable)
+                    nmap_options = render_nmap_options(selectable)
 
     selected_ids = selected_module_ids()
     auth_required = selection_requires_authorisation(selected_ids)
@@ -233,9 +256,9 @@ with st.sidebar:
             "Use only on systems you own, lab environments, or targets with written permission."
         )
 
-    if nmap_scripts and selected_modules.get("infra_nmap"):
+    if nmap_options.get("script_category") == SCRIPT_VULN and selected_modules.get("infra_nmap"):
         st.warning(
-            "**High-risk option selected:** `--script vuln` runs intrusive vulnerability checks. "
+            "**High-risk option selected:** `--script=vuln` runs intrusive vulnerability checks. "
             "Use only on systems you own or have explicit written permission to test. "
             "This option will not run without the authorisation confirmation above."
         )
@@ -311,10 +334,7 @@ if execute_btn:
 
                         options = {}
                         if module_id == "infra_nmap":
-                            options = {
-                                "nmap_fast": nmap_fast,
-                                "nmap_scripts": nmap_scripts,
-                            }
+                            options = {"nmap_options": nmap_options}
 
                         result = execute_module(
                             module_id,

@@ -1,49 +1,67 @@
+import os
 import subprocess
+import tempfile
+
 
 def parse_nmap_problems(scan_text):
     """Identifies 'Critical' findings in raw text output."""
     red_flags = ["vulnerable", "exploitable", "expired", "weak", "anonymous", "denial of service"]
     findings = []
-    
+
     if not scan_text:
         return findings
 
-    # Split text into lines and check for flags
-    for line in scan_text.split('\n'):
+    for line in scan_text.split("\n"):
         if any(flag in line.lower() for flag in red_flags):
             findings.append(line.strip())
-            
+
     return findings
+
 
 def run_nmap_scan(target_ip, flags):
     """
-    Executes Nmap using the subprocess module to allow for 
-    complex flag stacking (e.g., -sV --script vuln).
+    Execute Nmap with guided flags and capture human-readable and XML output.
+    Returns a dictionary with raw_output, xml_output, and findings.
     """
-    # Ensure flags is a list; if it's a string, we wrap it
     if isinstance(flags, str):
         flags = [flags]
-        
-    # Construct the command: ['nmap', '-sV', '192.168.1.1']
-    command = ["nmap"] + flags + [target_ip]
-    
+
+    xml_file = tempfile.NamedTemporaryFile(suffix=".xml", delete=False)
+    xml_path = xml_file.name
+    xml_file.close()
+
+    command = ["nmap"] + flags + ["-oX", xml_path, target_ip]
+
     try:
-        # Run the command
         process = subprocess.run(command, capture_output=True, text=True, check=True)
         scan_result = process.stdout
-        
-        # Run the automated problem identification
         problems = parse_nmap_problems(scan_result)
-        
-        return scan_result, problems
-    
-    except subprocess.CalledProcessError as e:
-        return f"Error executing Nmap: {e.stderr}", []
-    except FileNotFoundError:
-        return "Error: Nmap is not installed or not in your PATH.", []
 
-# Quick test if run directly
-if __name__ == "__main__":
-    # Test with a simple port scan
-    output, issues = run_nmap_scan("8.8.8.8", ["-p", "53"])
-    print(output)
+        xml_output = ""
+        try:
+            with open(xml_path, encoding="utf-8") as xml_handle:
+                xml_output = xml_handle.read()
+        except OSError:
+            xml_output = ""
+
+        return {
+            "raw_output": scan_result,
+            "xml_output": xml_output,
+            "findings": problems,
+        }
+
+    except subprocess.CalledProcessError as error:
+        return {
+            "raw_output": f"Error executing Nmap: {error.stderr}",
+            "xml_output": "",
+            "findings": [],
+        }
+    except FileNotFoundError:
+        return {
+            "raw_output": "Error: Nmap is not installed or not in your PATH.",
+            "xml_output": "",
+            "findings": [],
+        }
+    finally:
+        if os.path.exists(xml_path):
+            os.unlink(xml_path)

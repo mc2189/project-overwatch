@@ -15,11 +15,10 @@ from database.db_setup import (
     create_relationship,
 )
 from modules.module_registry import get_module, is_executable
-from utils.nmap_parser import (
-    build_service_entity_label,
-    build_service_entity_value,
-    parse_nmap_open_ports,
-)
+from utils.nmap_interpreter import interpret_nmap_results
+from utils.nmap_options import SCRIPT_VULN, build_nmap_flags, normalize_options
+from utils.nmap_parser import build_service_entity_label, build_service_entity_value
+from utils.nmap_xml_parser import parse_nmap_results
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 NMAP_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_nmap.py"
@@ -38,9 +37,12 @@ def make_result(
     raw_output: str = "",
     findings: list[str] | None = None,
     errors: list[str] | None = None,
+    parsed_data: dict[str, Any] | None = None,
+    interpreter_findings: list[dict[str, Any]] | None = None,
+    selected_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a standard execution result payload."""
-    return {
+    result: dict[str, Any] = {
         "module_id": module_id,
         "success": success,
         "status": status,
@@ -49,6 +51,13 @@ def make_result(
         "findings": findings or [],
         "errors": errors or [],
     }
+    if parsed_data is not None:
+        result["parsed_data"] = parsed_data
+    if interpreter_findings is not None:
+        result["interpreter_findings"] = interpreter_findings
+    if selected_options is not None:
+        result["selected_options"] = selected_options
+    return result
 
 
 def _load_nmap_handlers() -> None:
@@ -108,13 +117,11 @@ def _persist_nmap_services_and_relationships(
     case_id: int,
     source_entity_id: int,
     target: str,
-    raw_output: str,
+    parsed_ports: list[dict[str, Any]],
     module_id: str,
-) -> list[dict[str, Any]]:
-    """Create service entities and exposes_service relationships from Nmap output."""
-    open_ports = parse_nmap_open_ports(raw_output)
-
-    for port_info in open_ports:
+) -> None:
+    """Create service entities and exposes_service relationships from parsed ports."""
+    for port_info in parsed_ports:
         service_entity = create_or_get_entity(
             case_id,
             "service",
@@ -133,8 +140,6 @@ def _persist_nmap_services_and_relationships(
             confidence=80,
             conn=conn,
         )
-
-    return open_ports
 
 
 def _persist_investigation_records(
@@ -162,15 +167,20 @@ def _persist_investigation_records(
     if entity_id is None or result["status"] != "completed":
         return
 
-    open_ports = _persist_nmap_services_and_relationships(
-        conn,
-        case_id=case_id,
-        source_entity_id=entity_id,
-        target=target,
-        raw_output=result["raw_output"],
-        module_id=module_id,
-    )
+    parsed_data = result.get("parsed_data") or {}
+    parsed_ports = parsed_data.get("parsed_ports", [])
 
+    if parsed_ports:
+        _persist_nmap_services_and_relationships(
+            conn,
+            case_id=case_id,
+            source_entity_id=entity_id,
+            target=target,
+            parsed_ports=parsed_ports,
+            module_id=module_id,
+        )
+
+    selected_options = result.get("selected_options") or options.get("nmap_options", {})
     create_observation(
         case_id,
         entity_id,
@@ -185,11 +195,14 @@ def _persist_investigation_records(
                 "status": result["status"],
                 "findings_count": len(result["findings"]),
                 "findings": result["findings"],
-                "open_ports": open_ports,
-                "options": {
-                    "nmap_fast": bool(options.get("nmap_fast", False)),
-                    "nmap_scripts": bool(options.get("nmap_scripts", False)),
-                },
+                "nmap_profile": selected_options.get("profile"),
+                "selected_options": selected_options,
+                "parsed_ports": parsed_data.get("parsed_ports", []),
+                "parsed_services": parsed_data.get("parsed_services", []),
+                "os_matches": parsed_data.get("os_matches", []),
+                "script_results": parsed_data.get("script_results", []),
+                "interpreter_findings": result.get("interpreter_findings", []),
+                "parse_source": parsed_data.get("parse_source"),
             }
         ),
         raw_output=result["raw_output"],
@@ -218,26 +231,27 @@ def _execute_nmap(
         )
 
     run_nmap_scan, _parse_nmap_problems = _nmap_handlers
-    nmap_fast = bool(options.get("nmap_fast", False))
-    nmap_scripts = bool(options.get("nmap_scripts", False))
+    nmap_options = normalize_options(options.get("nmap_options", {}))
 
-    if nmap_scripts and not authorisation_confirmed:
+    if nmap_options.get("script_category") == SCRIPT_VULN and not authorisation_confirmed:
         return make_result(
             module_id,
             success=False,
             status="blocked",
             summary="Nmap vuln scripts require authorisation confirmation.",
             errors=["authorisation_required_for_vuln_scripts"],
+            selected_options=nmap_options,
         )
 
-    flags = ["-sV"]
-    if nmap_fast:
-        flags.append("-F")
-    if nmap_scripts:
-        flags.append("--script=vuln")
-
-    raw_output, findings = run_nmap_scan(target, flags)
+    flags = build_nmap_flags(nmap_options)
+    scan_data = run_nmap_scan(target, flags)
+    raw_output = scan_data.get("raw_output", "")
+    findings = scan_data.get("findings", [])
+    xml_output = scan_data.get("xml_output", "")
     is_error = raw_output.startswith("Error")
+
+    parsed_data = parse_nmap_results(raw_output, xml_output)
+    interpreter_findings = interpret_nmap_results(parsed_data, nmap_options)
 
     if is_error:
         result = make_result(
@@ -248,6 +262,9 @@ def _execute_nmap(
             raw_output=raw_output,
             findings=findings,
             errors=[raw_output],
+            parsed_data=parsed_data,
+            interpreter_findings=interpreter_findings,
+            selected_options=nmap_options,
         )
     else:
         result = make_result(
@@ -257,6 +274,9 @@ def _execute_nmap(
             summary=f"Nmap scan completed for {target}.",
             raw_output=raw_output,
             findings=findings,
+            parsed_data=parsed_data,
+            interpreter_findings=interpreter_findings,
+            selected_options=nmap_options,
         )
 
     if db_context is not None:
@@ -360,7 +380,7 @@ def execute_module(
             entity_id,
         )
 
-    # TODO(v0.6): Route additional implemented modules here.
+    # TODO(v0.7): Route additional implemented modules here.
     return make_result(
         module_id,
         success=False,

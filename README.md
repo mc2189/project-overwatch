@@ -1,6 +1,6 @@
 # Project Overwatch
 
-Defensive security intelligence dashboard built with Python and Streamlit. Project Overwatch v0.5 adds entity relationships, service discovery from Nmap, and a basic graph view on top of the investigation case model.
+Defensive security intelligence dashboard built with Python and Streamlit. Project Overwatch v0.6 adds guided Nmap scan profiles, XML parsing, compatibility rules, and an advisory result interpreter on top of the investigation case model.
 
 ## Requirements
 
@@ -123,7 +123,54 @@ When any **selected** module has `requires_authorisation=True`, the sidebar show
 
 **LAUNCH OPERATION** is blocked until this box is ticked. The executor performs the same check and returns `status: "blocked"` if authorisation is missing.
 
-Selecting Nmap **Vuln Scripts** (`--script vuln`) shows an additional high-risk warning. Vuln scripts also require the authorisation checkbox even if other checks pass.
+Selecting Nmap **Vuln Scripts** (`--script=vuln`) shows an additional high-risk warning. Vuln scripts also require the authorisation checkbox even if other checks pass.
+
+## Guided Nmap scan profiles
+
+When Nmap is enabled under **2. Infrastructure**, choose a guided profile:
+
+| Profile | Purpose |
+|---------|---------|
+| Quick check | Fast scan of common ports with open-only output |
+| Standard service scan | Default service/version detection (`-sV`) |
+| Detailed authorised scan | Service detection, OS detection, safe scripts, reasons |
+| Host discovery only | Ping/discovery only (`-sn`) with no port/script/version checks |
+| Custom guided scan | Individual options with compatibility rules |
+
+Each option includes a tooltip/description in the UI. Project Overwatch does **not** accept arbitrary raw Nmap command input.
+
+### Compatibility rules
+
+- **Host discovery only** disables port scanning, version detection, OS detection, and all script options.
+- **Fast scan** and **custom ports** cannot be active together.
+- **Top ports** and **custom ports** cannot be active together.
+- Only **one script category** may be selected: None, Safe, Default, Discovery, or Vuln.
+- Only **one timing profile** may be selected: Polite, Normal, or Aggressive.
+- **Vuln scripts** remain high-warning and require authorisation.
+- **OS detection**, **traceroute**, and **script scanning** require authorisation.
+
+**OS detection (`-O`) also requires elevated (root) privileges** on macOS and Linux. Project Overwatch does not automatically request `sudo`. If the Streamlit session is not running as root, OS detection is disabled or skipped and a service/version scan (`-sV`) is used instead. Service/version detection is the recommended default for most authorised assessments.
+
+No stealth, evasion, spoofing, decoy, SYN-only, UDP, or proxy-bypass options are exposed in v0.6.
+
+### XML parsing and structured results
+
+Nmap runs capture both human-readable output and XML (`-oX` via a temporary file). XML is preferred because it provides structured port, service, OS, and script data. If XML parsing fails, Overwatch falls back to the existing text parser.
+
+Observations store:
+
+- `raw_output` — human-readable Nmap text
+- `data_json` — profile, selected options, parsed ports/services, OS matches, script results, interpreter findings
+
+### Analyst interpretation
+
+After a scan, Overwatch shows an **Analyst Interpretation** section with advisory defensive findings such as:
+
+- Remote desktop, web, SMB, SSH, FTP/Telnet exposure review notes
+- OS fingerprint caveats
+- NSE script output treated as potential findings requiring validation
+
+The interpreter is **advisory only**. An open port does not automatically mean a vulnerability, missing script results do not mean a host is safe, and NSE vuln output is not proof of compromise.
 
 ## Investigation data model
 
@@ -134,7 +181,7 @@ Project Overwatch v0.4 stores investigation data in a structured model alongside
 | `cases` | Investigation containers (name, description, status) |
 | `entities` | Things under investigation: IPs, domains, emails, usernames, companies, documents, etc. |
 | `observations` | Module results linked to a case and entity |
-| `relationships` | Links between entities (reserved for future graph/network analysis) |
+| `relationships` | Links between entities such as `exposes_service` |
 | `operations` | Audit log of module runs (module, target, status, authorisation) |
 
 ### Cases
@@ -163,7 +210,7 @@ An **observation** is a structured module result. When Nmap completes, the execu
 - `observation_type`: "network_scan"
 - `summary`: executor result summary
 - `raw_output`: full Nmap text output
-- `data_json`: structured metadata including `open_ports`, findings, and scan options
+- `data_json`: structured metadata including parsed ports, services, OS matches, script results, interpreter findings, and selected scan options
 
 Legacy `recon_data` rows are still written for backwards compatibility.
 
@@ -209,7 +256,11 @@ modules/
   2_infrastructure/
     infra_nmap.py                Nmap subprocess wrapper
 utils/
-  nmap_parser.py               Parse open ports from Nmap output
+  nmap_options.py              Scan profiles, compatibility rules, flag builder
+  nmap_ui.py                   Streamlit Nmap option UI
+  nmap_parser.py               Text fallback parser for open ports
+  nmap_xml_parser.py           XML parser for structured Nmap results
+  nmap_interpreter.py          Advisory defensive result interpreter
   graph_view.py                NetworkX + Plotly graph rendering
 requirements.txt                 Python dependencies
 ```
