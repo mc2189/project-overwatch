@@ -4,23 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from utils.finding_interpreter import FINDING_KIND_SOURCE_NOTICE, make_finding
+
 LARGE_SUBDOMAIN_THRESHOLD = 25
-
-
-def _finding(
-    title: str,
-    severity: str,
-    confidence: int,
-    explanation: str,
-    suggested_actions: list[str],
-) -> dict[str, Any]:
-    return {
-        "title": title,
-        "severity": severity,
-        "confidence": confidence,
-        "explanation": explanation,
-        "suggested_actions": suggested_actions,
-    }
 
 
 def interpret_cert_subdomain_results(parsed_data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -33,18 +19,29 @@ def interpret_cert_subdomain_results(parsed_data: dict[str, Any]) -> list[dict[s
     source = parsed_data.get("source") or "certificate transparency"
 
     if warning and not subdomains:
+        timeout = "timeout" in warning.lower() or "timed out" in warning.lower()
+        title = "Certificate transparency source unavailable"
+        explanation = (
+            f"The public certificate transparency source ({source}) did not return names for {domain} in this run. "
+            f"{warning} No certificate names were returned in this run — this does not prove the domain has no related names."
+        )
+        if timeout:
+            explanation = (
+                f"The public certificate transparency source ({source}) timed out for {domain}. "
+                "No certificate names were returned in this run — this does not prove the domain has no related names."
+            )
         findings.append(
-            _finding(
-                "Certificate data unavailable",
-                "medium",
-                80,
-                f"Public certificate transparency data could not be collected for {domain}. {warning} "
-                "No subdomain names were derived from certificates in this run.",
+            make_finding(
+                title,
+                "info",
+                75,
+                explanation,
                 [
-                    "Retry later if the public source was rate limited or temporarily unavailable.",
+                    "Retry later if crt.sh or the public source was slow or temporarily unavailable.",
                     "Consider passive Domain Intelligence or manual review if certificate data is still needed.",
-                    "Document that certificate-derived leads were not available for this target.",
+                    "Document that certificate-derived leads were not available for this run.",
                 ],
+                finding_kind=FINDING_KIND_SOURCE_NOTICE,
             )
         )
         return findings
@@ -54,7 +51,7 @@ def interpret_cert_subdomain_results(parsed_data: dict[str, Any]) -> list[dict[s
         if len(subdomains) > 8:
             sample += ", ..."
         findings.append(
-            _finding(
+            make_finding(
                 "Subdomains discovered from public certificates",
                 "info",
                 85,
@@ -71,7 +68,7 @@ def interpret_cert_subdomain_results(parsed_data: dict[str, Any]) -> list[dict[s
 
     if len(subdomains) >= LARGE_SUBDOMAIN_THRESHOLD:
         findings.append(
-            _finding(
+            make_finding(
                 "Large number of public names observed",
                 "low",
                 80,
@@ -85,9 +82,9 @@ def interpret_cert_subdomain_results(parsed_data: dict[str, Any]) -> list[dict[s
             )
         )
 
-    if wildcard_observed:
+    if wildcard_observed and subdomains:
         findings.append(
-            _finding(
+            make_finding(
                 "Wildcard certificate names observed",
                 "info",
                 75,

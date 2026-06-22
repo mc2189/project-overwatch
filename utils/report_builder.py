@@ -25,6 +25,7 @@ from database.db_setup import (
     normalize_finding_status,
 )
 from modules.module_registry import get_module
+from utils.finding_interpreter import is_source_notice
 from utils.report_redaction import (
     RedactionOption,
     apply_redactions,
@@ -47,6 +48,29 @@ class ReportOptions:
     branding: ReportBranding | None = None
     custom_redaction_terms: list[str] = field(default_factory=list)
     custom_redaction_regex: str = ""
+
+
+def _lookup_notices_from_observations(observations: list[dict[str, Any]]) -> list[str]:
+    notices: list[str] = []
+    seen: set[str] = set()
+    for observation in observations:
+        try:
+            payload = json.loads(observation.get("data_json") or "{}")
+        except json.JSONDecodeError:
+            continue
+        for warning in payload.get("warnings") or []:
+            cleaned = str(warning).strip()
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                notices.append(cleaned)
+        for finding in payload.get("interpreter_findings") or []:
+            if not is_source_notice(finding):
+                continue
+            text = (finding.get("explanation") or finding.get("title") or "").strip()
+            if text and text not in seen:
+                seen.add(text)
+                notices.append(text)
+    return notices
 
 
 def _parse_suggested_actions(finding: dict[str, Any]) -> list[str]:
@@ -366,6 +390,18 @@ def build_case_report(
                     lines.append(f"- Summary: {observation.get('summary') or '_No summary._'}")
                     lines.append("")
             lines.append("")
+
+    lookup_notices = _lookup_notices_from_observations(observations)
+    if lookup_notices:
+        lines.extend(["## Lookup and source notices", ""])
+        lines.append(
+            "_External lookup limits and collection warnings. Informational only — "
+            "they do not by themselves indicate target risk._"
+        )
+        lines.append("")
+        for notice in lookup_notices:
+            lines.append(f"- {notice}")
+        lines.append("")
 
     lines.extend(["## Findings", ""])
     if not report_findings:

@@ -7,6 +7,10 @@ import streamlit as st
 
 from modules.module_registry import get_module
 from ui.constants import SEVERITY_RANK
+from utils.display_format import display_or_unavailable, format_wayback_timestamp
+from utils.finding_interpreter import risk_findings, source_notice_findings
+from utils.result_status import status_label
+from utils.result_summary import summarize_run_results
 
 
 def _highest_severity(findings: list[dict]) -> str | None:
@@ -21,17 +25,31 @@ def _highest_severity(findings: list[dict]) -> str | None:
     return best
 
 
+def _render_warnings_block(result: dict) -> None:
+    warnings = list(result.get("warnings") or [])
+    module_notes = [note for note in (result.get("findings") or []) if note not in warnings]
+    if warnings:
+        st.markdown("**Warnings**")
+        for warning in warnings:
+            st.warning(warning)
+    if module_notes and not warnings:
+        st.markdown("**Module notes**")
+        for note in module_notes:
+            st.caption(note)
+
+
 def render_result_summary_tab(result: dict) -> None:
     module = get_module(result["module_id"])
     display_name = module.display_name if module else result["module_id"]
     st.markdown(f"**Module:** {display_name}")
-    st.markdown(f"**Status:** {result.get('status', 'unknown')}")
+    st.markdown(f"**Status:** {status_label(result.get('status'))}")
     st.write(result.get("summary", ""))
+    _render_warnings_block(result)
 
     parsed_data = result.get("parsed_data") or {}
     if result["module_id"] == "infra_cert_subdomain" and parsed_data:
         subdomains = parsed_data.get("subdomains") or []
-        st.write(f"**Subdomains discovered:** {len(subdomains)}")
+        st.write(f"**Certificate names returned:** {len(subdomains)}")
         if parsed_data.get("source"):
             st.caption(f"Source: {parsed_data.get('source')}")
         if parsed_data.get("warning"):
@@ -55,11 +73,18 @@ def render_result_summary_tab(result: dict) -> None:
 
         wayback = parsed_data.get("wayback", {})
         if wayback and wayback.get("available"):
-            st.markdown("**Wayback Machine**")
-            st.write(
-                f"Snapshots available · first={wayback.get('first_snapshot')} · "
-                f"last={wayback.get('last_snapshot')}"
+            first = display_or_unavailable(
+                wayback.get("first_snapshot_display")
+                or format_wayback_timestamp(wayback.get("first_snapshot"))
             )
+            last = display_or_unavailable(
+                wayback.get("last_snapshot_display")
+                or format_wayback_timestamp(wayback.get("last_snapshot"))
+            )
+            st.markdown("**Wayback Machine**")
+            st.write(f"Snapshots available · first={first} · last={last}")
+        elif wayback.get("error"):
+            st.caption(f"Wayback lookup: {wayback['error']}")
 
     if result["module_id"] == "infra_website_metadata" and parsed_data:
         homepage = parsed_data.get("homepage") or {}
@@ -84,31 +109,48 @@ def render_result_summary_tab(result: dict) -> None:
 
 def render_result_interpretation_tab(result: dict) -> None:
     interpreter_findings = result.get("interpreter_findings") or []
-    if not interpreter_findings:
+    risk = risk_findings(interpreter_findings)
+    notices = source_notice_findings(interpreter_findings)
+    if not risk and not notices:
         st.caption("No analyst interpretation findings for this module run.")
         return
     st.caption("Advisory defensive analysis only. This is not a definitive vulnerability assessment.")
-    for finding in interpreter_findings:
-        severity = finding.get("severity", "info").upper()
-        st.markdown(f"**[{severity}] {finding.get('title', 'Finding')}** · confidence {finding.get('confidence', 0)}")
-        st.write(finding.get("explanation", ""))
-        for action in finding.get("suggested_actions") or []:
-            st.markdown(f"- {action}")
+    if risk:
+        st.markdown("**Review findings**")
+        for finding in risk:
+            severity = finding.get("severity", "info").upper()
+            st.markdown(
+                f"**[{severity}] {finding.get('title', 'Finding')}** · "
+                f"confidence {finding.get('confidence', 0)}"
+            )
+            st.write(finding.get("explanation", ""))
+            for action in finding.get("suggested_actions") or []:
+                st.markdown(f"- {action}")
+    if notices:
+        st.markdown("**Source and lookup notices**")
+        st.caption("External lookup limits — informational only, not target risk findings.")
+        for finding in notices:
+            st.markdown(f"**{finding.get('title', 'Notice')}**")
+            st.write(finding.get("explanation", ""))
 
 
 def render_result_module_output_tab(result: dict) -> None:
-    module_notes = result.get("findings") or []
-    if not module_notes:
+    warnings = result.get("warnings") or []
+    module_notes = [note for note in (result.get("findings") or []) if note not in warnings]
+    if module_notes:
+        st.markdown("**Module notes**")
+        for note in module_notes:
+            st.write(f"- {note}")
+    elif not warnings:
         st.caption("No additional module notes.")
-        return
-    for note in module_notes:
-        st.write(f"- {note}")
 
     parsed_data = result.get("parsed_data") or {}
     if result["module_id"] == "infra_cert_subdomain":
         subdomains = parsed_data.get("subdomains") or []
         if subdomains:
             st.dataframe(pd.DataFrame({"subdomain": subdomains}), width="stretch", hide_index=True)
+        else:
+            st.caption("No certificate names were returned in this run.")
         certificates = parsed_data.get("certificates") or []
         if certificates:
             st.markdown("**Certificate references (sample)**")
@@ -171,6 +213,7 @@ def render_result_structured_tab(result: dict) -> None:
     payload = {
         "selected_options": result.get("selected_options"),
         "parsed_data": result.get("parsed_data"),
+        "warnings": result.get("warnings"),
         "errors": result.get("errors"),
     }
     if any(payload.values()):
@@ -195,23 +238,43 @@ def render_result_detail_tabs(result: dict) -> None:
         render_result_structured_tab(result)
 
 
+def _render_combined_summary(results: list[dict]) -> None:
+    summary = summarize_run_results(results)
+    st.markdown("**Combined run summary**")
+    cols = st.columns(4)
+    cols[0].metric("Modules run", summary["modules_run"])
+    cols[1].metric("Completed", summary["completed"])
+    cols[2].metric("With warnings", summary["completed_with_warnings"] + summary["partial"])
+    cols[3].metric("Failed", summary["failed"])
+    st.caption(
+        f"Warnings: {summary['warnings_count']} · "
+        f"Review findings: {summary['total_findings']} · "
+        f"Highest severity: {summary['highest_severity'] or 'none'}"
+    )
+    if summary["partial"]:
+        st.caption(f"Partial results: {summary['partial']}")
+
+
 def render_latest_results(results: list[dict], *, target: str) -> None:
     if not results:
         return
 
     st.subheader("Latest Results")
     st.caption(f"Target: `{target}`")
+    _render_combined_summary(results)
 
     for index, result in enumerate(results):
         module = get_module(result["module_id"])
         display_name = module.display_name if module else result["module_id"]
         interpreter_findings = result.get("interpreter_findings") or []
-        highest = _highest_severity(interpreter_findings)
+        risk = risk_findings(interpreter_findings)
+        highest = _highest_severity(risk)
+        run_status = result.get("status", "unknown")
 
-        if result["status"] == "blocked":
+        if run_status == "blocked":
             st.warning(f"**{display_name}** — blocked · {result.get('summary', '')}")
             continue
-        if result["status"] == "error" or not result.get("success"):
+        if run_status == "error" or not result.get("success"):
             st.error(f"**{display_name}** — error · {result.get('summary', '')}")
             with st.expander(f"{display_name} details", expanded=False):
                 render_result_detail_tabs(result)
@@ -219,9 +282,12 @@ def render_latest_results(results: list[dict], *, target: str) -> None:
 
         summary_bits = [
             f"**{display_name}**",
-            f"status: {result.get('status', 'completed')}",
-            f"findings: {len(interpreter_findings)}",
+            f"status: {status_label(run_status)}",
+            f"findings: {len(risk)}",
         ]
+        warning_count = len(result.get("warnings") or [])
+        if warning_count:
+            summary_bits.append(f"warnings: {warning_count}")
         if highest:
             summary_bits.append(f"highest severity: {highest}")
         st.markdown(" · ".join(summary_bits))

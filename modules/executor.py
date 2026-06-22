@@ -23,7 +23,11 @@ from utils.target_detection import get_target_type
 from utils.nmap_options import SCRIPT_VULN, build_nmap_flags, normalize_options
 from utils.nmap_parser import build_service_entity_label, build_service_entity_value
 from utils.nmap_xml_parser import parse_nmap_results
-from utils.privileges import detect_nmap_privilege_issue
+from utils.result_status import (
+    STATUS_COMPLETED,
+    STATUS_COMPLETED_WITH_WARNINGS,
+    should_persist_observation,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 NMAP_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_nmap.py"
@@ -53,6 +57,7 @@ def make_result(
     summary: str,
     raw_output: str = "",
     findings: list[str] | None = None,
+    warnings: list[str] | None = None,
     errors: list[str] | None = None,
     parsed_data: dict[str, Any] | None = None,
     interpreter_findings: list[dict[str, Any]] | None = None,
@@ -66,6 +71,7 @@ def make_result(
         "summary": summary,
         "raw_output": raw_output,
         "findings": findings or [],
+        "warnings": warnings or [],
         "errors": errors or [],
     }
     if parsed_data is not None:
@@ -301,7 +307,7 @@ def _persist_investigation_records(
         conn=conn,
     )
 
-    if entity_id is None or result["status"] != "completed":
+    if entity_id is None or not should_persist_observation(result["status"]):
         return
 
     parsed_data = result.get("parsed_data") or {}
@@ -339,6 +345,7 @@ def _persist_investigation_records(
                 "os_matches": parsed_data.get("os_matches", []),
                 "script_results": parsed_data.get("script_results", []),
                 "interpreter_findings": result.get("interpreter_findings", []),
+                "warnings": result.get("warnings", []),
                 "parse_source": parsed_data.get("parse_source"),
             }
         ),
@@ -383,7 +390,7 @@ def _persist_domain_intel_records(
         conn=conn,
     )
 
-    if result["status"] != "completed":
+    if not should_persist_observation(result["status"]):
         return
 
     parsed_data = result.get("parsed_data") or {}
@@ -463,6 +470,7 @@ def _persist_domain_intel_records(
                 "status": result["status"],
                 "findings": result.get("findings", []),
                 "interpreter_findings": result.get("interpreter_findings", []),
+                "warnings": result.get("warnings", []),
                 "domain": parsed_data.get("domain"),
                 "input": parsed_data.get("input"),
                 "dns": parsed_data.get("dns", {}),
@@ -513,7 +521,7 @@ def _persist_cert_subdomain_records(
         conn=conn,
     )
 
-    if result["status"] != "completed":
+    if not should_persist_observation(result["status"]):
         return
 
     parsed_data = result.get("parsed_data") or {}
@@ -555,6 +563,7 @@ def _persist_cert_subdomain_records(
                 "status": result["status"],
                 "findings": result.get("findings", []),
                 "interpreter_findings": result.get("interpreter_findings", []),
+                "warnings": result.get("warnings", []),
                 "original_target": parsed_data.get("original_target"),
                 "domain": domain,
                 "subdomains": parsed_data.get("subdomains", []),
@@ -606,7 +615,7 @@ def _persist_website_metadata_records(
         conn=conn,
     )
 
-    if result["status"] != "completed":
+    if not should_persist_observation(result["status"]):
         return
 
     parsed_data = result.get("parsed_data") or {}
@@ -671,6 +680,7 @@ def _persist_website_metadata_records(
                 "status": result["status"],
                 "findings": result.get("findings", []),
                 "interpreter_findings": result.get("interpreter_findings", []),
+                "warnings": result.get("warnings", []),
                 "original_target": parsed_data.get("original_target"),
                 "domain": domain,
                 "homepage": homepage,
@@ -823,13 +833,24 @@ def _execute_nmap(
             selected_options=nmap_options,
         )
     else:
+        nmap_warnings: list[str] = []
+        if nmap_options.get("os_detection_runtime_failed"):
+            nmap_warnings.append("OS detection failed at runtime and was not included in the final result.")
+        elif nmap_options.get("os_detection_skipped"):
+            nmap_warnings.append("OS detection was skipped because elevated privileges were not available.")
+        if nmap_options.get("traceroute_runtime_failed"):
+            nmap_warnings.append("Traceroute failed at runtime and was not included in the final result.")
+        elif nmap_options.get("traceroute_skipped"):
+            nmap_warnings.append("Traceroute was skipped because elevated privileges were not available.")
+        nmap_status = STATUS_COMPLETED_WITH_WARNINGS if nmap_warnings else STATUS_COMPLETED
         result = make_result(
             module_id,
             success=True,
-            status="completed",
+            status=nmap_status,
             summary=_build_nmap_summary(target, nmap_options),
             raw_output=raw_output,
             findings=findings,
+            warnings=nmap_warnings,
             parsed_data=parsed_data,
             interpreter_findings=interpreter_findings,
             selected_options=nmap_options,
@@ -918,13 +939,16 @@ def _execute_domain_intel(
     connectivity_note = _domain_intel_connectivity_note(parsed_data)
     if connectivity_note:
         summary += f" {connectivity_note}"
+    warnings = list(intel_data.get("warnings") or [])
+    status = intel_data.get("status") or STATUS_COMPLETED
     result = make_result(
         module_id,
         success=True,
-        status="completed",
+        status=status,
         summary=summary,
         raw_output=intel_data.get("raw_output", ""),
         findings=intel_data.get("findings", []),
+        warnings=warnings,
         parsed_data=parsed_data,
         interpreter_findings=interpreter_findings,
     )
@@ -997,6 +1021,7 @@ def _execute_cert_subdomain(
         summary=intel_data.get("summary", f"Certificate intelligence collected for {domain}."),
         raw_output=intel_data.get("raw_output", ""),
         findings=intel_data.get("findings", []),
+        warnings=intel_data.get("warnings", []),
         parsed_data=parsed_data,
         interpreter_findings=interpreter_findings,
     )
@@ -1069,6 +1094,7 @@ def _execute_website_metadata(
         summary=intel_data.get("summary", f"Website metadata reviewed for {domain}."),
         raw_output=intel_data.get("raw_output", ""),
         findings=intel_data.get("findings", []),
+        warnings=intel_data.get("warnings", []),
         parsed_data=parsed_data,
         interpreter_findings=interpreter_findings,
     )

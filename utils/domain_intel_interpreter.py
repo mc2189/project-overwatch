@@ -5,33 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-
-def _finding(
-    title: str,
-    severity: str,
-    confidence: int,
-    explanation: str,
-    suggested_actions: list[str],
-) -> dict[str, Any]:
-    return {
-        "title": title,
-        "severity": severity,
-        "confidence": confidence,
-        "explanation": explanation,
-        "suggested_actions": suggested_actions,
-    }
-
-
-def _parse_cert_expiry(not_after: str | None) -> datetime | None:
-    if not not_after:
-        return None
-    try:
-        parsed = datetime.fromisoformat(not_after.replace("Z", "+00:00"))
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed
-    except ValueError:
-        return None
+from utils.display_format import display_or_unavailable, format_wayback_timestamp
+from utils.finding_interpreter import FINDING_KIND_SOURCE_NOTICE, make_finding
 
 
 def interpret_domain_intel_results(parsed_data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -48,7 +23,7 @@ def interpret_domain_intel_results(parsed_data: dict[str, Any]) -> list[dict[str
     aaaa_records = dns_records.get("AAAA", [])
     if not a_records and not aaaa_records:
         findings.append(
-            _finding(
+            make_finding(
                 "No A or AAAA records observed",
                 "medium",
                 85,
@@ -65,7 +40,7 @@ def interpret_domain_intel_results(parsed_data: dict[str, Any]) -> list[dict[str
     mx_records = [record for record in dns_records.get("MX", []) if str(record).strip()]
     if mx_records:
         findings.append(
-            _finding(
+            make_finding(
                 "MX records found",
                 "info",
                 90,
@@ -81,7 +56,7 @@ def interpret_domain_intel_results(parsed_data: dict[str, Any]) -> list[dict[str
     ns_records = [record for record in dns_records.get("NS", []) if str(record).strip()]
     if ns_records:
         findings.append(
-            _finding(
+            make_finding(
                 "Nameserver records found",
                 "info",
                 88,
@@ -98,7 +73,7 @@ def interpret_domain_intel_results(parsed_data: dict[str, Any]) -> list[dict[str
     if not https_info.get("reachable"):
         error_detail = https_info.get("error") or "connection failed"
         findings.append(
-            _finding(
+            make_finding(
                 "HTTPS unavailable or failed",
                 "medium",
                 80,
@@ -116,7 +91,7 @@ def interpret_domain_intel_results(parsed_data: dict[str, Any]) -> list[dict[str
     if missing_headers and https_info.get("reachable"):
         header_list = ", ".join(missing_headers)
         findings.append(
-            _finding(
+            make_finding(
                 "Common security headers not observed",
                 "low",
                 75,
@@ -136,7 +111,7 @@ def interpret_domain_intel_results(parsed_data: dict[str, Any]) -> list[dict[str
             days_remaining = (expiry - datetime.now(timezone.utc)).days
             if days_remaining <= 30:
                 findings.append(
-                    _finding(
+                    make_finding(
                         "TLS certificate expiry approaching",
                         "medium" if days_remaining <= 14 else "low",
                         92,
@@ -152,7 +127,7 @@ def interpret_domain_intel_results(parsed_data: dict[str, Any]) -> list[dict[str
     elif https_info.get("reachable"):
         tls_error = tls.get("error") or "certificate details unavailable"
         findings.append(
-            _finding(
+            make_finding(
                 "TLS certificate details unavailable",
                 "low",
                 70,
@@ -166,14 +141,19 @@ def interpret_domain_intel_results(parsed_data: dict[str, Any]) -> list[dict[str
         )
 
     if wayback.get("available"):
+        first = wayback.get("first_snapshot_display") or format_wayback_timestamp(wayback.get("first_snapshot"))
+        last = wayback.get("last_snapshot_display") or format_wayback_timestamp(wayback.get("last_snapshot"))
+        snapshot_text = f"Internet Archive Wayback Machine snapshots are available for {domain}."
+        if first:
+            snapshot_text += f" First snapshot: {first}."
+        if last:
+            snapshot_text += f" Last snapshot: {last}."
         findings.append(
-            _finding(
+            make_finding(
                 "Wayback snapshots available",
                 "info",
                 85,
-                f"Internet Archive Wayback Machine snapshots are available for {domain}. "
-                f"First snapshot: {wayback.get('first_snapshot') or 'unknown'}; "
-                f"last snapshot: {wayback.get('last_snapshot') or 'unknown'}.",
+                snapshot_text,
                 [
                     "Review historical snapshots for exposed old content or retired subpaths.",
                     "Compare archived content with current public-facing pages.",
@@ -181,5 +161,32 @@ def interpret_domain_intel_results(parsed_data: dict[str, Any]) -> list[dict[str
                 ],
             )
         )
+    elif wayback.get("error"):
+        findings.append(
+            make_finding(
+                "Wayback lookup unavailable",
+                "info",
+                70,
+                f"Wayback Machine data could not be retrieved for {domain}: {wayback['error']}. "
+                "This reflects an external lookup limitation and does not indicate a target risk.",
+                [
+                    "Retry later if historical snapshot data is still needed.",
+                    "Use other passive sources for historical context if Wayback remains unavailable.",
+                ],
+                finding_kind=FINDING_KIND_SOURCE_NOTICE,
+            )
+        )
 
     return findings
+
+
+def _parse_cert_expiry(not_after: str | None) -> datetime | None:
+    if not not_after:
+        return None
+    try:
+        parsed = datetime.fromisoformat(not_after.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    except ValueError:
+        return None

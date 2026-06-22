@@ -462,6 +462,112 @@ def _check_website_metadata_module() -> None:
         raise AssertionError("executor cannot load infra_website_metadata backend")
 
 
+def _check_result_quality() -> None:
+    result_status = __import__(
+        "utils.result_status",
+        fromlist=[
+            "STATUS_COMPLETED_WITH_WARNINGS",
+            "resolve_collection_status",
+            "should_persist_observation",
+        ],
+    )
+    display = __import__(
+        "utils.display_format",
+        fromlist=["format_wayback_timestamp", "display_or_unavailable"],
+    )
+    cert_interp = __import__(
+        "utils.cert_subdomain_interpreter",
+        fromlist=["interpret_cert_subdomain_results"],
+    )
+    domain_interp = __import__(
+        "utils.domain_intel_interpreter",
+        fromlist=["interpret_domain_intel_results"],
+    )
+    website_interp = __import__(
+        "utils.website_metadata_interpreter",
+        fromlist=["interpret_website_metadata_results"],
+    )
+    finding_interp = __import__(
+        "utils.finding_interpreter",
+        fromlist=["is_source_notice", "risk_findings"],
+    )
+    summary_mod = __import__(
+        "utils.result_summary",
+        fromlist=["summarize_run_results"],
+    )
+
+    timeout_findings = cert_interp.interpret_cert_subdomain_results(
+        {
+            "domain": "example.com",
+            "subdomains": [],
+            "warning": "Certificate transparency lookup timed out. crt.sh may be slow or unavailable.",
+            "source": "crt.sh",
+        }
+    )
+    if not timeout_findings or timeout_findings[0]["severity"] != "info":
+        raise AssertionError("crt.sh timeout should be info severity")
+    if not finding_interp.is_source_notice(timeout_findings[0]):
+        raise AssertionError("crt.sh timeout should be a source notice")
+    if "no related names" not in timeout_findings[0]["explanation"].lower():
+        raise AssertionError("timeout wording should not imply no subdomains exist")
+
+    empty_mx = domain_interp.interpret_domain_intel_results(
+        {
+            "domain": "example.com",
+            "dns": {"MX": [], "A": ["93.184.216.34"]},
+            "http": {"https": {"reachable": True}},
+            "security_headers": {"https": {}},
+            "tls": {},
+            "wayback": {},
+        }
+    )
+    if any(finding.get("title") == "MX records found" for finding in empty_mx):
+        raise AssertionError("empty MX should not create MX-found finding")
+
+    empty_subdomains = cert_interp.interpret_cert_subdomain_results(
+        {"domain": "example.com", "subdomains": [], "source": "crt.sh"}
+    )
+    if any("discovered" in finding.get("title", "").lower() for finding in empty_subdomains):
+        raise AssertionError("empty subdomain list should not create discovered finding")
+
+    no_sitemap = website_interp.interpret_website_metadata_results(
+        {
+            "domain": "example.com",
+            "homepage": {"page_title": "Example", "reachable": True},
+            "robots_txt": {"available": False},
+            "sitemap_hints": {"reachable_count": 0, "entries": []},
+        }
+    )
+    if any("sitemap hints discovered" in finding.get("title", "").lower() for finding in no_sitemap):
+        raise AssertionError("empty sitemap hints should not create sitemap-found finding")
+
+    wayback_fmt = display.format_wayback_timestamp("19990101000000")
+    if not wayback_fmt or "1999" not in wayback_fmt:
+        raise AssertionError("wayback timestamp formatting failed")
+    if display.display_or_unavailable(None) != "not available":
+        raise AssertionError("display_or_unavailable failed for None")
+
+    status = result_status.resolve_collection_status(warnings=["timeout"], has_core_data=False)
+    if status not in {"partial", "completed_with_warnings"}:
+        raise AssertionError("expected partial or completed_with_warnings for warning-only collection")
+    if not result_status.should_persist_observation(result_status.STATUS_COMPLETED_WITH_WARNINGS):
+        raise AssertionError("completed_with_warnings should persist observations")
+
+    run_summary = summary_mod.summarize_run_results(
+        [
+            {
+                "module_id": "infra_cert_subdomain",
+                "status": result_status.STATUS_COMPLETED_WITH_WARNINGS,
+                "success": True,
+                "warnings": ["timed out"],
+                "interpreter_findings": timeout_findings,
+            }
+        ]
+    )
+    if run_summary["total_findings"] != 0:
+        raise AssertionError("source notices should not count as review findings in combined summary")
+
+
 def main() -> int:
     print(f"Project Overwatch smoke check (root: {PROJECT_ROOT})")
     errors = 0
@@ -511,6 +617,11 @@ def main() -> int:
     run(
         "run modes",
         lambda: _check_run_modes(),
+    )
+
+    run(
+        "result quality",
+        lambda: _check_result_quality(),
     )
 
     run(

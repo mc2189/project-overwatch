@@ -6,6 +6,7 @@ import sqlite3
 from typing import Any
 
 from database.db_setup import close_superseded_findings, upsert_finding
+from utils.finding_interpreter import risk_findings
 
 
 def sync_module_findings(
@@ -21,7 +22,7 @@ def sync_module_findings(
     Persist module findings: close superseded open/reviewed items, then upsert current set.
     Returns the stored finding rows.
     """
-    active_titles = [finding.get("title", "Finding") for finding in interpreter_findings]
+    active_titles = [finding.get("title", "Finding") for finding in risk_findings(interpreter_findings)]
     close_superseded_findings(
         case_id,
         entity_id,
@@ -31,7 +32,7 @@ def sync_module_findings(
     )
 
     stored: list[dict[str, Any]] = []
-    for finding in interpreter_findings:
+    for finding in risk_findings(interpreter_findings):
         stored.append(
             upsert_finding(
                 case_id,

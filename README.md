@@ -1,4 +1,4 @@
-# Project Overwatch v1.6
+# Project Overwatch v1.7
 
 Project Overwatch is a **local** Python/Streamlit dashboard for defensive security intelligence. It helps analysts organise investigations into **cases**, collect data with authorised **active** scans and **passive** lookups, interpret results as advisory **findings**, and export **reports** — all stored in a local SQLite database on your machine.
 
@@ -144,7 +144,25 @@ Module cards on Run Operation show mode, risk, compatible target types, expected
 
 The **Operation Plan** on Run Operation summarises case, original and normalised target, detected type, **run mode**, **why modules were recommended**, selected modules, active/passive split, authorisation requirement, and expected outputs immediately before launch.
 
-After a run, **Latest Results** shows per-module status, finding counts, highest severity, and tabbed detail (Summary, Analyst Interpretation, Module Output, Raw Output, Structured Data). Raw output is collapsed by default.
+After a run, **Latest Results** shows a combined run summary (modules run, completed, warnings, findings, highest severity) plus per-module status, finding counts, and tabbed detail (Summary, Analyst Interpretation, Module Output, Raw Output, Structured Data). Raw output is collapsed by default.
+
+### Findings, warnings, and errors (v1.7)
+
+| Type | Meaning |
+|------|---------|
+| **Review findings** | Advisory analyst interpretation items worth triage (stored in Findings when persisted) |
+| **Warnings** | Collection or external lookup issues (timeouts, partial data) — informational, not target risk |
+| **Errors** | Module could not complete meaningfully (runtime failure, invalid target, blocked active scan) |
+
+Module run **status** values:
+
+- `completed` — collection finished normally
+- `completed_with_warnings` — useful data returned, but external lookups had limits
+- `partial` — limited data returned (e.g. source unavailable)
+- `blocked` — module did not run (compatibility or authorisation)
+- `error` — module failed
+
+External sources (crt.sh, Wayback, public HTTP/DNS) may time out or rate limit. These appear as **warnings** or **source notices**, usually at **info** severity — they do not mean the target is risky or that subdomains/records do not exist.
 
 ### Graph finding filters (v1.5)
 

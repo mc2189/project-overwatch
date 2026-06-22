@@ -10,6 +10,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 
 from utils.target_detection import DOMAIN_PATTERN, get_target_type, normalize_target_value
+from utils.result_status import resolve_collection_status
 
 MODULE_ID = "infra_website_metadata"
 USER_AGENT = "ProjectOverwatch/1.6 (passive website metadata review)"
@@ -395,6 +396,18 @@ def run_website_metadata_review(target: str) -> dict[str, Any]:
     base_data["robots_txt"] = _collect_robots_txt(domain)
     base_data["sitemap_hints"] = _collect_sitemap_hints(domain, base_data["robots_txt"])
 
+    warnings: list[str] = []
+    if base_data.get("warning"):
+        warnings.append(base_data["warning"])
+
+    has_core_data = bool(
+        homepage_data.get("page_title")
+        or homepage_data.get("meta_description")
+        or homepage_data.get("reachable")
+        or base_data["robots_txt"].get("available")
+    )
+    status = resolve_collection_status(warnings=warnings, has_core_data=has_core_data)
+
     title = homepage_data.get("page_title") or "(no title)"
     summary = (
         f"Website metadata reviewed for {domain}: title={title!r}, "
@@ -408,10 +421,11 @@ def run_website_metadata_review(target: str) -> dict[str, Any]:
     return {
         "module_id": MODULE_ID,
         "success": True,
-        "status": "completed",
+        "status": status,
         "summary": summary,
         "raw_output": _build_raw_output(base_data),
         "findings": _build_module_notes(base_data),
-        "errors": [base_data["warning"]] if base_data.get("warning") else [],
+        "warnings": warnings,
+        "errors": warnings if status == "partial" and not has_core_data else [],
         "data": base_data,
     }

@@ -2,6 +2,16 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v1.7.0 — Result quality and lookup resilience
+
+- Standard module run statuses: `completed`, `completed_with_warnings`, `partial`, `blocked`, `error`
+- Warnings separated from errors in module results and Latest Results UI
+- Source lookup timeouts (e.g. crt.sh) downgraded to info/source notices — not medium risk findings
+- Empty positive findings suppressed (MX, subdomains, sitemap hints when none returned)
+- Wayback timestamps formatted as readable UTC; no raw `None` in display
+- Combined Latest Results summary across modules in a run
+- Reports include a separate **Lookup and source notices** section
+
 ## v1.6.0 — Run mode persistence, analytics, and report presets
 
 - Guided run modes (v1.5): Quick Check, Website / Domain Footprint, Local Device / IP Check, Custom Module Selection

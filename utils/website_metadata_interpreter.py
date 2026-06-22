@@ -4,24 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from utils.finding_interpreter import FINDING_KIND_SOURCE_NOTICE, make_finding
+
 FORM_REVIEW_THRESHOLD = 1
 LINK_REVIEW_THRESHOLD = 50
-
-
-def _finding(
-    title: str,
-    severity: str,
-    confidence: int,
-    explanation: str,
-    suggested_actions: list[str],
-) -> dict[str, Any]:
-    return {
-        "title": title,
-        "severity": severity,
-        "confidence": confidence,
-        "explanation": explanation,
-        "suggested_actions": suggested_actions,
-    }
 
 
 def interpret_website_metadata_results(parsed_data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -36,22 +22,23 @@ def interpret_website_metadata_results(parsed_data: dict[str, Any]) -> list[dict
     if homepage.get("error") or (homepage.get("status_code") and homepage["status_code"] >= 400):
         detail = homepage.get("error") or f"HTTP {homepage.get('status_code')}"
         findings.append(
-            _finding(
+            make_finding(
                 "Homepage metadata unavailable",
-                "medium",
-                80,
-                f"The homepage for {domain} could not be reviewed reliably. {detail} "
-                "Page title, meta tags, and link/form counts may be incomplete.",
+                "info",
+                75,
+                f"The homepage for {domain} could not be reviewed reliably in this run. {detail} "
+                "This may reflect connectivity or external lookup limits rather than a confirmed target issue.",
                 [
                     "Retry when the site is reachable or confirm the target URL is correct.",
                     "Review robots.txt and sitemap hints separately if they were collected.",
                     "Document that homepage metadata was not available for this run.",
                 ],
+                finding_kind=FINDING_KIND_SOURCE_NOTICE,
             )
         )
     elif homepage.get("page_title"):
         findings.append(
-            _finding(
+            make_finding(
                 "Homepage title observed",
                 "info",
                 85,
@@ -64,9 +51,9 @@ def interpret_website_metadata_results(parsed_data: dict[str, Any]) -> list[dict
             )
         )
 
-    if homepage.get("meta_description"):
+    if homepage.get("meta_description") and not homepage.get("error"):
         findings.append(
-            _finding(
+            make_finding(
                 "Meta description present",
                 "info",
                 80,
@@ -80,9 +67,9 @@ def interpret_website_metadata_results(parsed_data: dict[str, Any]) -> list[dict
         )
 
     canonical = homepage.get("canonical_url")
-    if canonical:
+    if canonical and not homepage.get("error"):
         findings.append(
-            _finding(
+            make_finding(
                 "Canonical URL declared",
                 "info",
                 80,
@@ -96,9 +83,9 @@ def interpret_website_metadata_results(parsed_data: dict[str, Any]) -> list[dict
         )
 
     form_count = int(homepage.get("form_count") or 0)
-    if form_count >= FORM_REVIEW_THRESHOLD:
+    if form_count >= FORM_REVIEW_THRESHOLD and not homepage.get("error"):
         findings.append(
-            _finding(
+            make_finding(
                 "HTML forms observed on homepage",
                 "low",
                 75,
@@ -113,9 +100,9 @@ def interpret_website_metadata_results(parsed_data: dict[str, Any]) -> list[dict
         )
 
     link_count = int(homepage.get("link_count") or 0)
-    if link_count >= LINK_REVIEW_THRESHOLD:
+    if link_count >= LINK_REVIEW_THRESHOLD and not homepage.get("error"):
         findings.append(
-            _finding(
+            make_finding(
                 "Large number of homepage links",
                 "info",
                 70,
@@ -130,7 +117,7 @@ def interpret_website_metadata_results(parsed_data: dict[str, Any]) -> list[dict
 
     if robots.get("available"):
         findings.append(
-            _finding(
+            make_finding(
                 "robots.txt reviewed",
                 "info",
                 85,
@@ -142,9 +129,9 @@ def interpret_website_metadata_results(parsed_data: dict[str, Any]) -> list[dict
                 ],
             )
         )
-    elif not warning:
+    elif not warning and not homepage.get("error"):
         findings.append(
-            _finding(
+            make_finding(
                 "robots.txt not available",
                 "info",
                 65,
@@ -154,18 +141,19 @@ def interpret_website_metadata_results(parsed_data: dict[str, Any]) -> list[dict
                     "Retry later or check alternate schemes if robots guidance is needed.",
                     "Do not treat missing robots.txt as a security issue by itself.",
                 ],
+                finding_kind=FINDING_KIND_SOURCE_NOTICE,
             )
         )
 
-    reachable_sitemaps = sitemaps.get("reachable_count") or 0
-    if reachable_sitemaps:
+    reachable_sitemaps = int(sitemaps.get("reachable_count") or 0)
+    if reachable_sitemaps > 0:
         sample = ", ".join(
             entry.get("url", "")
             for entry in (sitemaps.get("entries") or [])
             if entry.get("reachable")
         )[:200]
         findings.append(
-            _finding(
+            make_finding(
                 "Sitemap hints discovered",
                 "info",
                 80,
@@ -179,17 +167,18 @@ def interpret_website_metadata_results(parsed_data: dict[str, Any]) -> list[dict
             )
         )
 
-    if warning and not findings:
+    if warning and not any(f.get("title") == "Homepage metadata unavailable" for f in findings):
         findings.append(
-            _finding(
+            make_finding(
                 "Website metadata collected with warnings",
-                "low",
+                "info",
                 70,
                 f"Metadata review for {domain} completed with warnings: {warning}",
                 [
                     "Review partial results in module output.",
                     "Retry when connectivity improves if fuller metadata is required.",
                 ],
+                finding_kind=FINDING_KIND_SOURCE_NOTICE,
             )
         )
 

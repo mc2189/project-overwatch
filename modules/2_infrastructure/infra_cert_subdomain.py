@@ -9,6 +9,7 @@ from urllib.parse import quote
 import requests
 
 from utils.target_detection import DOMAIN_PATTERN, get_target_type, normalize_target_value
+from utils.result_status import STATUS_COMPLETED_WITH_WARNINGS, STATUS_PARTIAL, resolve_collection_status
 
 MODULE_ID = "infra_cert_subdomain"
 SOURCE_NAME = "crt.sh"
@@ -231,17 +232,25 @@ def run_cert_subdomain_intel(target: str) -> dict[str, Any]:
     entries, fetch_warning = _fetch_crt_sh_entries(domain)
     if fetch_warning:
         base_data["warning"] = fetch_warning
+        timeout = "timeout" in fetch_warning.lower() or "timed out" in fetch_warning.lower()
+        status = STATUS_COMPLETED_WITH_WARNINGS if timeout else STATUS_PARTIAL
+        summary = (
+            f"Certificate transparency lookup for {domain} did not return names in this run. "
+        )
+        if timeout:
+            summary += f"The {SOURCE_NAME} source timed out. "
+        else:
+            summary += f"{fetch_warning} "
+        summary += "No certificate names were returned in this run — this does not prove the domain has no related names."
         return {
             "module_id": MODULE_ID,
             "success": True,
-            "status": "completed",
-            "summary": (
-                f"Certificate transparency data was unavailable for {domain}. "
-                f"{fetch_warning}"
-            ),
+            "status": status,
+            "summary": summary,
             "raw_output": _build_raw_output(base_data),
             "findings": [fetch_warning],
-            "errors": [fetch_warning],
+            "warnings": [fetch_warning],
+            "errors": [],
             "data": base_data,
         }
 
@@ -263,13 +272,18 @@ def run_cert_subdomain_intel(target: str) -> dict[str, Any]:
     if truncated:
         summary += f" Results limited to {MAX_SUBDOMAINS} names."
 
+    warnings: list[str] = []
+    if truncated:
+        warnings.append(f"Results limited to {MAX_SUBDOMAINS} names for usability.")
+
     return {
         "module_id": MODULE_ID,
         "success": True,
-        "status": "completed",
+        "status": resolve_collection_status(warnings=warnings, has_core_data=bool(subdomains)),
         "summary": summary,
         "raw_output": _build_raw_output(base_data),
         "findings": _build_module_notes(base_data),
+        "warnings": warnings,
         "errors": [],
         "data": base_data,
     }

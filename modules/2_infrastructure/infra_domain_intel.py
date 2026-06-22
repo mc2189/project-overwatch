@@ -13,6 +13,9 @@ import dns.exception
 import dns.resolver
 import requests
 
+from utils.display_format import display_or_unavailable, format_wayback_timestamp
+from utils.result_status import resolve_collection_status
+
 COMMON_SECURITY_HEADERS = [
     "strict-transport-security",
     "content-security-policy",
@@ -175,13 +178,17 @@ def _check_wayback_availability(domain: str) -> dict[str, Any]:
         if len(payload) > 1:
             result["available"] = True
             result["snapshot_count"] = max(len(payload) - 1, 1)
-            result["first_snapshot"] = payload[1][0]
+            raw_first = payload[1][0]
+            result["first_snapshot"] = raw_first
+            result["first_snapshot_display"] = format_wayback_timestamp(raw_first)
         summary_url = f"https://web.archive.org/cdx/search/cdx?url={domain}&output=json&limit=1&fl=timestamp&sort=reverse"
         summary_response = requests.get(summary_url, timeout=REQUEST_TIMEOUT)
         summary_response.raise_for_status()
         summary_payload = summary_response.json()
         if len(summary_payload) > 1:
-            result["last_snapshot"] = summary_payload[1][0]
+            raw_last = summary_payload[1][0]
+            result["last_snapshot"] = raw_last
+            result["last_snapshot_display"] = format_wayback_timestamp(raw_last)
     except (requests.RequestException, ValueError, IndexError) as exc:
         result["error"] = str(exc)
     return result
@@ -236,9 +243,15 @@ def _build_raw_output(parsed_data: dict[str, Any]) -> str:
     lines.append("")
     lines.append("Wayback:")
     if wayback.get("available"):
-        lines.append(
-            f"  snapshots available; first={wayback.get('first_snapshot')} last={wayback.get('last_snapshot')}"
+        first = display_or_unavailable(
+            wayback.get("first_snapshot_display")
+            or format_wayback_timestamp(wayback.get("first_snapshot"))
         )
+        last = display_or_unavailable(
+            wayback.get("last_snapshot_display")
+            or format_wayback_timestamp(wayback.get("last_snapshot"))
+        )
+        lines.append(f"  snapshots available; first={first}; last={last}")
     else:
         lines.append(f"  no snapshots found ({wayback.get('error') or 'none'})")
 
@@ -283,11 +296,22 @@ def run_domain_intel(target: str) -> dict[str, Any]:
     }
     findings = _build_findings(parsed_data)
     raw_output = _build_raw_output(parsed_data)
+    warnings: list[str] = []
+    wayback = parsed_data.get("wayback", {})
+    if wayback.get("error"):
+        warnings.append(f"Wayback lookup unavailable: {wayback['error']}")
+    has_core_data = any(
+        parsed_data.get("dns", {}).get(record_type)
+        for record_type in ("A", "AAAA", "MX", "NS", "TXT", "CNAME")
+    ) or parsed_data.get("http", {}).get("https", {}).get("reachable")
+    status = resolve_collection_status(warnings=warnings, has_core_data=bool(has_core_data))
 
     return {
         "success": True,
+        "status": status,
         "parsed_data": parsed_data,
         "raw_output": raw_output,
         "findings": findings,
+        "warnings": warnings,
         "errors": [],
     }
