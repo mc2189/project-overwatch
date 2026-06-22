@@ -33,6 +33,16 @@ SCRIPT_CATEGORIES = [
 ]
 
 
+def render_privilege_status() -> bool:
+    """Show whether the Streamlit session has elevated privileges."""
+    root_available = has_root_privileges()
+    if root_available:
+        st.info("Running with elevated privileges")
+    else:
+        st.caption("Standard user session · elevated privileges not available")
+    return root_available
+
+
 def render_nmap_options(enabled: bool) -> dict[str, Any]:
     """Render guided Nmap profile/options UI and return the selected option set."""
     root_available = has_root_privileges()
@@ -47,7 +57,7 @@ def render_nmap_options(enabled: bool) -> dict[str, Any]:
 
     if not root_available:
         st.caption(
-            "OS detection requires elevated privileges and is currently unavailable in this Streamlit session."
+            "OS detection and traceroute may require elevated privileges and are unavailable in this session."
         )
 
     options = default_options_for_profile(profile)
@@ -69,6 +79,10 @@ def render_nmap_options(enabled: bool) -> dict[str, Any]:
             st.caption(
                 "OS detection was requested by this profile but will be skipped because elevated "
                 "privileges are not available. The rest of the scan will still run."
+            )
+        if normalized.get("traceroute_skipped"):
+            st.caption(
+                "Traceroute was requested but will be skipped because elevated privileges are not available."
             )
 
     normalized = normalize_options(options)
@@ -142,7 +156,7 @@ def _render_custom_options(
     )
     if not root_available:
         st.caption(
-            "OS detection requires elevated privileges and is currently unavailable in this Streamlit session."
+            "OS detection and traceroute require elevated privileges and are unavailable in this Streamlit session."
         )
 
     script_labels = [label for label, _ in SCRIPT_CATEGORIES]
@@ -175,8 +189,8 @@ def _render_custom_options(
     )
     options["traceroute"] = st.checkbox(
         "Traceroute",
-        value=options["traceroute"],
-        disabled=host_discovery_only or not enabled,
+        value=options["traceroute"] and root_available,
+        disabled=host_discovery_only or not enabled or not root_available,
         help=OPTION_HELP["traceroute"],
     )
 

@@ -25,7 +25,7 @@ from modules.module_registry import (
 )
 from utils.graph_view import entity_graph_figure
 from utils.nmap_options import SCRIPT_VULN
-from utils.nmap_ui import render_nmap_options
+from utils.nmap_ui import render_nmap_options, render_privilege_status
 
 if "case_id" not in st.session_state:
     st.session_state.case_id = get_or_create_default_case()["id"]
@@ -147,6 +147,7 @@ current_case = get_current_case()
 # --- Sidebar ---
 with st.sidebar:
     st.title("🛡️ Arsenal Control")
+    render_privilege_status()
 
     st.subheader("Case")
     cases = list_cases()

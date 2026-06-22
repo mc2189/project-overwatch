@@ -41,7 +41,7 @@ OPTION_HELP: dict[str, str] = {
     "script_category": "Run one NSE script category: Safe, Default, Discovery, or Vuln. Requires authorisation.",
     "show_reasons": "Show Nmap's reasons why a port is in a given state (--reason).",
     "open_only": "Show only open ports in the output (--open).",
-    "traceroute": "Trace the network path to the target (--traceroute). Requires authorisation.",
+    "traceroute": "Trace the network path to the target (--traceroute). Requires authorisation and may require elevated privileges.",
     "timing_profile": "Select one timing template: Polite (T2), Normal (T3), or Aggressive (T4).",
 }
 
@@ -142,6 +142,7 @@ def normalize_options(options: dict[str, Any]) -> dict[str, Any]:
         normalized["os_detection"] = False
         normalized["script_category"] = SCRIPT_NONE
         normalized["open_only"] = False
+        _apply_privilege_rules(normalized)
         return normalized
 
     if normalized.get("fast_scan"):
@@ -168,14 +169,29 @@ def normalize_options(options: dict[str, Any]) -> dict[str, Any]:
     if timing not in {TIMING_POLITE, TIMING_NORMAL, TIMING_AGGRESSIVE}:
         normalized["timing_profile"] = TIMING_NORMAL
 
+    _apply_privilege_rules(normalized)
+
+    return normalized
+
+
+def _apply_privilege_rules(normalized: dict[str, Any]) -> None:
+    """Disable privilege-sensitive options when root is unavailable."""
     normalized["os_detection_requested"] = bool(normalized.get("os_detection"))
     if normalized["os_detection_requested"] and not has_root_privileges():
         normalized["os_detection"] = False
         normalized["os_detection_skipped"] = True
     else:
-        normalized["os_detection_skipped"] = False
+        normalized.setdefault("os_detection_skipped", False)
 
-    return normalized
+    normalized["traceroute_requested"] = bool(normalized.get("traceroute"))
+    if normalized["traceroute_requested"] and not has_root_privileges():
+        normalized["traceroute"] = False
+        normalized["traceroute_skipped"] = True
+    else:
+        normalized.setdefault("traceroute_skipped", False)
+
+    normalized.setdefault("os_detection_runtime_failed", False)
+    normalized.setdefault("traceroute_runtime_failed", False)
 
 
 def options_require_authorisation(options: dict[str, Any]) -> bool:
@@ -278,6 +294,11 @@ def validation_messages(options: dict[str, Any]) -> list[str]:
     if normalized.get("os_detection_skipped"):
         messages.append(
             "OS detection requires elevated privileges and is unavailable in this Streamlit session."
+        )
+
+    if normalized.get("traceroute_skipped"):
+        messages.append(
+            "Traceroute may require elevated privileges and is unavailable in this Streamlit session."
         )
 
     return messages

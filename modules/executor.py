@@ -19,6 +19,7 @@ from utils.nmap_interpreter import interpret_nmap_results
 from utils.nmap_options import SCRIPT_VULN, build_nmap_flags, normalize_options
 from utils.nmap_parser import build_service_entity_label, build_service_entity_value
 from utils.nmap_xml_parser import parse_nmap_results
+from utils.privileges import detect_nmap_privilege_issue
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 NMAP_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_nmap.py"
@@ -210,6 +211,72 @@ def _persist_investigation_records(
     )
 
 
+def _scan_output_text(scan_data: dict[str, Any]) -> str:
+    parts = [
+        scan_data.get("raw_output", ""),
+        scan_data.get("stderr", ""),
+        scan_data.get("stdout", ""),
+    ]
+    return "\n".join(part for part in parts if part)
+
+
+def _scan_failed(scan_data: dict[str, Any]) -> bool:
+    if not scan_data.get("success", True):
+        return True
+    return scan_data.get("raw_output", "").startswith("Error")
+
+
+def _run_nmap_with_privilege_retry(
+    run_nmap_scan: Any,
+    target: str,
+    nmap_options: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Run Nmap and retry without privilege-sensitive flags if Nmap reports a root error."""
+    current_options = normalize_options(nmap_options)
+    flags = build_nmap_flags(current_options)
+    scan_data = run_nmap_scan(target, flags)
+
+    if not _scan_failed(scan_data):
+        return scan_data, current_options
+
+    issue = detect_nmap_privilege_issue(_scan_output_text(scan_data))
+    if issue == "os_detection" and "-O" in flags:
+        current_options["os_detection"] = False
+        current_options["os_detection_skipped"] = True
+        current_options["os_detection_runtime_failed"] = True
+        flags = build_nmap_flags(current_options)
+        scan_data = run_nmap_scan(target, flags)
+        if not _scan_failed(scan_data):
+            return scan_data, current_options
+
+    if _scan_failed(scan_data):
+        issue = detect_nmap_privilege_issue(_scan_output_text(scan_data))
+        current_flags = build_nmap_flags(current_options)
+        if issue == "traceroute" and "--traceroute" in current_flags:
+            current_options["traceroute"] = False
+            current_options["traceroute_skipped"] = True
+            current_options["traceroute_runtime_failed"] = True
+            scan_data = run_nmap_scan(target, build_nmap_flags(current_options))
+
+    return scan_data, current_options
+
+
+def _build_nmap_summary(target: str, nmap_options: dict[str, Any]) -> str:
+    summary = f"Nmap scan completed for {target}."
+    notes: list[str] = []
+    if nmap_options.get("os_detection_runtime_failed"):
+        notes.append("OS detection failed at runtime and was not included in the final result")
+    elif nmap_options.get("os_detection_skipped"):
+        notes.append("OS detection was skipped")
+    if nmap_options.get("traceroute_runtime_failed"):
+        notes.append("traceroute failed at runtime and was not included in the final result")
+    elif nmap_options.get("traceroute_skipped"):
+        notes.append("traceroute was skipped")
+    if notes:
+        summary += " " + "; ".join(notes) + "."
+    return summary
+
+
 def _execute_nmap(
     module_id: str,
     target: str,
@@ -243,12 +310,11 @@ def _execute_nmap(
             selected_options=nmap_options,
         )
 
-    flags = build_nmap_flags(nmap_options)
-    scan_data = run_nmap_scan(target, flags)
+    scan_data, nmap_options = _run_nmap_with_privilege_retry(run_nmap_scan, target, nmap_options)
     raw_output = scan_data.get("raw_output", "")
     findings = scan_data.get("findings", [])
     xml_output = scan_data.get("xml_output", "")
-    is_error = raw_output.startswith("Error")
+    is_error = _scan_failed(scan_data)
 
     parsed_data = parse_nmap_results(raw_output, xml_output)
     interpreter_findings = interpret_nmap_results(parsed_data, nmap_options)
@@ -271,7 +337,7 @@ def _execute_nmap(
             module_id,
             success=True,
             status="completed",
-            summary=f"Nmap scan completed for {target}.",
+            summary=_build_nmap_summary(target, nmap_options),
             raw_output=raw_output,
             findings=findings,
             parsed_data=parsed_data,

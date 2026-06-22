@@ -149,7 +149,20 @@ Each option includes a tooltip/description in the UI. Project Overwatch does **n
 - **Vuln scripts** remain high-warning and require authorisation.
 - **OS detection**, **traceroute**, and **script scanning** require authorisation.
 
-**OS detection (`-O`) also requires elevated (root) privileges** on macOS and Linux. Project Overwatch does not automatically request `sudo`. If the Streamlit session is not running as root, OS detection is disabled or skipped and a service/version scan (`-sV`) is used instead. Service/version detection is the recommended default for most authorised assessments.
+**OS detection (`-O`) and traceroute (`--traceroute`) may require elevated (root) privileges** on macOS and Linux. Project Overwatch does not automatically request `sudo`. If the Streamlit session is not running as root, those options are disabled or skipped and a service/version scan (`-sV`) is used instead. Service/version detection is the recommended default for most authorised assessments.
+
+If Nmap still reports a privilege error at runtime (for example if privileges change mid-session), Overwatch retries the scan without the failing option and records it as skipped in **Analyst Interpretation**.
+
+### Elevated privileges for lab use only
+
+Project Overwatch never prompts for a password or escalates privileges automatically. For **authorised lab testing only**, you may start Streamlit from an elevated shell yourself:
+
+```bash
+# macOS / Linux — lab environments only
+sudo "$(which python)" -m streamlit run main.py
+```
+
+When running elevated, the sidebar shows **Running with elevated privileges**. Only use this in controlled lab environments you own or are explicitly authorised to test. Prefer normal (`streamlit run main.py`) service scans for day-to-day use.
 
 No stealth, evasion, spoofing, decoy, SYN-only, UDP, or proxy-bypass options are exposed in v0.6.
 

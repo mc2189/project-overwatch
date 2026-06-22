@@ -21,7 +21,7 @@ def parse_nmap_problems(scan_text):
 def run_nmap_scan(target_ip, flags):
     """
     Execute Nmap with guided flags and capture human-readable and XML output.
-    Returns a dictionary with raw_output, xml_output, and findings.
+    Returns a dictionary with raw_output, stderr, xml_output, findings, and success.
     """
     if isinstance(flags, str):
         flags = [flags]
@@ -46,21 +46,31 @@ def run_nmap_scan(target_ip, flags):
 
         return {
             "raw_output": scan_result,
+            "stderr": process.stderr or "",
             "xml_output": xml_output,
             "findings": problems,
+            "success": True,
         }
 
     except subprocess.CalledProcessError as error:
+        stderr = error.stderr or ""
+        stdout = error.stdout or ""
+        combined = stderr or stdout
         return {
-            "raw_output": f"Error executing Nmap: {error.stderr}",
+            "raw_output": f"Error executing Nmap: {combined}".strip(),
+            "stderr": stderr,
+            "stdout": stdout,
             "xml_output": "",
             "findings": [],
+            "success": False,
         }
     except FileNotFoundError:
         return {
             "raw_output": "Error: Nmap is not installed or not in your PATH.",
+            "stderr": "",
             "xml_output": "",
             "findings": [],
+            "success": False,
         }
     finally:
         if os.path.exists(xml_path):

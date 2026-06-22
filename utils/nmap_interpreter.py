@@ -30,7 +30,20 @@ def interpret_nmap_results(parsed_data: dict[str, Any], options: dict[str, Any] 
     os_matches = parsed_data.get("os_matches", [])
     script_category = options.get("script_category", "none")
 
-    if options.get("os_detection_skipped"):
+    if options.get("os_detection_runtime_failed"):
+        findings.append(
+            _finding(
+                "OS detection failed at runtime",
+                "info",
+                90,
+                "Nmap reported that OS detection requires elevated privileges during the scan. The scan continued without OS detection.",
+                [
+                    "Review the raw output for the exact Nmap message.",
+                    "Use service/version detection instead, or run OS detection only in an authorised elevated terminal session.",
+                ],
+            )
+        )
+    elif options.get("os_detection_skipped"):
         findings.append(
             _finding(
                 "OS detection skipped",
@@ -39,6 +52,32 @@ def interpret_nmap_results(parsed_data: dict[str, Any], options: dict[str, Any] 
                 "Nmap OS detection requires elevated privileges and was not run.",
                 [
                     "Run a standard service scan instead, or use OS detection only in an authorised elevated terminal session.",
+                ],
+            )
+        )
+
+    if options.get("traceroute_runtime_failed"):
+        findings.append(
+            _finding(
+                "Traceroute failed at runtime",
+                "info",
+                88,
+                "Nmap reported that traceroute requires elevated privileges during the scan. The scan continued without traceroute.",
+                [
+                    "Review the raw output for the exact Nmap message.",
+                    "Use an authorised elevated terminal session if traceroute is required.",
+                ],
+            )
+        )
+    elif options.get("traceroute_skipped"):
+        findings.append(
+            _finding(
+                "Traceroute skipped",
+                "info",
+                92,
+                "Nmap traceroute may require elevated privileges and was not run.",
+                [
+                    "Continue with the service scan results, or run traceroute separately in an authorised elevated session.",
                 ],
             )
         )
