@@ -1,6 +1,6 @@
 # Project Overwatch
 
-Defensive security intelligence dashboard built with Python and Streamlit. Project Overwatch v0.2 provides target tracking, reconnaissance logging, a central module registry, and manual Nmap integration for authorised assessments only.
+Defensive security intelligence dashboard built with Python and Streamlit. Project Overwatch v0.3 provides target tracking, reconnaissance logging, a central module registry, an execution dispatcher, and manual Nmap integration for authorised assessments only.
 
 ## Requirements
 
@@ -41,8 +41,9 @@ Streamlit opens the dashboard in your browser, typically at `http://localhost:85
 
 1. Enter a target IP or domain in the sidebar and click **Acquire Target** to add it to the archive.
 2. Select modules under **Select Modules**. The sidebar is generated from `modules/module_registry.py`.
-3. Click **LAUNCH OPERATION** to run selected modules. Scans are never started automatically.
-4. Review results in the main panel and browse stored data under **Archive** (Manifest / History tabs).
+3. If you select an **active** module that requires authorisation (such as Nmap), tick the authorisation checkbox in the sidebar.
+4. Click **LAUNCH OPERATION** to run selected modules. Scans are never started automatically.
+5. Review results in the main panel and browse stored data under **Archive** (Manifest / History tabs).
 
 Only modules marked **active** and **implemented** in the registry can be executed. Planned modules appear in the UI but are disabled.
 
@@ -71,9 +72,61 @@ Helper functions:
 - `get_module(module_id)` — lookup a single entry
 - `is_executable(module)` — returns `True` only when `implemented` and `status == "active"`
 
-To add a module later: register it in `module_registry.py`, implement its backend file, then wire execution in `main.py` (or a future dispatcher). Do not hard-code sidebar entries in `main.py`.
+To add a module later: register it in `module_registry.py`, implement its backend file, then wire execution in `modules/executor.py`. Do not hard-code sidebar entries in `main.py`.
 
 Current executable module: **Nmap** (`infra_nmap`) under Infrastructure.
+
+## Execution dispatcher
+
+`modules/executor.py` routes all module execution. `main.py` calls:
+
+```python
+execute_module(module_id, target, options, db_context, authorisation_confirmed)
+```
+
+The executor:
+
+1. Looks up the module in `module_registry.py`
+2. Blocks unimplemented, inactive, or non-executable modules
+3. Enforces authorisation for modules with `requires_authorisation=True`
+4. Runs the module backend (Nmap today)
+5. Returns a structured result:
+
+```python
+{
+    "module_id": "...",
+    "success": True,
+    "status": "completed",  # or "blocked" / "error"
+    "summary": "...",
+    "raw_output": "...",
+    "findings": [],
+    "errors": [],
+}
+```
+
+## Active vs passive modules
+
+| Mode | Description | Authorisation gate |
+|------|-------------|-------------------|
+| `passive` | Public or read-only lookups | Only if `requires_authorisation=True` |
+| `active` | Sends probes or scans to a target | Usually required |
+| `analysis` | Local file or capture analysis | Only if `requires_authorisation=True` |
+
+Passive and analysis modules do not show the authorisation checkbox unless their registry entry sets `requires_authorisation=True`.
+
+## Authorisation gating
+
+When any **selected** module has `requires_authorisation=True`, the sidebar shows:
+
+> I confirm I am authorised to run active checks against this target.
+
+**LAUNCH OPERATION** is blocked until this box is ticked. The executor performs the same check and returns `status: "blocked"` if authorisation is missing.
+
+Selecting Nmap **Vuln Scripts** (`--script vuln`) shows an additional high-risk warning. Vuln scripts also require the authorisation checkbox even if other checks pass.
+
+## Lawful use
+
+Project Overwatch is intended for **lawful OSINT**, **systems you own**, **lab environments**, and **authorised security assessments** only. Do not use it to scan, probe, or investigate targets without permission.
 
 ## Project layout
 
@@ -84,6 +137,7 @@ database/
   overwatch.db                   Local target and recon data (auto-created)
 modules/
   module_registry.py           Module metadata and helpers
+  executor.py                  Execution dispatcher and result format
   2_infrastructure/
     infra_nmap.py                Nmap subprocess wrapper
 requirements.txt                 Python dependencies
