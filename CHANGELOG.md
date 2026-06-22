@@ -2,6 +2,16 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v1.4.0 — Investigation workflow UI
+
+- Sidebar simplified to case selection and page navigation
+- New **Run Operation** page with step-by-step target, module cards, configuration, operation plan, and launch
+- **Latest Results** section with tabbed result detail (raw output collapsed by default)
+- Archive split into dedicated pages: Findings, Entities, Relationships, Observations, Operations, Graph, Report, Backup
+- **Roadmap** page for planned modules (removed from active run workflow)
+- UI code organised under `ui/` package
+- Data quality: skip empty MX/NS findings; clearer URL normalisation and Nmap disabled for URL targets
+
 ## v1.3.0 — Certificate and subdomain intelligence
 
 - New passive module `infra_cert_subdomain` (Certificate & Subdomain Intelligence)

@@ -62,7 +62,7 @@ def interpret_domain_intel_results(parsed_data: dict[str, Any]) -> list[dict[str
             )
         )
 
-    mx_records = dns_records.get("MX", [])
+    mx_records = [record for record in dns_records.get("MX", []) if str(record).strip()]
     if mx_records:
         findings.append(
             _finding(
@@ -78,7 +78,7 @@ def interpret_domain_intel_results(parsed_data: dict[str, Any]) -> list[dict[str
             )
         )
 
-    ns_records = dns_records.get("NS", [])
+    ns_records = [record for record in dns_records.get("NS", []) if str(record).strip()]
     if ns_records:
         findings.append(
             _finding(

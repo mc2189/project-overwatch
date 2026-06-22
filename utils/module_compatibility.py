@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from modules.module_registry import MODULES, ModuleEntry, get_module, is_executable
-from utils.target_detection import get_target_type, target_type_label
+from utils.target_detection import get_target_type, normalize_target_value, target_type_label
 
 
 def module_short_help(module: ModuleEntry) -> str:
@@ -73,10 +73,13 @@ def get_incompatible_reason(module: ModuleEntry, target_type: str) -> str:
             f"Requires {accepted_labels}; could not recognise the target type. "
             "Enter an IPv4 address, domain, or URL."
         )
-    if target_type == "ipv4" and "domain" in module.accepted_target_types and "url" in module.accepted_target_types:
-        return f"Requires a domain or URL; detected target type is {detected}."
     if target_type == "ipv4" and "domain" in module.accepted_target_types:
         return f"Requires a domain or URL; detected target type is {detected}."
+    if target_type == "url" and module.module_id == "infra_nmap":
+        return (
+            "Nmap requires an IPv4 address or domain name. "
+            "Enter the hostname only (e.g. example.com) if you want a port scan."
+        )
 
     return f"Requires {accepted_labels}; detected target type is {detected}."
 
@@ -128,6 +131,9 @@ def build_operation_plan(
 ) -> dict:
     """Build a pre-launch operation plan summary for the dashboard."""
     target_type = get_target_type(target)
+    normalized_target = (
+        normalize_target_value(target.strip(), target_type) if target.strip() else ""
+    )
     modules = [get_module(module_id) for module_id in selected_module_ids]
     modules = [module for module in modules if module is not None]
 
@@ -158,6 +164,7 @@ def build_operation_plan(
         "case_name": case_name,
         "case_id": case_id,
         "target": target.strip(),
+        "normalized_target": normalized_target,
         "target_type": target_type,
         "target_type_label": target_type_label(target_type),
         "selected_modules": [module.display_name for module in modules],
