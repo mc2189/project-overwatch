@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+venv/
+.venv/
+
+# macOS
+.DS_Store
+
+# Environment variables
+.env
+
+# Local database files
+database/*.db
+database/*.sqlite
+database/*.sqlite3
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Logs / output
+logs/
+reports/
+exports/
+*.log
