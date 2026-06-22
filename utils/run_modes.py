@@ -5,6 +5,7 @@ from __future__ import annotations
 from modules.module_registry import get_module
 from ui.constants import MODULE_CARD_TITLES
 from utils.target_detection import TARGET_TYPES, target_type_label
+from utils.whois_rdap_helpers import is_public_ipv4
 
 QUICK_CHECK = "quick_check"
 WEBSITE_FOOTPRINT = "website_footprint"
@@ -48,15 +49,35 @@ MODE_DESCRIPTIONS: dict[str, str] = {
 _MODE_TARGET_RECOMMENDATIONS: dict[str, dict[str, tuple[str, ...]]] = {
     QUICK_CHECK: {
         "ipv4": ("infra_nmap",),
-        "domain": ("infra_domain_intel", "infra_cert_subdomain", "infra_website_metadata"),
-        "url": ("infra_domain_intel", "infra_cert_subdomain", "infra_website_metadata"),
+        "domain": (
+            "infra_whois_rdap",
+            "infra_domain_intel",
+            "infra_cert_subdomain",
+            "infra_website_metadata",
+        ),
+        "url": (
+            "infra_whois_rdap",
+            "infra_domain_intel",
+            "infra_cert_subdomain",
+            "infra_website_metadata",
+        ),
         "email": (),
         "username": (),
         "unknown": (),
     },
     WEBSITE_FOOTPRINT: {
-        "domain": ("infra_domain_intel", "infra_cert_subdomain", "infra_website_metadata"),
-        "url": ("infra_domain_intel", "infra_cert_subdomain", "infra_website_metadata"),
+        "domain": (
+            "infra_whois_rdap",
+            "infra_domain_intel",
+            "infra_cert_subdomain",
+            "infra_website_metadata",
+        ),
+        "url": (
+            "infra_whois_rdap",
+            "infra_domain_intel",
+            "infra_cert_subdomain",
+            "infra_website_metadata",
+        ),
     },
     LOCAL_IP_CHECK: {
         "ipv4": ("infra_nmap",),
@@ -77,14 +98,28 @@ def get_run_mode_description(mode_id: str) -> str:
     return MODE_DESCRIPTIONS.get(mode_id, "")
 
 
-def get_recommended_modules_for_mode(mode_id: str, target_type: str) -> list[str]:
+def get_recommended_modules_for_mode(
+    mode_id: str,
+    target_type: str,
+    *,
+    target: str | None = None,
+) -> list[str]:
     """Return recommended module IDs for a run mode and target type."""
     if mode_id == CUSTOM:
         return []
     if target_type not in TARGET_TYPES:
         target_type = "unknown"
     by_target = _MODE_TARGET_RECOMMENDATIONS.get(mode_id, {})
-    return list(by_target.get(target_type, ()))
+    modules = list(by_target.get(target_type, ()))
+    if (
+        target
+        and target_type == "ipv4"
+        and mode_id in {QUICK_CHECK, LOCAL_IP_CHECK}
+        and is_public_ipv4(target)
+        and "infra_whois_rdap" not in modules
+    ):
+        modules.append("infra_whois_rdap")
+    return modules
 
 
 def resolve_recommended_modules_for_mode(
@@ -92,9 +127,10 @@ def resolve_recommended_modules_for_mode(
     target_type: str,
     *,
     quick_check_include_port_scan: bool = False,
+    target: str | None = None,
 ) -> list[str]:
     """Return recommendations, including optional Quick Check port scan."""
-    modules = get_recommended_modules_for_mode(mode_id, target_type)
+    modules = get_recommended_modules_for_mode(mode_id, target_type, target=target)
     if (
         mode_id == QUICK_CHECK
         and quick_check_include_port_scan
@@ -115,6 +151,7 @@ def get_recommendation_reason(
     target_type: str,
     *,
     quick_check_include_port_scan: bool = False,
+    target: str | None = None,
 ) -> str:
     """Explain why modules are recommended for this mode and target."""
     label = target_type_label(target_type)
@@ -122,6 +159,7 @@ def get_recommendation_reason(
         mode_id,
         target_type,
         quick_check_include_port_scan=quick_check_include_port_scan,
+        target=target,
     )
 
     if mode_id == CUSTOM:
@@ -155,8 +193,8 @@ def get_recommendation_reason(
                 "Enter a domain or URL, or switch run mode."
             )
         return (
-            "Website / Domain Footprint recommends passive DNS, HTTP/TLS, and certificate "
-            "transparency lookups. Nmap is not included by default."
+            "Website / Domain Footprint recommends passive registration metadata (RDAP), DNS, HTTP/TLS, "
+            "and certificate transparency lookups. Nmap is not included by default."
         )
 
     if mode_id == LOCAL_IP_CHECK:
@@ -167,7 +205,8 @@ def get_recommendation_reason(
             )
         return (
             "Local Device / IP Check recommends Network Service Check with a conservative "
-            "scan profile. Authorisation is required before launch."
+            "scan profile. Public IPv4 addresses may also include passive WHOIS/RDAP context. "
+            "Authorisation is required before launch."
         )
 
     return "Select compatible modules for this target."

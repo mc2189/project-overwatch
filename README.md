@@ -45,9 +45,9 @@ After collection populates entities, open **Entity Workspace** to pivot between 
 1. **Select an entity** from the active case (type, value, label, source, confidence, timestamps).
 2. Review **Related intelligence** — findings (with status/notes), observations (raw output collapsed), relationships from/to, and matching operations.
 3. Use **Pivot actions** — compatible modules are recommended from existing target compatibility rules:
-   - **Domain** → Domain Intelligence, Certificate & Subdomain Intelligence, Website Metadata Review
-   - **URL** → Domain Intelligence, Website Metadata Review (hostname normalised)
-   - **IPv4** → Network Service Check (authorisation required)
+   - **Domain** → WHOIS/RDAP Intelligence, Domain Intelligence, Certificate & Subdomain Intelligence, Website Metadata Review
+   - **URL** → WHOIS/RDAP Intelligence, Domain Intelligence, Website Metadata Review (hostname normalised)
+   - **IPv4** → Network Service Check (authorisation required); public IPs may also use WHOIS/RDAP as passive context
    - **Service** → no direct module; review the parent host entity
    - **Email / username** → no implemented modules yet
 4. **Run compatible modules** from the workspace using the same executor path as Run Operation. Active modules still require the authorisation checkbox; passive modules do not.
@@ -63,7 +63,7 @@ Entity notes appear in generated reports where entities are listed.
 The **Batch Queue** page runs compatible follow-up modules for multiple entities in a controlled, visible way:
 
 1. **Select entities** (filter by type) and review compatible module suggestions.
-2. **Add passive modules for selection** — queues Domain Intelligence, Certificate & Subdomain Intelligence, and Website Metadata Review where compatible.
+2. **Add passive modules for selection** — queues WHOIS/RDAP Intelligence, Domain Intelligence, Certificate & Subdomain Intelligence, and Website Metadata Review where compatible.
 3. **Duplicate protection** — the same entity/module pair cannot be queued twice while still queued.
 4. **Recent-run warning** — warns if the same module ran against that target within 24 hours.
 5. **Run passive queue** — one item at a time via the normal executor, with a configurable courtesy delay (default 1.5 s) between passive lookups.
@@ -77,6 +77,7 @@ Results appear automatically in Operations, Observations, Findings, Relationship
 ### Module cards on Run Operation
 
 - **Network Service Check, powered by Nmap** — active; IPv4 or domain only (not URL — enter hostname separately for port scans).
+- **WHOIS / RDAP Intelligence** — passive registration/allocation metadata for domain, URL (host extracted), or public IPv4 via public RDAP.
 - **Domain Intelligence** — passive DNS/HTTP/TLS/Wayback for domain or URL.
 - **Certificate & Subdomain Intelligence** — passive certificate transparency names for domain or URL.
 - **Website Metadata Review** — passive homepage title, meta tags, headers, robots.txt, and sitemap hints for domain or URL.
@@ -87,9 +88,9 @@ After entering a target, choose **What do you want to do?** on Run Operation:
 
 | Run mode | Purpose | Typical recommendations |
 |----------|---------|-------------------------|
-| **Quick Check** | Simple default | IPv4 → Network Service Check only; domain/URL → Domain Intelligence + Certificate & Subdomain Intelligence + Website Metadata Review; email/username/unknown → none |
-| **Website / Domain Footprint** | Passive domain footprint | Domain Intelligence + Certificate & Subdomain Intelligence + Website Metadata Review (no Nmap by default) |
-| **Local Device / IP Check** | Conservative active IP scan | Network Service Check with Quick check Nmap profile; authorisation required |
+| **Quick Check** | Simple default | IPv4 → Network Service Check (+ WHOIS/RDAP for public IPs); domain/URL → WHOIS/RDAP + Domain Intelligence + Certificate & Subdomain Intelligence + Website Metadata Review; email/username/unknown → none |
+| **Website / Domain Footprint** | Passive domain footprint | WHOIS/RDAP + Domain Intelligence + Certificate & Subdomain Intelligence + Website Metadata Review (no Nmap by default) |
+| **Local Device / IP Check** | Conservative active IP scan | Network Service Check with Quick check Nmap profile; public IPv4 may also recommend WHOIS/RDAP; private/local IPs skip RDAP; authorisation required |
 | **Custom Module Selection** | Power-user manual pick | All compatible modules shown; no automatic preselection when you change target |
 
 Recommendations are deterministic and local — they filter by target type and run mode only. **Compatibility checks and the authorisation gate still apply**; passive-only runs do not require authorisation.
@@ -139,7 +140,7 @@ General settings:
 | `PROJECT_OVERWATCH_MAX_BATCH_ITEMS` | Max queued batch items per case | `50` |
 | `PROJECT_OVERWATCH_ENABLE_ACTIVE_MODULES` | Global active module toggle | `true` |
 
-Future API-backed modules are blocked cleanly when keys are missing. Current passive modules (Domain Intelligence, Certificate & Subdomain Intelligence, Website Metadata Review) and Nmap do **not** require API keys.
+Future API-backed modules are blocked cleanly when keys are missing. Current passive modules (WHOIS/RDAP Intelligence, Domain Intelligence, Certificate & Subdomain Intelligence, Website Metadata Review) and Nmap do **not** require API keys.
 
 ### Optional local password
 
@@ -344,6 +345,25 @@ Re-running a module does not automatically reopen closed/accepted/false positive
 
 If crt.sh is rate limited or unavailable, the module returns a structured warning instead of crashing.
 
+### WHOIS / RDAP Intelligence (passive, v2.0)
+
+- Collects public registration and allocation metadata using **RDAP** (Registration Data Access Protocol) via the public `rdap.org` redirector
+- Accepts **domain**, **URL** (hostname extracted), and **public IPv4** targets — no API key required
+- Parses registrar/registry, status, registration/update/expiry dates, nameservers, entities, and abuse contacts where published
+- **Lookup order:** IANA bootstrap RDAP → `rdap.org` redirector → port-43 WHOIS fallback; retries on HTTP 429/503
+- **Per-case cache** — repeat lookups for the same target reuse stored RDAP/WHOIS responses within a case
+- **Private/local IPv4** addresses (`192.168.x.x`, `10.x.x.x`, `172.16–31.x.x`, `127.x.x.x`, etc.) return a clean informational result without attempting public RDAP
+- Registration data may be **incomplete, redacted, or stale** — treat all fields as contextual metadata, not proof of ownership or risk
+- Creates entities/relationships for nameservers, registrar, network holder, and abuse contacts where observed
+- Evidence Locker stores RDAP summaries, WHOIS fallback text, and source-unavailable notices
+
+**How to test:**
+
+1. Enter `example.com` or `8.8.8.8` as the target on Run Operation.
+2. Enable **WHOIS / RDAP Intelligence [Passive]** (no authorisation required).
+3. Review registrar/status/dates/nameservers in the result summary, findings, graph relationships, Evidence Locker, and reports.
+4. Test `192.168.1.10` to confirm the private-IP informational path (not treated as an error).
+
 ## Reports
 
 **Archive → Report** generates Markdown previews with optional:
@@ -469,7 +489,7 @@ The **Evidence Locker** preserves source artefacts from module runs:
 
 **Current limitation:** text artefacts are stored in the local SQLite database (`content_text`). Content larger than 32 KB spills to `database/evidence_files/` with a preview retained in the database.
 
-**TODO (v1.14+):** binary attachments, external object storage, and first API-backed collection module with evidence preflight.
+- **Evidence Locker** stores text artefacts with provenance, reliability, and SHA-256 hashes; large/binary spill to disk
 
 ### Evidence linking and filters (v1.13)
 
@@ -480,7 +500,7 @@ The **Evidence Locker** preserves source artefacts from module runs:
 
 ## Developing new modules
 
-Before adding WHOIS, VirusTotal, Sherlock, or other collectors, use the **Module SDK** (`utils/module_sdk.py`) and the template skeleton (`modules/TEMPLATE_module.py`).
+Before adding additional collectors (Sherlock, expanded WHOIS fallback, etc.), use the **Module SDK** (`utils/module_sdk.py`) and the template skeleton (`modules/TEMPLATE_module.py`).
 
 ### Standard result contract
 

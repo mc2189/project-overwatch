@@ -137,6 +137,19 @@ def collect_health_checks() -> list[HealthCheck]:
             )
         )
 
+    whois_ready = is_runtime_ready("infra_whois_rdap")
+    whois_error = get_runtime_error("infra_whois_rdap")
+    if whois_ready:
+        checks.append(HealthCheck("WHOIS / RDAP Intelligence", True, "Backend loaded"))
+    else:
+        checks.append(
+            HealthCheck(
+                "WHOIS / RDAP Intelligence",
+                False,
+                whois_error or "Backend failed to load — run pip install -r requirements.txt",
+            )
+        )
+
     checks.append(
         HealthCheck(
             "Graph PNG (kaleido)",

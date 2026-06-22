@@ -10,6 +10,7 @@ from typing import Any
 from database.db_setup import create_evidence_item, link_evidence_to_finding, list_evidence_items
 from utils.evidence_model import (
     EVIDENCE_DIRECT_OBSERVATION,
+    EVIDENCE_SYSTEM_GENERATED,
     EVIDENCE_THIRD_PARTY_SOURCE,
     EVIDENCE_UNAVAILABLE_SOURCE,
     RELIABILITY_HIGH,
@@ -539,6 +540,102 @@ def capture_virustotal_evidence(
     return items
 
 
+def capture_whois_rdap_evidence(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    observation_id: int,
+    module_id: str,
+    result: dict[str, Any],
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    parsed_data = result.get("parsed_data") or result.get("data") or {}
+
+    if parsed_data.get("private_local_ip"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Private/local IP RDAP notice",
+                summary="Public RDAP allocation lookup is not applicable for this address.",
+                content_text=_text_summary(parsed_data),
+                content_type="application/json",
+                evidence_type=EVIDENCE_SYSTEM_GENERATED,
+                source_name="project_overwatch",
+                collection_method="local_classification",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+        return items
+
+    rdap_summary = parsed_data.get("rdap_summary")
+    source = parsed_data.get("source")
+    if rdap_summary:
+        is_whois = source == "whois"
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="WHOIS fallback summary" if is_whois else "RDAP response summary",
+                summary=(
+                    "Structured registration metadata from WHOIS port-43 fallback."
+                    if is_whois
+                    else "Structured registration/allocation metadata from public RDAP."
+                ),
+                content_text=_text_summary(
+                    {
+                        "source": source,
+                        "rdap_url": parsed_data.get("rdap_url"),
+                        "whois_fallback": parsed_data.get("whois_fallback"),
+                        "rdap_summary": rdap_summary,
+                        "from_cache": parsed_data.get("from_cache"),
+                    }
+                ),
+                content_type="application/json",
+                evidence_type=EVIDENCE_THIRD_PARTY_SOURCE,
+                source_name=(parsed_data.get("whois_fallback") or {}).get("whois_server") or "rdap.org",
+                source_url=None if is_whois else "https://rdap.org/",
+                collection_method="whois_fallback" if is_whois else "public_rdap_lookup",
+                reliability=RELIABILITY_MEDIUM,
+            )
+        )
+
+    if parsed_data.get("lookup_status") == "unavailable" or parsed_data.get("warning"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="RDAP lookup limitation",
+                summary="RDAP source was unavailable or incomplete during this run.",
+                content_text=_text_summary(
+                    {
+                        "warning": parsed_data.get("warning"),
+                        "rdap_url": parsed_data.get("rdap_url"),
+                        "lookup_status": parsed_data.get("lookup_status"),
+                    }
+                ),
+                content_type="application/json",
+                evidence_type=EVIDENCE_UNAVAILABLE_SOURCE,
+                source_name="rdap.org",
+                source_url="https://rdap.org/",
+                collection_method="public_rdap_lookup",
+                reliability=RELIABILITY_UNKNOWN,
+            )
+        )
+
+    return items
+
+
 def capture_module_evidence(
     conn: sqlite3.Connection,
     *,
@@ -585,7 +682,16 @@ def capture_module_evidence(
             module_id=module_id,
             result=result,
         )
-    if module_id == "intel_virustotal":
+    if module_id == "infra_whois_rdap":
+        items = capture_whois_rdap_evidence(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            result=result,
+        )
+    elif module_id == "intel_virustotal":
         items = capture_virustotal_evidence(
             conn,
             case_id=case_id,

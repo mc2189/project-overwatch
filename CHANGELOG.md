@@ -2,6 +2,25 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.1.0 — RDAP bootstrap, WHOIS fallback and case cache
+
+- **IANA bootstrap RDAP** — queries registry-specific RDAP servers before `rdap.org` redirector
+- **Retry/backoff** — automatic retry on HTTP 429/503 from RDAP endpoints
+- **WHOIS port-43 fallback** — stdlib socket fallback when RDAP is unavailable (no new dependencies)
+- **Per-case cache** — `rdap_lookup_cache` table stores RDAP/WHOIS responses per case/query
+- **Domain abuse contacts** — `has_abuse_contact` relationships for domain/URL targets, not just IPv4
+- WHOIS text parser produces RDAP-compatible summaries for findings and evidence
+
+## v2.0.0 — WHOIS / RDAP Intelligence
+
+- **`infra_whois_rdap`** — passive registration and allocation metadata for domains, URLs, and public IPv4 addresses
+- Public RDAP lookups via `rdap.org` redirector (no API key required)
+- Private/local IPv4 handling returns informational result without public lookup
+- Entities/relationships: nameservers, registrar, network holder, abuse contacts
+- Findings interpreter, evidence capture, run mode recommendations, batch queue support
+- UI result summaries for registration dates, status, nameservers, and abuse contacts
+- TODO noted for WHOIS port-43 fallback when RDAP is unavailable (v2.1)
+
 ## v1.15.0 — Evidence hints, binary storage, VirusTotal and CI
 
 - **`capture_result_evidence_hints()`** — module `result["evidence"]` hints are stored automatically after module-specific capture

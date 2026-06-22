@@ -60,8 +60,11 @@ def render_result_summary_tab(result: dict) -> None:
         if dns_records:
             st.markdown("**DNS records**")
             for record_type, values in dns_records.items():
-                if values:
-                    st.write(f"- {record_type}: {', '.join(values)}")
+                cleaned = [str(value).strip() for value in (values or []) if str(value).strip()]
+                if cleaned:
+                    st.write(f"- {record_type}: {', '.join(cleaned)}")
+                else:
+                    st.write(f"- {record_type}: none observed")
 
         tls = parsed_data.get("tls", {})
         if tls and tls.get("available"):
@@ -72,7 +75,7 @@ def render_result_summary_tab(result: dict) -> None:
             )
 
         wayback = parsed_data.get("wayback", {})
-        if wayback and wayback.get("available"):
+        if wayback:
             first = display_or_unavailable(
                 wayback.get("first_snapshot_display")
                 or format_wayback_timestamp(wayback.get("first_snapshot"))
@@ -81,10 +84,66 @@ def render_result_summary_tab(result: dict) -> None:
                 wayback.get("last_snapshot_display")
                 or format_wayback_timestamp(wayback.get("last_snapshot"))
             )
-            st.markdown("**Wayback Machine**")
-            st.write(f"Snapshots available · first={first} · last={last}")
-        elif wayback.get("error"):
-            st.caption(f"Wayback lookup: {wayback['error']}")
+            has_first = bool((wayback.get("first_snapshot") or "").strip()) or bool(
+                (wayback.get("first_snapshot_display") or "").strip()
+            )
+            has_last = bool((wayback.get("last_snapshot") or "").strip()) or bool(
+                (wayback.get("last_snapshot_display") or "").strip()
+            )
+            if wayback.get("available") and has_first and has_last:
+                st.markdown("**Wayback Machine**")
+                st.write(f"Snapshots available · first observed: {first} · latest snapshot: {last}")
+            elif wayback.get("available") and has_first and not has_last:
+                st.markdown("**Wayback Machine**")
+                st.write(
+                    f"Wayback partially available · first observed: {first} · "
+                    "latest snapshot unavailable during this run."
+                )
+            elif wayback.get("available") and not has_first and has_last:
+                st.markdown("**Wayback Machine**")
+                st.write(
+                    f"Wayback partially available · latest snapshot: {last} · "
+                    "earliest snapshot unavailable during this run."
+                )
+            elif wayback.get("available"):
+                st.markdown("**Wayback Machine**")
+                st.write("Wayback partially available · snapshot details were incomplete during this run.")
+            elif wayback.get("error"):
+                st.caption(f"Wayback lookup: {wayback['error']}")
+
+    if result["module_id"] == "infra_whois_rdap" and parsed_data:
+        if parsed_data.get("private_local_ip"):
+            st.info("Private/local IP — public RDAP allocation lookup is not applicable.")
+        rdap = parsed_data.get("rdap_summary") or {}
+        registrar = rdap.get("registrar") or parsed_data.get("registrar")
+        if registrar and (registrar.get("name") or registrar.get("handle")):
+            st.markdown(
+                f"**Registrar/registry:** {registrar.get('name') or registrar.get('handle')}"
+            )
+        if rdap.get("status"):
+            st.markdown(f"**Status:** {', '.join(rdap['status'])}")
+        events = rdap.get("events") or {}
+        date_bits = []
+        for label, key in (
+            ("Created", "registration"),
+            ("Updated", "last_changed"),
+            ("Expires", "expiration"),
+        ):
+            if events.get(key):
+                date_bits.append(f"{label}: {events[key]}")
+        if date_bits:
+            st.markdown("**Dates:** " + " · ".join(date_bits))
+        if rdap.get("nameservers"):
+            st.markdown(f"**Nameservers:** {', '.join(rdap['nameservers'])}")
+        if rdap.get("network_name"):
+            st.markdown(f"**Network:** {rdap['network_name']}")
+        if rdap.get("country"):
+            st.markdown(f"**Country:** {rdap['country']}")
+        abuse = rdap.get("abuse_contact") or parsed_data.get("abuse_contact")
+        if abuse and (abuse.get("email") or abuse.get("name")):
+            st.markdown(f"**Abuse/contact:** {abuse.get('email') or abuse.get('name')}")
+        if parsed_data.get("warning"):
+            st.warning(parsed_data["warning"])
 
     if result["module_id"] == "infra_website_metadata" and parsed_data:
         homepage = parsed_data.get("homepage") or {}
@@ -165,6 +224,53 @@ def render_result_module_output_tab(result: dict) -> None:
                 for cert in certificates[:15]
             ]
             st.dataframe(pd.DataFrame(cert_rows), width="stretch", hide_index=True)
+
+    if result["module_id"] == "infra_whois_rdap" and parsed_data:
+        rdap = parsed_data.get("rdap_summary") or {}
+        rows: list[dict[str, str]] = []
+        for label, key in (
+            ("Object class", "object_class"),
+            ("Handle", "handle"),
+            ("LDH name", "ldh_name"),
+            ("Network", "network_name"),
+            ("Country", "country"),
+        ):
+            value = rdap.get(key)
+            if value:
+                rows.append({"field": label, "value": str(value)})
+        events = rdap.get("events") or {}
+        for label, key in (
+            ("Registration", "registration"),
+            ("Last changed", "last_changed"),
+            ("Expiration", "expiration"),
+        ):
+            if events.get(key):
+                rows.append({"field": label, "value": events[key]})
+        if rdap.get("status"):
+            rows.append({"field": "Status", "value": ", ".join(rdap["status"])})
+        if rows:
+            st.markdown("**RDAP summary**")
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+        if rdap.get("nameservers"):
+            st.markdown("**Nameservers**")
+            st.dataframe(
+                pd.DataFrame({"nameserver": rdap["nameservers"]}),
+                width="stretch",
+                hide_index=True,
+            )
+        entities = rdap.get("entities") or []
+        if entities:
+            st.markdown("**RDAP entities (sample)**")
+            entity_rows = [
+                {
+                    "roles": ", ".join(entity.get("roles") or []),
+                    "name": entity.get("name"),
+                    "email": entity.get("email"),
+                    "handle": entity.get("handle"),
+                }
+                for entity in entities[:10]
+            ]
+            st.dataframe(pd.DataFrame(entity_rows), width="stretch", hide_index=True)
 
     if result["module_id"] == "infra_domain_intel" and parsed_data:
         security_headers = parsed_data.get("security_headers", {}).get("https", {})

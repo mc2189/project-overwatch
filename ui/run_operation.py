@@ -151,6 +151,7 @@ def _sync_run_mode_selection(
             run_mode,
             target_type,
             quick_check_include_port_scan=include_port_scan,
+            target=target,
         )
         compatible_ids = {
             module.module_id
@@ -247,6 +248,7 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
         run_mode,
         target_type,
         quick_check_include_port_scan=include_port_scan,
+        target=target,
     )
     if target.strip():
         if run_mode != CUSTOM:
@@ -278,6 +280,7 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
             run_mode,
             target_type,
             quick_check_include_port_scan=include_port_scan,
+            target=target,
         )
     )
     recommended_compatible = [
@@ -369,6 +372,13 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
                     st.write(
                         "Fetches the public homepage and reviews title, meta tags, headers, "
                         "link/form counts, robots.txt, and sitemap hints. Does not submit forms."
+                    )
+                elif module_id == "infra_whois_rdap":
+                    st.caption("Passive module — no authorisation required.")
+                    st.write(
+                        "Collects public registration and allocation metadata using RDAP for domains, "
+                        "URLs (host extracted), and public IPv4 addresses. Private/local IPs return an "
+                        "informational result without public lookup."
                     )
         st.session_state.nmap_options = nmap_options
 

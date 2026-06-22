@@ -200,6 +200,36 @@ MODULES: list[ModuleEntry] = [
         ),
     ),
     ModuleEntry(
+        module_id="infra_whois_rdap",
+        display_name="WHOIS / RDAP Intelligence",
+        category="Infrastructure",
+        description="Passive registration and allocation metadata for domains and IP addresses.",
+        status="active",
+        mode="passive",
+        risk_level="low",
+        requires_authorisation=False,
+        requires_api_key=False,
+        implemented=True,
+        accepted_target_types=("domain", "url", "ipv4"),
+        config_notes="No API key required. Uses IANA bootstrap RDAP with rdap.org fallback and port-43 WHOIS when RDAP is unavailable.",
+        rate_limit_notes="Public registry endpoints may rate limit — automatic retry/backoff on HTTP 429/503.",
+        short_help="Passive registration and allocation metadata via public RDAP for domains, URLs, and IPv4 addresses.",
+        detailed_help=(
+            "Collects public registration and allocation metadata using RDAP for domains, URLs (host extracted), "
+            "and public IPv4 addresses. Private/local IPs return an informational result without public lookup. "
+            "Registry data may be incomplete, redacted, or outdated — treat results as contextual metadata only."
+        ),
+        example_inputs=("example.com", "https://example.com/path", "8.8.8.8"),
+        output_summary="Registrar/registry, status, dates, nameservers, abuse contacts, and RDAP entity summaries.",
+        caution_notes=(
+            "Passive public metadata only — no active scanning.",
+            "Registration data can be redacted, incomplete, or stale.",
+            "Private/local IPv4 addresses skip public RDAP lookup by design.",
+            "WHOIS port-43 fallback is used when RDAP is unavailable.",
+            "Per-case RDAP/WHOIS responses are cached to reduce repeat registry queries.",
+        ),
+    ),
+    ModuleEntry(
         module_id="infra_amass",
         display_name="Amass",
         category="Infrastructure",

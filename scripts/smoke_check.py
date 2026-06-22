@@ -531,6 +531,149 @@ def _check_cert_subdomain_module() -> None:
         raise AssertionError("findings pipeline not registered for infra_cert_subdomain")
 
 
+def _check_whois_rdap_module() -> None:
+    registry = __import__("modules.module_registry", fromlist=["get_module"])
+    module = registry.get_module("infra_whois_rdap")
+    if module is None or not module.implemented:
+        raise AssertionError("infra_whois_rdap registry entry missing or not implemented")
+    for field in (
+        "accepted_target_types",
+        "short_help",
+        "detailed_help",
+        "example_inputs",
+        "output_summary",
+        "caution_notes",
+    ):
+        if not getattr(module, field):
+            raise AssertionError(f"infra_whois_rdap missing registry metadata: {field}")
+    if module.accepted_target_types != ("domain", "url", "ipv4"):
+        raise AssertionError("infra_whois_rdap accepted_target_types mismatch")
+
+    import importlib.util
+
+    module_path = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_whois_rdap.py"
+    spec = importlib.util.spec_from_file_location("infra_whois_rdap", module_path)
+    if spec is None or spec.loader is None:
+        raise AssertionError("could not load infra_whois_rdap module spec")
+    loaded = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(loaded)
+    if not callable(getattr(loaded, "run_whois_rdap_lookup", None)):
+        raise AssertionError("run_whois_rdap_lookup missing")
+
+    executor = __import__("modules.executor", fromlist=["is_runtime_ready"])
+    if not executor.is_runtime_ready("infra_whois_rdap"):
+        raise AssertionError("executor cannot load infra_whois_rdap backend")
+
+    mock_payload = {
+        "objectClassName": "domain",
+        "handle": "EXAMPLE-DOM",
+        "ldhName": "example.com",
+        "status": ["client transfer prohibited"],
+        "events": [
+            {"eventAction": "registration", "eventDate": "1995-08-14T04:00:00Z"},
+            {"eventAction": "expiration", "eventDate": "2026-08-13T04:00:00Z"},
+        ],
+        "nameservers": [{"ldhName": "ns1.example.com"}, {"ldhName": "ns2.example.com"}],
+        "entities": [
+            {
+                "roles": ["registrar"],
+                "handle": "REG-EXAMPLE",
+                "vcardArray": ["vcard", [["fn", {}, "text", "Example Registrar Inc"]]],
+            }
+        ],
+    }
+    lookup = loaded.run_whois_rdap_lookup(
+        "example.com",
+        options={"mock_rdap_response": mock_payload},
+    )
+    if not lookup.get("success"):
+        raise AssertionError("mock WHOIS/RDAP lookup should succeed")
+    parsed = lookup.get("data") or lookup.get("parsed_data") or {}
+    if not parsed.get("rdap_summary"):
+        raise AssertionError("mock WHOIS/RDAP lookup missing rdap_summary")
+
+    private = loaded.run_whois_rdap_lookup("192.168.1.10")
+    if not private.get("success"):
+        raise AssertionError("private IP lookup should succeed as informational result")
+    private_data = private.get("data") or private.get("parsed_data") or {}
+    if not private_data.get("private_local_ip"):
+        raise AssertionError("private IP should be flagged as private_local_ip")
+
+    interpreter = __import__(
+        "utils.whois_rdap_interpreter",
+        fromlist=["interpret_whois_rdap_results"],
+    )
+    findings = interpreter.interpret_whois_rdap_results(parsed)
+    if not findings:
+        raise AssertionError("whois rdap interpreter returned no findings for sample data")
+
+    registry_pipeline = __import__(
+        "utils.findings_registry",
+        fromlist=["module_has_findings_pipeline"],
+    )
+    if not registry_pipeline.module_has_findings_pipeline("infra_whois_rdap"):
+        raise AssertionError("findings pipeline not registered for infra_whois_rdap")
+
+    sdk = __import__("utils.module_sdk", fromlist=["normalise_result", "validate_module_result"])
+    normalized = sdk.normalise_result(lookup)
+    validation = sdk.validate_module_result(normalized)
+    if not validation["ok"] and validation["errors"]:
+        raise AssertionError(f"WHOIS/RDAP result failed SDK validation: {validation['errors']}")
+
+    whois_text = (
+        "Domain Name: example.com\n"
+        "Registrar: Example Registrar Inc\n"
+        "Creation Date: 1995-08-14T04:00:00Z\n"
+        "Registry Expiry Date: 2026-08-13T04:00:00Z\n"
+        "Name Server: ns1.example.com\n"
+        "Name Server: ns2.example.com\n"
+        "Abuse Email: abuse@example.com\n"
+    )
+    whois_lookup = loaded.run_whois_rdap_lookup(
+        "example.com",
+        options={"mock_whois_text": whois_text},
+    )
+    if not whois_lookup.get("success"):
+        raise AssertionError("mock WHOIS fallback lookup should succeed")
+    whois_data = whois_lookup.get("data") or whois_lookup.get("parsed_data") or {}
+    if whois_data.get("source") != "whois":
+        raise AssertionError("mock WHOIS fallback should set source=whois")
+    if not whois_data.get("rdap_summary", {}).get("nameservers"):
+        raise AssertionError("WHOIS parser should extract nameservers")
+
+    parser = __import__("utils.whois_rdap_parser", fromlist=["parse_whois_text"])
+    summary = parser.parse_whois_text(whois_text, query_value="example.com", target_type="domain")
+    if not (summary.get("registrar") or {}).get("name"):
+        raise AssertionError("parse_whois_text should extract registrar")
+
+    cache = __import__("utils.rdap_cache", fromlist=["get_rdap_cache_entry", "set_rdap_cache_entry"])
+    db = __import__("database.db_setup", fromlist=["get_or_create_default_case", "get_db_conn"])
+    case = db.get_or_create_default_case()
+    conn = db.get_db_conn()
+    try:
+        cache.set_rdap_cache_entry(
+            case["id"],
+            "domain:cache-smoke.example",
+            "domain",
+            "rdap",
+            '{"objectClassName":"domain","ldhName":"cache-smoke.example"}',
+            rdap_url="mock://cache",
+            conn=conn,
+        )
+        cached = cache.get_rdap_cache_entry(case["id"], "domain:cache-smoke.example", conn=conn)
+        if not cached or cached.get("source") != "rdap":
+            raise AssertionError("rdap cache get/set failed")
+        cached_lookup = loaded.run_whois_rdap_lookup(
+            "cache-smoke.example",
+            options={"case_id": case["id"], "use_cache": True, "skip_bootstrap": True},
+        )
+        cached_data = cached_lookup.get("data") or cached_lookup.get("parsed_data") or {}
+        if not cached_data.get("from_cache"):
+            raise AssertionError("lookup should reuse case cache when available")
+    finally:
+        conn.close()
+
+
 def _check_stale_finding_reopen() -> None:
     db = __import__(
         "database.db_setup",
@@ -694,14 +837,35 @@ def _check_run_modes() -> None:
     domain_quick = run_modes.get_recommended_modules_for_mode(
         run_modes.QUICK_CHECK, "domain"
     )
-    if set(domain_quick) != {"infra_domain_intel", "infra_cert_subdomain", "infra_website_metadata"}:
+    expected_domain_modules = {
+        "infra_whois_rdap",
+        "infra_domain_intel",
+        "infra_cert_subdomain",
+        "infra_website_metadata",
+    }
+    if set(domain_quick) != expected_domain_modules:
         raise AssertionError(f"domain quick check recommendations unexpected: {domain_quick}")
 
     url_footprint = run_modes.get_recommended_modules_for_mode(
         run_modes.WEBSITE_FOOTPRINT, "url"
     )
-    if set(url_footprint) != {"infra_domain_intel", "infra_cert_subdomain", "infra_website_metadata"}:
+    if set(url_footprint) != expected_domain_modules:
         raise AssertionError(f"URL footprint recommendations unexpected: {url_footprint}")
+
+    public_ip_modules = run_modes.resolve_recommended_modules_for_mode(
+        run_modes.LOCAL_IP_CHECK,
+        "ipv4",
+        target="8.8.8.8",
+    )
+    if "infra_whois_rdap" not in public_ip_modules:
+        raise AssertionError("public IPv4 local check should recommend WHOIS/RDAP")
+    private_ip_modules = run_modes.resolve_recommended_modules_for_mode(
+        run_modes.LOCAL_IP_CHECK,
+        "ipv4",
+        target="192.168.1.10",
+    )
+    if "infra_whois_rdap" in private_ip_modules:
+        raise AssertionError("private IPv4 local check should not recommend WHOIS/RDAP")
 
     for unsupported in ("email", "username", "unknown"):
         quick = run_modes.get_recommended_modules_for_mode(run_modes.QUICK_CHECK, unsupported)
@@ -712,8 +876,11 @@ def _check_run_modes() -> None:
             raise AssertionError("Custom mode should not auto-recommend modules")
 
     outputs = run_modes.get_run_mode_expected_outputs(run_modes.QUICK_CHECK, "domain")
-    if not outputs or "Domain Intelligence" not in outputs[0]:
-        raise AssertionError("expected domain module output in quick check plan")
+    if not outputs:
+        raise AssertionError("expected domain module outputs in quick check plan")
+    output_text = " ".join(outputs)
+    if "Domain Intelligence" not in output_text or "WHOIS / RDAP Intelligence" not in output_text:
+        raise AssertionError("expected domain and WHOIS/RDAP outputs in quick check plan")
 
     reason = run_modes.get_recommendation_reason(run_modes.LOCAL_IP_CHECK, "ipv4")
     if "authorisation" not in reason.lower():
@@ -1368,6 +1535,7 @@ def _check_module_sdk() -> None:
         "infra_domain_intel",
         "infra_cert_subdomain",
         "infra_website_metadata",
+        "infra_whois_rdap",
         "intel_virustotal",
     ):
         module = registry.get_module(module_id)
@@ -1582,6 +1750,11 @@ def main() -> int:
     run(
         "cert subdomain module",
         lambda: _check_cert_subdomain_module(),
+    )
+
+    run(
+        "whois rdap module",
+        lambda: _check_whois_rdap_module(),
     )
 
     run(

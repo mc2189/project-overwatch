@@ -103,6 +103,13 @@ MODULE_EVIDENCE_DEFAULTS: dict[str, dict[str, Any]] = {
         "reliability": RELIABILITY_HIGH,
         "collection_method": "http_request",
     },
+    "infra_whois_rdap": {
+        "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
+        "source_name": "rdap.org",
+        "source_url": "https://rdap.org/",
+        "reliability": RELIABILITY_MEDIUM,
+        "collection_method": "public_rdap_lookup",
+    },
     "intel_virustotal": {
         "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
         "source_name": "virustotal",
@@ -139,6 +146,22 @@ RELATIONSHIP_EVIDENCE_DEFAULTS: dict[tuple[str, str], dict[str, Any]] = {
     },
     ("infra_website_metadata", "references_sitemap"): {
         "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
+        "reliability": RELIABILITY_MEDIUM,
+    },
+    ("infra_whois_rdap", "uses_nameserver"): {
+        "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
+        "reliability": RELIABILITY_MEDIUM,
+    },
+    ("infra_whois_rdap", "registered_with"): {
+        "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
+        "reliability": RELIABILITY_MEDIUM,
+    },
+    ("infra_whois_rdap", "allocated_to"): {
+        "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
+        "reliability": RELIABILITY_MEDIUM,
+    },
+    ("infra_whois_rdap", "has_abuse_contact"): {
+        "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
         "reliability": RELIABILITY_MEDIUM,
     },
 }
@@ -249,6 +272,19 @@ def observation_evidence_for_module(
         if parsed.get("api", {}).get("error"):
             meta["reliability"] = RELIABILITY_UNKNOWN
             meta["evidence_type"] = EVIDENCE_UNAVAILABLE_SOURCE
+    if module_id == "infra_whois_rdap" and result is not None:
+        parsed = result.get("parsed_data") or result.get("data") or {}
+        if parsed.get("private_local_ip"):
+            meta["evidence_type"] = EVIDENCE_SYSTEM_GENERATED
+            meta["source_name"] = "project_overwatch"
+            meta["reliability"] = RELIABILITY_HIGH
+            meta["collection_method"] = "local_classification"
+        elif parsed.get("source") == "whois":
+            meta["collection_method"] = "whois_fallback"
+            meta["source_name"] = (parsed.get("whois_fallback") or {}).get("whois_server") or "whois"
+        elif parsed.get("lookup_status") == "unavailable":
+            meta["evidence_type"] = EVIDENCE_UNAVAILABLE_SOURCE
+            meta["reliability"] = RELIABILITY_UNKNOWN
     return meta
 
 

@@ -273,6 +273,22 @@ CREATE TABLE IF NOT EXISTS evidence_finding_links (
 )
 """
 
+RDAP_LOOKUP_CACHE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS rdap_lookup_cache (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER NOT NULL,
+    query_key TEXT NOT NULL,
+    target_type TEXT NOT NULL,
+    source TEXT NOT NULL,
+    response_json TEXT NOT NULL,
+    rdap_url TEXT,
+    whois_server TEXT,
+    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(case_id) REFERENCES cases(id),
+    UNIQUE(case_id, query_key)
+)
+"""
+
 ALL_SCHEMAS = (
     TARGETS_SCHEMA,
     RECON_DATA_SCHEMA,
@@ -287,6 +303,7 @@ ALL_SCHEMAS = (
     BATCH_QUEUE_RUNS_SCHEMA,
     EVIDENCE_ITEMS_SCHEMA,
     EVIDENCE_FINDING_LINKS_SCHEMA,
+    RDAP_LOOKUP_CACHE_SCHEMA,
 )
 
 

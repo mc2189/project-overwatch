@@ -37,6 +37,7 @@ NMAP_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_nmap.p
 DOMAIN_INTEL_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_domain_intel.py"
 CERT_SUBDOMAIN_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_cert_subdomain.py"
 WEBSITE_METADATA_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_website_metadata.py"
+WHOIS_RDAP_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_whois_rdap.py"
 VIRUSTOTAL_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intel" / "intel_virustotal.py"
 
 _nmap_handlers: tuple[Any, Any] | None = None
@@ -51,6 +52,9 @@ _cert_subdomain_load_attempted = False
 _website_metadata_handler: Any | None = None
 _website_metadata_load_error: str | None = None
 _website_metadata_load_attempted = False
+_whois_rdap_handler: Any | None = None
+_whois_rdap_load_error: str | None = None
+_whois_rdap_load_attempted = False
 _virustotal_handler: Any | None = None
 _virustotal_load_error: str | None = None
 _virustotal_load_attempted = False
@@ -222,6 +226,29 @@ def _load_website_metadata_handler() -> None:
         _website_metadata_load_error = str(exc)
 
 
+def _load_whois_rdap_handler() -> None:
+    global _whois_rdap_handler, _whois_rdap_load_error, _whois_rdap_load_attempted
+
+    if _whois_rdap_load_attempted:
+        return
+
+    _whois_rdap_load_attempted = True
+
+    if not WHOIS_RDAP_MODULE_PATH.is_file():
+        _whois_rdap_load_error = f"Module file not found: {WHOIS_RDAP_MODULE_PATH}"
+        return
+
+    try:
+        spec = importlib.util.spec_from_file_location("infra_whois_rdap", WHOIS_RDAP_MODULE_PATH)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load module spec from {WHOIS_RDAP_MODULE_PATH}")
+        infra_whois_rdap = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(infra_whois_rdap)
+        _whois_rdap_handler = infra_whois_rdap.run_whois_rdap_lookup
+    except Exception as exc:
+        _whois_rdap_load_error = str(exc)
+
+
 def _load_virustotal_handler() -> None:
     global _virustotal_handler, _virustotal_load_error, _virustotal_load_attempted
 
@@ -263,6 +290,9 @@ def is_runtime_ready(module_id: str) -> bool:
     if module_id == "infra_website_metadata":
         _load_website_metadata_handler()
         return _website_metadata_handler is not None
+    if module_id == "infra_whois_rdap":
+        _load_whois_rdap_handler()
+        return _whois_rdap_handler is not None
     if module_id == "intel_virustotal":
         _load_virustotal_handler()
         return _virustotal_handler is not None
@@ -288,6 +318,9 @@ def get_runtime_error(module_id: str) -> str | None:
     if module_id == "infra_website_metadata":
         _load_website_metadata_handler()
         return _website_metadata_load_error
+    if module_id == "infra_whois_rdap":
+        _load_whois_rdap_handler()
+        return _whois_rdap_load_error
     if module_id == "intel_virustotal":
         _load_virustotal_handler()
         return _virustotal_load_error
@@ -846,6 +879,188 @@ def _persist_website_metadata_records(
         )
 
 
+def _organisation_entity_value(info: dict[str, Any] | None) -> str | None:
+    if not info:
+        return None
+    return info.get("name") or info.get("handle")
+
+
+def _contact_entity_value(info: dict[str, Any] | None) -> str | None:
+    if not info:
+        return None
+    return info.get("email") or info.get("name") or info.get("handle")
+
+
+def _persist_whois_rdap_records(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    source_entity_id: int,
+    module_id: str,
+    target: str,
+    result: dict[str, Any],
+    authorisation_confirmed: bool,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> None:
+    """Save WHOIS/RDAP operations, observations, entities, relationships, and findings."""
+    result = _prepare_module_result(result)
+    create_operation_log(
+        case_id,
+        module_id,
+        target,
+        result["status"],
+        authorisation_confirmed=authorisation_confirmed,
+        summary=result["summary"],
+        run_mode_id=run_mode_id,
+        run_mode_label=run_mode_label,
+        conn=conn,
+    )
+
+    if not should_persist_observation(result["status"]):
+        return
+
+    parsed_data = result.get("parsed_data") or result.get("data") or {}
+    rdap_summary = parsed_data.get("rdap_summary") or {}
+    target_type = parsed_data.get("target_type") or get_target_type(target)
+
+    if target_type in {"domain", "url"}:
+        for nameserver in rdap_summary.get("nameservers") or []:
+            ns_entity = create_or_get_entity(
+                case_id,
+                "domain",
+                nameserver,
+                label=nameserver,
+                source=module_id,
+                confidence=80,
+                conn=conn,
+            )
+            create_relationship(
+                case_id,
+                source_entity_id,
+                "uses_nameserver",
+                ns_entity["id"],
+                source_module=module_id,
+                confidence=80,
+                conn=conn,
+            )
+
+        registrar_value = _organisation_entity_value(rdap_summary.get("registrar"))
+        if registrar_value:
+            registrar_entity = create_or_get_entity(
+                case_id,
+                "organization",
+                registrar_value,
+                label=registrar_value,
+                source=module_id,
+                confidence=75,
+                conn=conn,
+            )
+            create_relationship(
+                case_id,
+                source_entity_id,
+                "registered_with",
+                registrar_entity["id"],
+                source_module=module_id,
+                confidence=75,
+                conn=conn,
+            )
+
+    if target_type == "ipv4":
+        holder_value = _organisation_entity_value(rdap_summary.get("registrant")) or rdap_summary.get("network_name")
+        if holder_value:
+            holder_entity = create_or_get_entity(
+                case_id,
+                "organization",
+                str(holder_value),
+                label=str(holder_value),
+                source=module_id,
+                confidence=75,
+                conn=conn,
+            )
+            create_relationship(
+                case_id,
+                source_entity_id,
+                "allocated_to",
+                holder_entity["id"],
+                source_module=module_id,
+                confidence=75,
+                conn=conn,
+            )
+
+    abuse_value = _contact_entity_value(rdap_summary.get("abuse_contact"))
+    if abuse_value:
+        abuse_entity = create_or_get_entity(
+            case_id,
+            "contact",
+            abuse_value,
+            label=abuse_value,
+            source=module_id,
+            confidence=70,
+            conn=conn,
+        )
+        create_relationship(
+            case_id,
+            source_entity_id,
+            "has_abuse_contact",
+            abuse_entity["id"],
+            source_module=module_id,
+            confidence=70,
+            conn=conn,
+        )
+
+    observation = create_observation(
+        case_id,
+        source_entity_id,
+        module_id,
+        "whois_rdap_lookup",
+        "WHOIS/RDAP intelligence result",
+        summary=result["summary"],
+        data_json=json.dumps(
+            {
+                "module_id": module_id,
+                "success": result["success"],
+                "status": result["status"],
+                "findings": result.get("findings", []),
+                "interpreter_findings": result.get("interpreter_findings", []),
+                "warnings": result.get("warnings", []),
+                "original_target": parsed_data.get("original_target"),
+                "query_value": parsed_data.get("query_value"),
+                "target_type": parsed_data.get("target_type"),
+                "domain_or_ip": parsed_data.get("domain_or_ip"),
+                "lookup_status": parsed_data.get("lookup_status"),
+                "private_local_ip": parsed_data.get("private_local_ip"),
+                "rdap_summary": rdap_summary,
+                "source": parsed_data.get("source"),
+                "warning": parsed_data.get("warning"),
+            }
+        ),
+        raw_output=result["raw_output"],
+        **_observation_evidence_kwargs(module_id, result),
+        conn=conn,
+    )
+
+    _persist_observation_evidence(
+        conn,
+        case_id=case_id,
+        entity_id=source_entity_id,
+        observation_id=observation["id"],
+        module_id=module_id,
+        result=result,
+    )
+
+    interpreter_findings = result.get("interpreter_findings") or []
+    if interpreter_findings:
+        _persist_module_findings(
+            conn,
+            case_id=case_id,
+            entity_id=source_entity_id,
+            observation_id=observation["id"],
+            module_id=module_id,
+            interpreter_findings=interpreter_findings,
+        )
+
+
 def _persist_virustotal_records(
     conn: sqlite3.Connection,
     *,
@@ -1344,6 +1559,95 @@ def _execute_website_metadata(
     return result
 
 
+def _execute_whois_rdap(
+    module_id: str,
+    target: str,
+    options: dict[str, Any],
+    db_context: sqlite3.Connection | None,
+    authorisation_confirmed: bool,
+    case_id: int | None,
+    entity_id: int | None,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> dict[str, Any]:
+    _load_whois_rdap_handler()
+    if _whois_rdap_handler is None:
+        error_message = _whois_rdap_load_error or "WHOIS/RDAP Intelligence module is not available."
+        return make_result(
+            module_id,
+            success=False,
+            status="error",
+            summary="WHOIS/RDAP Intelligence module is not available.",
+            errors=[error_message],
+        )
+
+    intel_data = _whois_rdap_handler(
+        target,
+        options={**options, "case_id": case_id},
+    )
+    parsed_data = intel_data.get("parsed_data") or intel_data.get("data") or {}
+
+    if not intel_data.get("success") and intel_data.get("errors"):
+        errors = intel_data.get("errors") or ["WHOIS/RDAP lookup failed."]
+        return make_result(
+            module_id,
+            success=False,
+            status=intel_data.get("status", "error"),
+            summary=errors[0],
+            raw_output=intel_data.get("raw_output", ""),
+            errors=errors,
+            parsed_data=parsed_data,
+            warnings=intel_data.get("warnings", []),
+            evidence=intel_data.get("evidence", []),
+        )
+
+    interpreter_findings = interpret_module_findings(module_id, parsed_data)
+    result = make_result(
+        module_id,
+        success=True,
+        status=intel_data.get("status", STATUS_COMPLETED),
+        summary=intel_data.get("summary", f"WHOIS/RDAP lookup completed for {target}."),
+        raw_output=intel_data.get("raw_output", ""),
+        findings=intel_data.get("findings", []),
+        warnings=intel_data.get("warnings", []),
+        parsed_data=parsed_data,
+        interpreter_findings=interpreter_findings,
+        evidence=intel_data.get("evidence", []),
+    )
+
+    if db_context is not None and case_id is not None:
+        target_type = parsed_data.get("target_type") or get_target_type(target)
+        query_value = parsed_data.get("query_value") or parsed_data.get("domain_or_ip") or target
+        if target_type in {"domain", "url"}:
+            entity_type = "domain"
+            entity_value = parsed_data.get("domain_or_ip") or query_value
+        else:
+            entity_type = "ip_address"
+            entity_value = query_value
+
+        source_entity = create_or_get_entity(
+            case_id,
+            entity_type,
+            entity_value,
+            label=entity_value,
+            source=module_id,
+            conn=db_context,
+        )
+        _persist_whois_rdap_records(
+            db_context,
+            case_id=case_id,
+            source_entity_id=source_entity["id"],
+            module_id=module_id,
+            target=entity_value,
+            result=result,
+            authorisation_confirmed=authorisation_confirmed,
+            run_mode_id=run_mode_id,
+            run_mode_label=run_mode_label,
+        )
+
+    return result
+
+
 def _execute_virustotal(
     module_id: str,
     target: str,
@@ -1612,6 +1916,28 @@ def execute_module(
         return _execute_website_metadata(
             module_id,
             target,
+            db_context,
+            authorisation_confirmed,
+            case_id,
+            entity_id,
+            run_mode_id,
+            run_mode_label,
+        )
+
+    if module_id == "infra_whois_rdap":
+        if not is_runtime_ready(module_id):
+            error_message = get_runtime_error(module_id) or "WHOIS/RDAP Intelligence runtime is not ready."
+            return make_result(
+                module_id,
+                success=False,
+                status="error",
+                summary="WHOIS/RDAP Intelligence module is not available.",
+                errors=[error_message],
+            )
+        return _execute_whois_rdap(
+            module_id,
+            target,
+            options,
             db_context,
             authorisation_confirmed,
             case_id,
