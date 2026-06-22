@@ -242,6 +242,32 @@ Findings are created when **Nmap** or **Domain Intelligence** completes successf
 
 View findings in **Archive → Findings**. The dashboard shows an **Open Findings** metric for the active case.
 
+### Finding workflow (v0.9)
+
+Each finding can move through analyst workflow states:
+
+| Status | Meaning |
+|--------|---------|
+| `open` | New or awaiting review |
+| `reviewed` | Analyst has reviewed; may still need follow-up |
+| `closed` | Resolved, accepted risk, or no further action |
+
+Use the controls inside each finding expander to **Reopen**, **Mark reviewed**, or **Close**.
+
+Re-running the same module against the same entity **refreshes** matching findings and **closes** open/reviewed items that are no longer observed (marked as superseded in the explanation).
+
+### Case export (v0.9)
+
+**Archive → Findings** provides **Download Markdown report** and **Download JSON export** for the active case. Exports include findings (with suggested actions), observation summaries, and entity/relationship counts. Use exports for case notes or handoff — they remain advisory, not proof of risk.
+
+### Entity graph severity (v0.9)
+
+The **Graph** tab colours entity nodes by the highest **open** or **reviewed** finding severity linked to that entity. Grey nodes have no open/reviewed findings.
+
+### Adding findings to new modules
+
+Register an interpreter in `utils/findings_registry.py` (`MODULE_FINDING_INTERPRETERS`), wire module execution in `modules/executor.py`, and call `_persist_module_findings()` after creating an observation. The shared `sync_module_findings()` helper handles upsert and superseded closing.
+
 ### Domain Intelligence interpretation
 
 The domain interpreter uses cautious language. Missing security headers are described as **not observed**, not as confirmed vulnerabilities. Example finding types:
@@ -319,7 +345,7 @@ The **Graph** archive tab renders a simple network view using stored entities an
 - **Nodes** = entities (label if present, otherwise value)
 - **Edges** = relationships (`exposes_service`, etc.)
 
-The graph is read-only and does **not** perform new scanning. It visualises data already collected from modules the user ran.
+The graph is read-only and does **not** perform new scanning. Entity nodes are coloured by the highest open or reviewed finding severity when findings exist (v0.9).
 
 ## Lawful use
 
@@ -345,6 +371,9 @@ utils/
   nmap_xml_parser.py           XML parser for structured Nmap results
   nmap_interpreter.py          Advisory defensive result interpreter
   domain_intel_interpreter.py  Domain intelligence findings interpreter
+  findings_registry.py       Module interpreter registry for findings pipeline
+  findings_sync.py           Upsert and supersede findings on module completion
+  case_report.py             Markdown and JSON case export builders
   graph_view.py                NetworkX + Plotly graph rendering
 requirements.txt                 Python dependencies
 ```

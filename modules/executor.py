@@ -9,15 +9,14 @@ from pathlib import Path
 from typing import Any
 
 from database.db_setup import (
-    create_finding,
     create_observation,
     create_operation_log,
     create_or_get_entity,
     create_relationship,
 )
 from modules.module_registry import get_module, is_executable
-from utils.domain_intel_interpreter import interpret_domain_intel_results
-from utils.nmap_interpreter import interpret_nmap_results
+from utils.findings_registry import interpret_module_findings
+from utils.findings_sync import sync_module_findings
 from utils.nmap_options import SCRIPT_VULN, build_nmap_flags, normalize_options
 from utils.nmap_parser import build_service_entity_label, build_service_entity_value
 from utils.nmap_xml_parser import parse_nmap_results
@@ -187,20 +186,15 @@ def _persist_module_findings(
     module_id: str,
     interpreter_findings: list[dict[str, Any]],
 ) -> None:
-    """Save structured interpreter findings, skipping exact duplicates."""
-    for finding in interpreter_findings:
-        create_finding(
-            case_id,
-            module_id,
-            finding.get("title", "Finding"),
-            finding.get("severity", "info"),
-            int(finding.get("confidence", 50)),
-            finding.get("explanation", ""),
-            finding.get("suggested_actions") or [],
-            entity_id=entity_id,
-            observation_id=observation_id,
-            conn=conn,
-        )
+    """Sync structured interpreter findings (close superseded, upsert current)."""
+    sync_module_findings(
+        conn,
+        case_id=case_id,
+        entity_id=entity_id,
+        observation_id=observation_id,
+        module_id=module_id,
+        interpreter_findings=interpreter_findings,
+    )
 
 
 def _persist_investigation_records(
@@ -514,7 +508,11 @@ def _execute_nmap(
     is_error = _scan_failed(scan_data)
 
     parsed_data = parse_nmap_results(raw_output, xml_output)
-    interpreter_findings = interpret_nmap_results(parsed_data, nmap_options)
+    interpreter_findings = interpret_module_findings(
+        module_id,
+        parsed_data,
+        nmap_options,
+    )
 
     if is_error:
         result = make_result(
@@ -594,7 +592,7 @@ def _execute_domain_intel(
 
     parsed_data = intel_data.get("parsed_data") or {}
     domain = parsed_data.get("domain") or target
-    interpreter_findings = interpret_domain_intel_results(parsed_data)
+    interpreter_findings = interpret_module_findings(module_id, parsed_data)
     result = make_result(
         module_id,
         success=True,
@@ -730,7 +728,7 @@ def execute_module(
             entity_id,
         )
 
-    # TODO(v0.9): Route additional implemented modules through the findings pipeline.
+    # Additional modules: register an interpreter in utils/findings_registry.py and wire execution here.
     return make_result(
         module_id,
         success=False,

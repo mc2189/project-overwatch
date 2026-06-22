@@ -1,0 +1,40 @@
+"""Registry of module result interpreters for the unified findings pipeline."""
+
+from __future__ import annotations
+
+from typing import Any, Callable
+
+from utils.domain_intel_interpreter import interpret_domain_intel_results
+from utils.nmap_interpreter import interpret_nmap_results
+
+InterpreterFn = Callable[[dict[str, Any], dict[str, Any]], list[dict[str, Any]]]
+
+
+def _interpret_domain_intel(parsed_data: dict[str, Any], _options: dict[str, Any]) -> list[dict[str, Any]]:
+    return interpret_domain_intel_results(parsed_data)
+
+
+def _interpret_nmap(parsed_data: dict[str, Any], options: dict[str, Any]) -> list[dict[str, Any]]:
+    return interpret_nmap_results(parsed_data, options)
+
+
+MODULE_FINDING_INTERPRETERS: dict[str, InterpreterFn] = {
+    "infra_nmap": _interpret_nmap,
+    "infra_domain_intel": _interpret_domain_intel,
+}
+
+
+def interpret_module_findings(
+    module_id: str,
+    parsed_data: dict[str, Any],
+    options: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Run the registered interpreter for a module, if one exists."""
+    interpreter = MODULE_FINDING_INTERPRETERS.get(module_id)
+    if interpreter is None:
+        return []
+    return interpreter(parsed_data, options or {})
+
+
+def module_has_findings_pipeline(module_id: str) -> bool:
+    return module_id in MODULE_FINDING_INTERPRETERS

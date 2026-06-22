@@ -185,6 +185,17 @@ def list_cases(conn: sqlite3.Connection | None = None) -> list[dict[str, Any]]:
             conn.close()
 
 
+def get_case(case_id: int, conn: sqlite3.Connection | None = None) -> dict[str, Any] | None:
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        return _row_to_dict(conn.execute("SELECT * FROM cases WHERE id = ?", (case_id,)).fetchone())
+    finally:
+        if own_conn:
+            conn.close()
+
+
 def create_case(
     name: str,
     description: str | None = None,
@@ -585,9 +596,136 @@ def create_finding(
             conn.close()
 
 
+def upsert_finding(
+    case_id: int,
+    module_id: str,
+    title: str,
+    severity: str,
+    confidence: int,
+    explanation: str,
+    suggested_actions: list[str] | None = None,
+    entity_id: int | None = None,
+    observation_id: int | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any]:
+    """Create or refresh a finding without changing analyst-set closed status."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        existing = _finding_exists(case_id, entity_id, module_id, title, conn)
+        actions_json = json.dumps(suggested_actions or [])
+        if existing:
+            conn.execute(
+                """
+                UPDATE findings
+                SET observation_id = ?, severity = ?, confidence = ?, explanation = ?,
+                    suggested_actions_json = ?
+                WHERE id = ?
+                """,
+                (
+                    observation_id,
+                    severity,
+                    confidence,
+                    explanation,
+                    actions_json,
+                    existing["id"],
+                ),
+            )
+            conn.commit()
+            updated = _row_to_dict(
+                conn.execute("SELECT * FROM findings WHERE id = ?", (existing["id"],)).fetchone()
+            )
+            if updated is None:
+                raise RuntimeError("Failed to update finding.")
+            return updated
+
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO findings (
+                case_id, entity_id, observation_id, module_id, title, severity,
+                confidence, explanation, suggested_actions_json, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')
+            """,
+            (
+                case_id,
+                entity_id,
+                observation_id,
+                module_id,
+                title,
+                severity,
+                confidence,
+                explanation,
+                actions_json,
+            ),
+        )
+        conn.commit()
+        finding = _row_to_dict(conn.execute("SELECT * FROM findings WHERE id = ?", (cursor.lastrowid,)).fetchone())
+        if finding is None:
+            raise RuntimeError("Failed to create finding.")
+        return finding
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def close_superseded_findings(
+    case_id: int,
+    entity_id: int | None,
+    module_id: str,
+    active_titles: list[str],
+    conn: sqlite3.Connection | None = None,
+) -> int:
+    """Close open/reviewed findings for a module run that are no longer present."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        if entity_id is None:
+            rows = conn.execute(
+                """
+                SELECT id, title, explanation FROM findings
+                WHERE case_id = ? AND entity_id IS NULL AND module_id = ?
+                  AND status IN ('open', 'reviewed')
+                """,
+                (case_id, module_id),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT id, title, explanation FROM findings
+                WHERE case_id = ? AND entity_id = ? AND module_id = ?
+                  AND status IN ('open', 'reviewed')
+                """,
+                (case_id, entity_id, module_id),
+            ).fetchall()
+
+        closed = 0
+        active_set = set(active_titles)
+        suffix = " [Superseded: not observed in latest module run.]"
+        for row in rows:
+            finding = dict(row)
+            if finding["title"] in active_set:
+                continue
+            explanation = (finding.get("explanation") or "") + suffix
+            conn.execute(
+                "UPDATE findings SET status = 'closed', explanation = ? WHERE id = ?",
+                (explanation, finding["id"]),
+            )
+            closed += 1
+        if closed:
+            conn.commit()
+        return closed
+    finally:
+        if own_conn:
+            conn.close()
+
+
 def list_findings(
     case_id: int | None = None,
     entity_id: int | None = None,
+    module_id: str | None = None,
     severity: str | None = None,
     status: str | None = None,
     conn: sqlite3.Connection | None = None,
@@ -606,6 +744,9 @@ def list_findings(
         if entity_id is not None:
             filters.append("entity_id = ?")
             params.append(entity_id)
+        if module_id is not None:
+            filters.append("module_id = ?")
+            params.append(module_id)
         if severity is not None:
             filters.append("severity = ?")
             params.append(severity)

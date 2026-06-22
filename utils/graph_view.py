@@ -7,6 +7,36 @@ from typing import Any
 import networkx as nx
 import plotly.graph_objects as go
 
+SEVERITY_ORDER = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}
+SEVERITY_COLORS = {
+    "critical": "#d62728",
+    "high": "#ff7f0e",
+    "medium": "#bcbd22",
+    "low": "#aec7e8",
+    "info": "#1f77b4",
+    "none": "#cccccc",
+}
+
+
+def entity_max_severity(
+    findings: list[dict[str, Any]],
+    *,
+    statuses: tuple[str, ...] = ("open", "reviewed"),
+) -> dict[int, str]:
+    """Map entity IDs to their highest open/reviewed finding severity."""
+    entity_severity: dict[int, str] = {}
+    for finding in findings:
+        if finding.get("status") not in statuses:
+            continue
+        entity_id = finding.get("entity_id")
+        if entity_id is None:
+            continue
+        severity = finding.get("severity", "info")
+        current = entity_severity.get(entity_id, "none")
+        if SEVERITY_ORDER.get(severity, 0) > SEVERITY_ORDER.get(current, 0):
+            entity_severity[entity_id] = severity
+    return entity_severity
+
 
 def build_entity_graph(
     entities: list[dict[str, Any]],
@@ -41,25 +71,25 @@ def build_entity_graph(
 def entity_graph_figure(
     entities: list[dict[str, Any]],
     relationships: list[dict[str, Any]],
+    findings: list[dict[str, Any]] | None = None,
 ) -> go.Figure | None:
     """Create a simple Plotly figure for the entity graph."""
     graph = build_entity_graph(entities, relationships)
     if graph.number_of_nodes() == 0:
         return None
 
+    severity_by_entity = entity_max_severity(findings or [])
     labels = nx.get_node_attributes(graph, "label")
     positions = nx.spring_layout(graph, seed=42)
 
     edge_x: list[float | None] = []
     edge_y: list[float | None] = []
-    edge_hover: list[str] = []
 
-    for source_id, target_id, edge_data in graph.edges(data=True):
+    for source_id, target_id, _edge_data in graph.edges(data=True):
         x0, y0 = positions[source_id]
         x1, y1 = positions[target_id]
         edge_x.extend([x0, x1, None])
         edge_y.extend([y0, y1, None])
-        edge_hover.append(edge_data.get("relationship_type", "related"))
 
     edge_trace = go.Scatter(
         x=edge_x,
@@ -74,6 +104,7 @@ def entity_graph_figure(
     node_y: list[float] = []
     node_labels: list[str] = []
     node_hover: list[str] = []
+    node_colors: list[str] = []
 
     for node_id in graph.nodes():
         x, y = positions[node_id]
@@ -81,7 +112,13 @@ def entity_graph_figure(
         node_y.append(y)
         node_labels.append(labels.get(node_id, str(node_id)))
         node_type = graph.nodes[node_id].get("entity_type", "unknown")
-        node_hover.append(f"{labels.get(node_id, node_id)}<br>type: {node_type}<br>id: {node_id}")
+        severity = severity_by_entity.get(node_id, "none")
+        severity_label = severity if severity != "none" else "no open findings"
+        node_hover.append(
+            f"{labels.get(node_id, node_id)}<br>type: {node_type}<br>"
+            f"finding severity: {severity_label}<br>id: {node_id}"
+        )
+        node_colors.append(SEVERITY_COLORS.get(severity, SEVERITY_COLORS["none"]))
 
     node_trace = go.Scatter(
         x=node_x,
@@ -91,7 +128,7 @@ def entity_graph_figure(
         textposition="top center",
         hovertext=node_hover,
         hoverinfo="text",
-        marker={"size": 18, "color": "#1f77b4", "line": {"width": 1, "color": "#ffffff"}},
+        marker={"size": 18, "color": node_colors, "line": {"width": 1, "color": "#ffffff"}},
         name="Entities",
     )
 
@@ -109,15 +146,30 @@ def entity_graph_figure(
     relationship_types = sorted(
         {data.get("relationship_type", "related") for _, _, data in graph.edges(data=True)}
     )
+    annotations = []
     if relationship_types:
-        figure.add_annotation(
-            text="Edge types: " + ", ".join(relationship_types),
+        annotations.append(
+            dict(
+                text="Edge types: " + ", ".join(relationship_types),
+                xref="paper",
+                yref="paper",
+                x=0,
+                y=-0.08,
+                showarrow=False,
+                font={"size": 11, "color": "#666666"},
+            )
+        )
+    annotations.append(
+        dict(
+            text="Node colour: highest open/reviewed finding severity (grey = none)",
             xref="paper",
             yref="paper",
             x=0,
-            y=-0.08,
+            y=-0.14,
             showarrow=False,
             font={"size": 11, "color": "#666666"},
         )
+    )
+    figure.update_layout(annotations=annotations)
 
     return figure

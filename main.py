@@ -7,6 +7,7 @@ import streamlit as st
 from database.db_setup import (
     create_case,
     create_or_get_entity,
+    get_case,
     get_or_create_default_case,
     get_db_conn,
     infer_entity_type,
@@ -16,6 +17,7 @@ from database.db_setup import (
     list_observations,
     list_operations,
     list_relationships,
+    update_finding_status,
 )
 from modules.executor import execute_module, get_runtime_error, is_runtime_ready
 from modules.module_registry import (
@@ -25,6 +27,7 @@ from modules.module_registry import (
     is_executable,
     module_ui_label,
 )
+from utils.case_report import build_case_report_json, build_case_report_markdown
 from utils.graph_view import entity_graph_figure
 from utils.nmap_options import SCRIPT_VULN
 from utils.nmap_ui import render_nmap_options, render_privilege_status
@@ -63,6 +66,38 @@ def selection_requires_authorisation(module_ids: list[str]) -> bool:
         (module := get_module(module_id)) is not None and module.requires_authorisation
         for module_id in module_ids
     )
+
+
+FINDING_STATUSES = ("open", "reviewed", "closed")
+
+
+def set_finding_status(finding_id: int, status: str) -> None:
+    conn = get_db_conn()
+    try:
+        update_finding_status(finding_id, status, conn=conn)
+    finally:
+        conn.close()
+
+
+def render_finding_status_controls(finding: dict) -> None:
+    """Render workflow controls for a single finding."""
+    current = finding.get("status", "open")
+    st.caption(f"Status: **{current}**")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if current != "open" and st.button("Reopen", key=f"finding_open_{finding['id']}", width="stretch"):
+            set_finding_status(finding["id"], "open")
+            st.rerun()
+    with col2:
+        if current != "reviewed" and st.button(
+            "Mark reviewed", key=f"finding_reviewed_{finding['id']}", width="stretch"
+        ):
+            set_finding_status(finding["id"], "reviewed")
+            st.rerun()
+    with col3:
+        if current != "closed" and st.button("Close", key=f"finding_closed_{finding['id']}", width="stretch"):
+            set_finding_status(finding["id"], "closed")
+            st.rerun()
 
 
 def get_current_case() -> dict:
@@ -494,7 +529,10 @@ with tab_operations:
 
 with tab_findings:
     conn = get_db_conn()
+    case = get_case(st.session_state.case_id, conn=conn)
     entities = list_entities(case_id=st.session_state.case_id, conn=conn)
+    observations = list_observations(case_id=st.session_state.case_id, conn=conn)
+    relationships = list_relationships(case_id=st.session_state.case_id, conn=conn)
     entity_lookup = {
         entity["id"]: entity.get("label") or entity.get("value", entity["id"])
         for entity in entities
@@ -506,6 +544,31 @@ with tab_findings:
         f"Showing findings for case #{st.session_state.case_id}. "
         "Findings are analyst aids, not final proof of risk."
     )
+
+    if case and findings:
+        report_markdown = build_case_report_markdown(
+            case, entities, observations, findings, relationships
+        )
+        report_json = build_case_report_json(
+            case, entities, observations, findings, relationships
+        )
+        export_col1, export_col2 = st.columns(2)
+        with export_col1:
+            st.download_button(
+                "Download Markdown report",
+                data=report_markdown,
+                file_name=f"case_{case['id']}_report.md",
+                mime="text/markdown",
+                width="stretch",
+            )
+        with export_col2:
+            st.download_button(
+                "Download JSON export",
+                data=report_json,
+                file_name=f"case_{case['id']}_export.json",
+                mime="application/json",
+                width="stretch",
+            )
 
     filter_col1, filter_col2 = st.columns(2)
     with filter_col1:
@@ -563,17 +626,20 @@ with tab_findings:
                     st.markdown("**Suggested next actions**")
                     for action in suggested_actions:
                         st.markdown(f"- {action}")
+                render_finding_status_controls(finding)
 
 with tab_graph:
     conn = get_db_conn()
     entities = list_entities(case_id=st.session_state.case_id, conn=conn)
     relationships = list_relationships(case_id=st.session_state.case_id, conn=conn)
+    findings = list_findings(case_id=st.session_state.case_id, conn=conn)
     conn.close()
     st.caption(
         "Graph built from stored entities and relationships for the active case. "
+        "Node colour reflects the highest open or reviewed finding severity. "
         "This view does not perform new scanning."
     )
-    figure = entity_graph_figure(entities, relationships)
+    figure = entity_graph_figure(entities, relationships, findings)
     if figure is None:
         st.info("No graph data yet. Run Domain Intelligence or Nmap against a target to populate entities and relationships.")
     else:
