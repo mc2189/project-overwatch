@@ -6,6 +6,13 @@ import pandas as pd
 import streamlit as st
 
 from database.db_setup import get_db_conn
+from modules.module_registry import (
+    CATEGORIES,
+    get_module,
+    get_modules_by_category,
+    is_executable,
+    module_ui_label,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 NMAP_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_nmap.py"
@@ -28,13 +35,75 @@ else:
     except Exception as exc:
         nmap_module_error = str(exc)
 
-nmap_available = run_nmap_scan is not None and parse_nmap_problems is not None
+nmap_runtime_ready = run_nmap_scan is not None and parse_nmap_problems is not None
 
-# --- Sidebar: Full 12-Module Control ---
+modules_by_category = get_modules_by_category()
+selected_modules: dict[str, bool] = {}
+nmap_fast = False
+nmap_scripts = False
+
+
+def module_selectable(module) -> bool:
+    """A module can be selected in the UI only if it is executable and runtime-ready."""
+    if not is_executable(module):
+        return False
+    if module.module_id == "infra_nmap":
+        return nmap_runtime_ready
+    return True
+
+
+def run_registered_module(module_id: str, target: str) -> None:
+    """Execute an implemented active module. Only Nmap is wired in v0.2."""
+    module = get_module(module_id)
+    if module is None or not is_executable(module):
+        st.warning(f"Module `{module_id}` is not available for execution.")
+        return
+
+    if module_id == "infra_nmap":
+        if not nmap_runtime_ready:
+            st.error("Nmap module is not available. Check the sidebar for details.")
+            return
+
+        st.write(f"🛰️ Engaging Nmap on **{target}**...")
+
+        flags = ["-sV"]
+        if nmap_fast:
+            flags.append("-F")
+        if nmap_scripts:
+            flags.append("--script vuln")
+
+        raw_output, problems = run_nmap_scan(target, flags)
+
+        st.write("### 📜 Live Console: Nmap Output")
+        st.code(raw_output, language="bash")
+
+        if problems:
+            st.error(f"🚨 {len(problems)} Critical Problems Found!")
+            for problem in problems:
+                st.warning(f"**Finding:** {problem}")
+
+        conn = get_db_conn()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM targets WHERE domain_or_ip = ?", (target,))
+        t_id = cursor.fetchone()
+        if t_id:
+            cursor.execute(
+                "INSERT INTO recon_data (target_id, open_ports) VALUES (?, ?)",
+                (t_id[0], raw_output),
+            )
+            conn.commit()
+        conn.close()
+        return
+
+    st.info(f"{module.display_name} is registered but not wired for execution yet.")
+
+
+# --- Sidebar ---
 with st.sidebar:
     st.title("🛡️ Arsenal Control")
 
-    if nmap_module_error:
+    nmap_entry = get_module("infra_nmap")
+    if nmap_entry and is_executable(nmap_entry) and nmap_module_error:
         st.error("Nmap module unavailable")
         st.caption(nmap_module_error)
 
@@ -54,28 +123,39 @@ with st.sidebar:
     st.divider()
     st.subheader("Select Modules")
 
-    with st.expander("1. Identity", expanded=False):
-        st.checkbox("Sherlock (Username Search)")
+    for category in CATEGORIES:
+        category_key = str(category["key"])
+        category_label = str(category["label"])
+        default_expanded = bool(category.get("default_expanded", False))
+        category_modules = modules_by_category.get(category_key, [])
 
-    with st.expander("2. Infrastructure", expanded=True):
-        run_nmap = st.checkbox(
-            "Nmap (Port Scan)",
-            value=nmap_available,
-            disabled=not nmap_available,
-        )
-        l_fast = st.checkbox("Fast Scan (-F)", disabled=not nmap_available)
-        l_scripts = st.checkbox("Vuln Scripts (--script vuln)", disabled=not nmap_available)
+        with st.expander(category_label, expanded=default_expanded):
+            if not category_modules:
+                st.caption("No modules registered.")
+                continue
 
-    with st.expander("3. Vulnerability"):
-        st.caption("Nuclei / SQLmap (Planned)")
+            for module in category_modules:
+                selectable = module_selectable(module)
+                default_checked = module.module_id == "infra_nmap" and selectable
 
-    with st.expander("4. Threat Intel"):
-        st.caption("VirusTotal / Pulsedive (Planned)")
+                selected_modules[module.module_id] = st.checkbox(
+                    module_ui_label(module),
+                    value=default_checked,
+                    disabled=not selectable,
+                    help=module.description,
+                )
+
+                if not selectable and not is_executable(module):
+                    st.caption(f"{module.mode.title()} · {module.risk_level.title()} risk · planned")
+
+                if module.module_id == "infra_nmap" and selectable:
+                    nmap_fast = st.checkbox("Fast Scan (-F)", disabled=not selectable)
+                    nmap_scripts = st.checkbox("Vuln Scripts (--script vuln)", disabled=not selectable)
 
     st.divider()
     execute_btn = st.button("LAUNCH OPERATION", type="primary", use_container_width=True)
 
-# --- Main Dashboard UI ---
+# --- Main Dashboard ---
 st.title("Project Overwatch")
 st.caption("Intelligence Command Centre")
 
@@ -91,49 +171,28 @@ m3.metric("System", "Operational")
 
 st.divider()
 
-# --- Display Engine (runs only when user clicks LAUNCH OPERATION) ---
 if execute_btn:
     if not target_ip:
         st.error("No target specified.")
     else:
+        selected_ids = [module_id for module_id, enabled in selected_modules.items() if enabled]
+
         with st.status("Executing Active Intelligence Stack...", expanded=True) as status:
-            if run_nmap:
-                if not nmap_available:
-                    st.error("Nmap module is not available. Check the sidebar for details.")
-                else:
-                    st.write(f"🛰️ Engaging Nmap on **{target_ip}**...")
-
-                    flags = ["-sV"]
-                    if l_fast:
-                        flags.append("-F")
-                    if l_scripts:
-                        flags.append("--script vuln")
-
-                    raw_output, problems = run_nmap_scan(target_ip, flags)
-
-                    st.write("### 📜 Live Console: Nmap Output")
-                    st.code(raw_output, language="bash")
-
-                    if problems:
-                        st.error(f"🚨 {len(problems)} Critical Problems Found!")
-                        for problem in problems:
-                            st.warning(f"**Finding:** {problem}")
-
-                    conn = get_db_conn()
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT id FROM targets WHERE domain_or_ip = ?", (target_ip,))
-                    t_id = cursor.fetchone()
-                    if t_id:
-                        cursor.execute(
-                            "INSERT INTO recon_data (target_id, open_ports) VALUES (?, ?)",
-                            (t_id[0], raw_output),
-                        )
-                        conn.commit()
-                    conn.close()
+            if not selected_ids:
+                st.warning("No executable modules selected.")
+            else:
+                for module_id in selected_ids:
+                    module = get_module(module_id)
+                    if module is None:
+                        continue
+                    if not is_executable(module):
+                        st.warning(f"{module.display_name} is planned and cannot be run yet.")
+                        continue
+                    run_registered_module(module_id, target_ip)
 
             status.update(label="Operation Complete", state="complete")
 
-# --- Archive View ---
+# --- Archive ---
 st.header("📂 Archive")
 tab1, tab2 = st.tabs(["Manifest", "History"])
 with tab1:
