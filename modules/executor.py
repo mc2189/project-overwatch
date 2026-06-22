@@ -8,8 +8,18 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from database.db_setup import create_observation, create_operation_log
+from database.db_setup import (
+    create_observation,
+    create_operation_log,
+    create_or_get_entity,
+    create_relationship,
+)
 from modules.module_registry import get_module, is_executable
+from utils.nmap_parser import (
+    build_service_entity_label,
+    build_service_entity_value,
+    parse_nmap_open_ports,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 NMAP_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_nmap.py"
@@ -92,6 +102,41 @@ def _save_recon_output(conn: sqlite3.Connection, target: str, raw_output: str) -
         conn.commit()
 
 
+def _persist_nmap_services_and_relationships(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    source_entity_id: int,
+    target: str,
+    raw_output: str,
+    module_id: str,
+) -> list[dict[str, Any]]:
+    """Create service entities and exposes_service relationships from Nmap output."""
+    open_ports = parse_nmap_open_ports(raw_output)
+
+    for port_info in open_ports:
+        service_entity = create_or_get_entity(
+            case_id,
+            "service",
+            build_service_entity_value(target, port_info),
+            label=build_service_entity_label(port_info),
+            source=module_id,
+            confidence=80,
+            conn=conn,
+        )
+        create_relationship(
+            case_id,
+            source_entity_id,
+            "exposes_service",
+            service_entity["id"],
+            source_module=module_id,
+            confidence=80,
+            conn=conn,
+        )
+
+    return open_ports
+
+
 def _persist_investigation_records(
     conn: sqlite3.Connection,
     *,
@@ -117,6 +162,15 @@ def _persist_investigation_records(
     if entity_id is None or result["status"] != "completed":
         return
 
+    open_ports = _persist_nmap_services_and_relationships(
+        conn,
+        case_id=case_id,
+        source_entity_id=entity_id,
+        target=target,
+        raw_output=result["raw_output"],
+        module_id=module_id,
+    )
+
     create_observation(
         case_id,
         entity_id,
@@ -131,6 +185,7 @@ def _persist_investigation_records(
                 "status": result["status"],
                 "findings_count": len(result["findings"]),
                 "findings": result["findings"],
+                "open_ports": open_ports,
                 "options": {
                     "nmap_fast": bool(options.get("nmap_fast", False)),
                     "nmap_scripts": bool(options.get("nmap_scripts", False)),
@@ -179,7 +234,7 @@ def _execute_nmap(
     if nmap_fast:
         flags.append("-F")
     if nmap_scripts:
-        flags.append("--script vuln")
+        flags.append("--script=vuln")
 
     raw_output, findings = run_nmap_scan(target, flags)
     is_error = raw_output.startswith("Error")
@@ -305,7 +360,7 @@ def execute_module(
             entity_id,
         )
 
-    # TODO(v0.5): Route additional implemented modules here.
+    # TODO(v0.6): Route additional implemented modules here.
     return make_result(
         module_id,
         success=False,

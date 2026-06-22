@@ -1,6 +1,6 @@
 # Project Overwatch
 
-Defensive security intelligence dashboard built with Python and Streamlit. Project Overwatch v0.4 provides investigation cases, entity tracking, structured observations, an execution dispatcher, and manual Nmap integration for authorised assessments only.
+Defensive security intelligence dashboard built with Python and Streamlit. Project Overwatch v0.5 adds entity relationships, service discovery from Nmap, and a basic graph view on top of the investigation case model.
 
 ## Requirements
 
@@ -44,7 +44,7 @@ Streamlit opens the dashboard in your browser, typically at `http://localhost:85
 3. Select modules under **Select Modules**. The sidebar is generated from `modules/module_registry.py`.
 4. If you select an **active** module that requires authorisation (such as Nmap), tick the authorisation checkbox in the sidebar.
 5. Click **LAUNCH OPERATION** to run selected modules. Scans are never started automatically.
-6. Review results in the main panel and browse stored data under **Archive** tabs.
+6. Review results in the main panel and browse stored data under **Archive** tabs, including **Relationships** and **Graph**.
 
 Only modules marked **active** and **implemented** in the registry can be executed. Planned modules appear in the UI but are disabled.
 
@@ -151,6 +151,9 @@ An **entity** is a concrete item being investigated within a case. When you acqu
 | Domain name | `domain` |
 | Email address | `email` |
 | Other | `unknown` |
+| Discovered open port/service | `service` (created from Nmap output) |
+
+Service entities use values such as `192.168.1.1:5900/tcp` and labels such as `5900/tcp vnc Apple remote desktop vnc`.
 
 ### Observations
 
@@ -160,13 +163,34 @@ An **observation** is a structured module result. When Nmap completes, the execu
 - `observation_type`: "network_scan"
 - `summary`: executor result summary
 - `raw_output`: full Nmap text output
-- `data_json`: basic structured metadata (findings count, options used)
+- `data_json`: structured metadata including `open_ports`, findings, and scan options
 
 Legacy `recon_data` rows are still written for backwards compatibility.
 
 ### Relationships
 
-The `relationships` table is created now but not yet used in the UI. It will support entity graph and network analysis in a future release.
+A **relationship** links two entities within a case. When Nmap completes against an authorised scan, Overwatch:
+
+1. Parses open ports from the stored Nmap output
+2. Creates or reuses **service** entities for each open port
+3. Creates `exposes_service` relationships from the scanned target entity to each service entity
+4. Avoids duplicate relationships if the same scan is run again
+
+Example: scanning `192.168.68.122` and finding port 5900 creates:
+
+- Service entity: `192.168.68.122:5900/tcp`
+- Relationship: `192.168.68.122` → `exposes_service` → `192.168.68.122:5900/tcp`
+
+View relationships in the **Relationships** archive tab.
+
+### Entity graph
+
+The **Graph** archive tab renders a simple network view using stored entities and relationships. It uses NetworkX to build the graph and Plotly to display it:
+
+- **Nodes** = entities (label if present, otherwise value)
+- **Edges** = relationships (`exposes_service`, etc.)
+
+The graph is read-only and does **not** perform new scanning. It visualises data already collected from modules the user ran.
 
 ## Lawful use
 
@@ -184,6 +208,9 @@ modules/
   executor.py                  Execution dispatcher and result format
   2_infrastructure/
     infra_nmap.py                Nmap subprocess wrapper
+utils/
+  nmap_parser.py               Parse open ports from Nmap output
+  graph_view.py                NetworkX + Plotly graph rendering
 requirements.txt                 Python dependencies
 ```
 

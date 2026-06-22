@@ -393,3 +393,92 @@ def list_operations(case_id: int | None = None, conn: sqlite3.Connection | None 
     finally:
         if own_conn:
             conn.close()
+
+
+def relationship_exists(
+    case_id: int,
+    source_entity_id: int,
+    relationship_type: str,
+    target_entity_id: int,
+    conn: sqlite3.Connection | None = None,
+) -> bool:
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        row = conn.execute(
+            """
+            SELECT 1 FROM relationships
+            WHERE case_id = ? AND source_entity_id = ? AND relationship_type = ? AND target_entity_id = ?
+            """,
+            (case_id, source_entity_id, relationship_type, target_entity_id),
+        ).fetchone()
+        return row is not None
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def create_relationship(
+    case_id: int,
+    source_entity_id: int,
+    relationship_type: str,
+    target_entity_id: int,
+    source_module: str | None = None,
+    confidence: int = 50,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any]:
+    """Create a relationship, returning the existing row if it already exists."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        existing = conn.execute(
+            """
+            SELECT * FROM relationships
+            WHERE case_id = ? AND source_entity_id = ? AND relationship_type = ? AND target_entity_id = ?
+            """,
+            (case_id, source_entity_id, relationship_type, target_entity_id),
+        ).fetchone()
+        if existing:
+            return dict(existing)
+
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO relationships (
+                case_id, source_entity_id, relationship_type, target_entity_id, source_module, confidence
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (case_id, source_entity_id, relationship_type, target_entity_id, source_module, confidence),
+        )
+        conn.commit()
+        relationship = _row_to_dict(
+            conn.execute("SELECT * FROM relationships WHERE id = ?", (cursor.lastrowid,)).fetchone()
+        )
+        if relationship is None:
+            raise RuntimeError("Failed to create relationship.")
+        return relationship
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def list_relationships(case_id: int | None = None, conn: sqlite3.Connection | None = None) -> list[dict[str, Any]]:
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        if case_id is None:
+            rows = conn.execute(
+                "SELECT * FROM relationships ORDER BY created_at DESC, id DESC"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM relationships WHERE case_id = ? ORDER BY created_at DESC, id DESC",
+                (case_id,),
+            ).fetchall()
+        return _rows_to_dicts(rows)
+    finally:
+        if own_conn:
+            conn.close()

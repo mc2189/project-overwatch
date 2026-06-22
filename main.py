@@ -13,6 +13,7 @@ from database.db_setup import (
     list_entities,
     list_observations,
     list_operations,
+    list_relationships,
 )
 from modules.executor import execute_module, get_runtime_error, is_runtime_ready
 from modules.module_registry import (
@@ -22,6 +23,7 @@ from modules.module_registry import (
     is_executable,
     module_ui_label,
 )
+from utils.graph_view import entity_graph_figure
 
 if "case_id" not in st.session_state:
     st.session_state.case_id = get_or_create_default_case()["id"]
@@ -64,6 +66,27 @@ def get_current_case() -> dict:
     default_case = get_or_create_default_case()
     st.session_state.case_id = default_case["id"]
     return default_case
+
+
+def enrich_relationships_for_display(
+    relationships: list[dict],
+    entities: list[dict],
+) -> list[dict]:
+    entity_map = {entity["id"]: entity for entity in entities}
+    display_rows = []
+
+    for relationship in relationships:
+        source = entity_map.get(relationship["source_entity_id"], {})
+        target = entity_map.get(relationship["target_entity_id"], {})
+        display_rows.append(
+            {
+                **relationship,
+                "source_entity": source.get("label") or source.get("value", relationship["source_entity_id"]),
+                "target_entity": target.get("label") or target.get("value", relationship["target_entity_id"]),
+            }
+        )
+
+    return display_rows
 
 
 def render_execution_result(result: dict) -> None:
@@ -238,13 +261,18 @@ observation_count = conn.execute(
     "SELECT count(*) FROM observations WHERE case_id = ?",
     (st.session_state.case_id,),
 ).fetchone()[0]
+relationship_count = conn.execute(
+    "SELECT count(*) FROM relationships WHERE case_id = ?",
+    (st.session_state.case_id,),
+).fetchone()[0]
 conn.close()
 
-m1, m2, m3, m4 = st.columns(4)
+m1, m2, m3, m4, m5 = st.columns(5)
 m1.metric("Legacy Targets", t_count)
 m2.metric("Case Entities", entity_count)
-m3.metric("Observations", observation_count)
-m4.metric("Legacy Logs", s_count)
+m3.metric("Relationships", relationship_count)
+m4.metric("Observations", observation_count)
+m5.metric("Legacy Logs", s_count)
 
 st.divider()
 
@@ -310,9 +338,22 @@ st.header("📂 Archive")
     tab_history,
     tab_cases,
     tab_entities,
+    tab_relationships,
     tab_observations,
     tab_operations,
-) = st.tabs(["Manifest", "History", "Cases", "Entities", "Observations", "Operations"])
+    tab_graph,
+) = st.tabs(
+    [
+        "Manifest",
+        "History",
+        "Cases",
+        "Entities",
+        "Relationships",
+        "Observations",
+        "Operations",
+        "Graph",
+    ]
+)
 
 with tab_manifest:
     conn = get_db_conn()
@@ -336,6 +377,18 @@ with tab_entities:
     st.caption(f"Showing entities for case #{st.session_state.case_id}.")
     st.dataframe(pd.DataFrame(entities), width="stretch")
 
+with tab_relationships:
+    conn = get_db_conn()
+    entities = list_entities(case_id=st.session_state.case_id, conn=conn)
+    relationships = list_relationships(case_id=st.session_state.case_id, conn=conn)
+    conn.close()
+    st.caption(f"Showing relationships for case #{st.session_state.case_id}.")
+    if relationships:
+        display_rows = enrich_relationships_for_display(relationships, entities)
+        st.dataframe(pd.DataFrame(display_rows), width="stretch")
+    else:
+        st.info("No relationships recorded for this case yet. Run Nmap against a target to discover services.")
+
 with tab_observations:
     conn = get_db_conn()
     observations = list_observations(case_id=st.session_state.case_id, conn=conn)
@@ -358,3 +411,18 @@ with tab_operations:
     conn.close()
     st.caption(f"Showing operations for case #{st.session_state.case_id}.")
     st.dataframe(pd.DataFrame(operations), width="stretch")
+
+with tab_graph:
+    conn = get_db_conn()
+    entities = list_entities(case_id=st.session_state.case_id, conn=conn)
+    relationships = list_relationships(case_id=st.session_state.case_id, conn=conn)
+    conn.close()
+    st.caption(
+        "Graph built from stored entities and relationships for the active case. "
+        "This view does not perform new scanning."
+    )
+    figure = entity_graph_figure(entities, relationships)
+    if figure is None:
+        st.info("No graph data yet. Run Nmap against an authorised target to populate entities and relationships.")
+    else:
+        st.plotly_chart(figure, width="stretch")
