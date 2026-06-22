@@ -147,11 +147,13 @@ def entity_graph_figure(
     node_labels: list[str] = []
     node_hover: list[str] = []
     node_colors: list[str] = []
+    node_ids: list[int] = []
 
     for node_id in graph.nodes():
         x, y = positions[node_id]
         node_x.append(x)
         node_y.append(y)
+        node_ids.append(int(node_id))
         node_labels.append(labels.get(node_id, str(node_id)))
         node_type = graph.nodes[node_id].get("entity_type", "unknown")
         severity = severity_by_entity.get(node_id, "none")
@@ -170,6 +172,7 @@ def entity_graph_figure(
         textposition="top center",
         hovertext=node_hover,
         hoverinfo="text",
+        customdata=node_ids,
         marker={"size": 18, "color": node_colors, "line": {"width": 1, "color": "#ffffff"}},
         name="Entities",
     )

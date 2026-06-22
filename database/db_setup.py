@@ -105,6 +105,19 @@ CREATE TABLE IF NOT EXISTS operations (
 )
 """
 
+PIVOT_QUEUE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS pivot_queue_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER NOT NULL,
+    entity_id INTEGER NOT NULL,
+    position INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(case_id) REFERENCES cases(id),
+    FOREIGN KEY(entity_id) REFERENCES entities(id),
+    UNIQUE(case_id, entity_id)
+)
+"""
+
 FINDINGS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS findings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -168,6 +181,7 @@ ALL_SCHEMAS = (
     OBSERVATIONS_SCHEMA,
     OPERATIONS_SCHEMA,
     FINDINGS_SCHEMA,
+    PIVOT_QUEUE_SCHEMA,
 )
 
 
@@ -417,6 +431,230 @@ def list_entities(case_id: int | None = None, conn: sqlite3.Connection | None = 
                 (case_id,),
             ).fetchall()
         return _rows_to_dicts(rows)
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def get_entity(entity_id: int, conn: sqlite3.Connection | None = None) -> dict[str, Any] | None:
+    """Return a single entity row by id."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        return _row_to_dict(conn.execute("SELECT * FROM entities WHERE id = ?", (entity_id,)).fetchone())
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def update_entity_notes(
+    entity_id: int,
+    notes: str | None,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any] | None:
+    """Update analyst notes on an entity."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        existing = get_entity(entity_id, conn=conn)
+        if existing is None:
+            return None
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "UPDATE entities SET notes = ?, updated_at = ? WHERE id = ?",
+            (notes, now, entity_id),
+        )
+        conn.commit()
+        return get_entity(entity_id, conn=conn)
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def update_entity_label(
+    entity_id: int,
+    label: str | None,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any] | None:
+    """Update the display label on an entity."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        existing = get_entity(entity_id, conn=conn)
+        if existing is None:
+            return None
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "UPDATE entities SET label = ?, updated_at = ? WHERE id = ?",
+            (label, now, entity_id),
+        )
+        conn.commit()
+        return get_entity(entity_id, conn=conn)
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def update_entity_confidence(
+    entity_id: int,
+    confidence: int,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any] | None:
+    """Update confidence score on an entity."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        existing = get_entity(entity_id, conn=conn)
+        if existing is None:
+            return None
+        bounded = max(0, min(100, int(confidence)))
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "UPDATE entities SET confidence = ?, updated_at = ? WHERE id = ?",
+            (bounded, now, entity_id),
+        )
+        conn.commit()
+        return get_entity(entity_id, conn=conn)
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def list_pivot_queue(
+    case_id: int,
+    conn: sqlite3.Connection | None = None,
+) -> list[dict[str, Any]]:
+    """Return pivot queue rows for a case, ordered by position then created_at."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT * FROM pivot_queue_items
+            WHERE case_id = ?
+            ORDER BY position ASC, created_at ASC, id ASC
+            """,
+            (case_id,),
+        ).fetchall()
+        return _rows_to_dicts(rows)
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def list_pivot_queue_entity_ids(
+    case_id: int,
+    conn: sqlite3.Connection | None = None,
+) -> list[int]:
+    """Return entity ids in the case pivot queue."""
+    return [row["entity_id"] for row in list_pivot_queue(case_id, conn=conn)]
+
+
+def pivot_queue_contains(
+    case_id: int,
+    entity_id: int,
+    conn: sqlite3.Connection | None = None,
+) -> bool:
+    """Return True when the entity is already queued for the case."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM pivot_queue_items WHERE case_id = ? AND entity_id = ? LIMIT 1",
+            (case_id, entity_id),
+        ).fetchone()
+        return row is not None
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def add_to_pivot_queue(
+    case_id: int,
+    entity_id: int,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any] | None:
+    """Add an entity to the case pivot queue. Returns the queue row or existing row."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        entity = get_entity(entity_id, conn=conn)
+        if entity is None or entity.get("case_id") != case_id:
+            return None
+
+        existing = conn.execute(
+            "SELECT * FROM pivot_queue_items WHERE case_id = ? AND entity_id = ?",
+            (case_id, entity_id),
+        ).fetchone()
+        if existing:
+            return dict(existing)
+
+        position_row = conn.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS next_pos FROM pivot_queue_items WHERE case_id = ?",
+            (case_id,),
+        ).fetchone()
+        next_position = int(position_row["next_pos"]) if position_row else 0
+
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO pivot_queue_items (case_id, entity_id, position)
+            VALUES (?, ?, ?)
+            """,
+            (case_id, entity_id, next_position),
+        )
+        conn.commit()
+        return _row_to_dict(
+            conn.execute(
+                "SELECT * FROM pivot_queue_items WHERE id = ?",
+                (cursor.lastrowid,),
+            ).fetchone()
+        )
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def remove_from_pivot_queue(
+    case_id: int,
+    entity_id: int,
+    conn: sqlite3.Connection | None = None,
+) -> bool:
+    """Remove an entity from the case pivot queue."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        cursor = conn.execute(
+            "DELETE FROM pivot_queue_items WHERE case_id = ? AND entity_id = ?",
+            (case_id, entity_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def clear_pivot_queue(
+    case_id: int,
+    conn: sqlite3.Connection | None = None,
+) -> int:
+    """Clear all pivot queue items for a case. Returns rows removed."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        cursor = conn.execute("DELETE FROM pivot_queue_items WHERE case_id = ?", (case_id,))
+        conn.commit()
+        return cursor.rowcount
     finally:
         if own_conn:
             conn.close()

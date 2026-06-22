@@ -54,6 +54,8 @@ def render_sidebar() -> str:
 
     st.divider()
     st.subheader("Navigation")
+    if st.session_state.get("nav_page") == "Entities":
+        st.session_state.nav_page = "Entity Workspace"
     default_index = NAV_PAGES.index(st.session_state.get("nav_page", "Run Operation"))
     nav_page = st.radio(
         "Go to",

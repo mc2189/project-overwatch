@@ -5,7 +5,7 @@ from __future__ import annotations
 NAV_PAGES: tuple[str, ...] = (
     "Run Operation",
     "Findings",
-    "Entities",
+    "Entity Workspace",
     "Relationships",
     "Observations",
     "Operations",

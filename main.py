@@ -7,13 +7,13 @@ import streamlit as st
 from database.db_setup import get_or_create_default_case, list_cases
 from ui.archive_pages import (
     render_backup_page,
-    render_entities_page,
     render_graph_page,
     render_observations_page,
     render_operations_page,
     render_relationships_page,
     render_report_page,
 )
+from ui.entity_workspace import render_entity_workspace_page
 from ui.findings_page import render_findings_page
 from ui.metrics import load_case_metrics
 from ui.roadmap import render_roadmap_page
@@ -64,8 +64,12 @@ if nav_page == "Run Operation":
     render_run_operation_page(current_case, metrics)
 elif nav_page == "Findings":
     render_findings_page(st.session_state.case_id, metrics)
-elif nav_page == "Entities":
-    render_entities_page(st.session_state.case_id, metrics)
+elif nav_page == "Entity Workspace":
+    render_entity_workspace_page(
+        st.session_state.case_id,
+        metrics,
+        case_name=current_case.get("name") or "",
+    )
 elif nav_page == "Relationships":
     render_relationships_page(st.session_state.case_id, metrics)
 elif nav_page == "Observations":

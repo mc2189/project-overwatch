@@ -76,15 +76,10 @@ def enrich_relationships_for_display(
 
 
 def render_entities_page(case_id: int, metrics: dict[str, int]) -> None:
-    st.title("Entities")
-    render_compact_metrics(metrics)
-    st.divider()
+    """Legacy alias — Entity Workspace replaced the basic entities list."""
+    from ui.entity_workspace import render_entity_workspace_page
 
-    conn = get_db_conn()
-    entities = list_entities(case_id=case_id, conn=conn)
-    conn.close()
-    st.caption(f"Showing entities for case #{case_id}.")
-    st.dataframe(pd.DataFrame(entities), width="stretch")
+    render_entity_workspace_page(case_id, metrics)
 
 
 def render_relationships_page(case_id: int, metrics: dict[str, int]) -> None:
@@ -166,6 +161,9 @@ def render_operations_page(case_id: int, metrics: dict[str, int]) -> None:
 
 
 def render_graph_page(case_id: int, metrics: dict[str, int]) -> None:
+    from ui.entity_workspace import open_entity_in_workspace
+    from utils.entity_pivot import get_entity_neighbour_ids
+
     st.title("Graph")
     render_compact_metrics(metrics)
     st.divider()
@@ -200,10 +198,6 @@ def render_graph_page(case_id: int, metrics: dict[str, int]) -> None:
     statuses = tuple(status_filter) if status_filter else ("open", "in_review", "action_required")
     min_sev = None if min_severity == "All" else min_severity
 
-    st.caption(
-        "Graph built from stored entities and relationships. "
-        "Node colour reflects the highest finding severity matching the filters above."
-    )
     figure = entity_graph_figure(
         entities,
         relationships,
@@ -212,13 +206,87 @@ def render_graph_page(case_id: int, metrics: dict[str, int]) -> None:
         min_severity=min_sev,
         hide_entities_without_findings=hide_without_findings,
     )
+
+    st.caption(
+        "Graph built from stored entities and relationships. "
+        "Node colour reflects the highest finding severity matching the filters above. "
+        "Click a node to focus it below."
+    )
     if figure is None:
         st.info(
             "No graph data yet. Run Domain Intelligence or Nmap against a target to populate "
             "entities and relationships."
         )
     else:
-        st.plotly_chart(figure, width="stretch")
+        graph_event = st.plotly_chart(
+            figure,
+            width="stretch",
+            on_select="rerun",
+            selection_mode="points",
+            key="entity_graph_chart",
+        )
+        if graph_event and graph_event.selection and graph_event.selection.points:
+            point = graph_event.selection.points[0]
+            custom = point.get("customdata")
+            if custom is not None:
+                st.session_state.graph_focus_entity = int(custom)
+
+    st.divider()
+    st.subheader("Entity neighbours")
+    st.caption(
+        "Select or click a graph node to list immediate neighbours, queue them, or open Entity Workspace."
+    )
+    if entities:
+        entity_options = {entity["id"]: entity for entity in entities}
+        focus_options = list(entity_options.keys())
+        default_focus = st.session_state.get("graph_focus_entity")
+        focus_index = focus_options.index(default_focus) if default_focus in focus_options else 0
+        graph_entity_id = st.selectbox(
+            "Focus entity",
+            options=focus_options,
+            index=focus_index,
+            format_func=lambda eid: entity_options[eid].get("label")
+            or entity_options[eid].get("value")
+            or str(eid),
+            key="graph_focus_entity_select",
+        )
+        st.session_state.graph_focus_entity = graph_entity_id
+        neighbour_ids = get_entity_neighbour_ids(graph_entity_id, relationships)
+        if neighbour_ids:
+            st.markdown("**Immediate neighbours**")
+            for neighbour_id in sorted(neighbour_ids):
+                if neighbour_id not in entity_options:
+                    continue
+                neighbour = entity_options[neighbour_id]
+                neighbour_label = neighbour.get("label") or neighbour.get("value") or str(neighbour_id)
+                ncol1, ncol2, ncol3 = st.columns([3, 1, 1])
+                with ncol1:
+                    st.markdown(f"#{neighbour_id} · {neighbour_label}")
+                with ncol2:
+                    if st.button("Open", key=f"graph_neighbour_open_{neighbour_id}", width="stretch"):
+                        open_entity_in_workspace(neighbour_id)
+                        st.rerun()
+                with ncol3:
+                    if st.button("Queue", key=f"graph_neighbour_queue_{neighbour_id}", width="stretch"):
+                        from ui.entity_workspace import queue_entity_for_case
+
+                        if queue_entity_for_case(case_id, neighbour_id):
+                            st.success(f"Queued {neighbour_label}.")
+                        st.rerun()
+        else:
+            st.caption("No direct relationships for this entity.")
+        focus_col1, focus_col2 = st.columns(2)
+        with focus_col1:
+            if st.button("Open in Entity Workspace", key="graph_open_entity_workspace", width="stretch"):
+                open_entity_in_workspace(graph_entity_id)
+                st.rerun()
+        with focus_col2:
+            if st.button("Add focus to pivot queue", key="graph_queue_focus_entity", width="stretch"):
+                from ui.entity_workspace import queue_entity_for_case
+
+                if queue_entity_for_case(case_id, graph_entity_id):
+                    st.success("Added to pivot queue.")
+                st.rerun()
 
 
 def render_report_page(case_id: int, metrics: dict[str, int]) -> None:

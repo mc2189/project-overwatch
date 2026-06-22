@@ -2,6 +2,25 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v1.9.0 — Persistent pivot queue and graph pivot links
+
+- Pivot queue persisted per case in SQLite (`pivot_queue_items` table)
+- Add to pivot queue from relationship rows, findings, graph neighbours, and focus entity
+- Graph node click selection focuses entity and lists neighbour actions (Open / Queue)
+- Case backup export/import includes pivot queue items
+- Fixed Entity Workspace crash when rendering relationships (`entity_lookup` undefined)
+
+## v1.8.0 — Entity Workspace and pivot actions
+
+- **Entity Workspace** replaces the basic Entities list — inspect entity details, linked findings, observations, relationships, and operations
+- Pivot module recommendations use existing target compatibility logic (domain, URL, IPv4, service, email, username)
+- Run compatible modules directly from Entity Workspace via the same `execute_module` path as Run Operation
+- Session **pivot queue** for follow-up targets; batch passive runs on queued domain/URL entities
+- Analyst fields: edit entity notes, label, and confidence (`update_entity_notes`, `update_entity_label`, `update_entity_confidence`)
+- Findings linked to an entity support status and analyst notes from the workspace
+- Graph page: focus entity neighbours and **Open in Entity Workspace**
+- Reports already include entity notes where entities are listed
+
 ## v1.7.0 — Result quality and lookup resilience
 
 - Standard module run statuses: `completed`, `completed_with_warnings`, `partial`, `blocked`, `error`

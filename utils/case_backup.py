@@ -14,10 +14,12 @@ from database.db_setup import (
     create_or_get_entity,
     create_relationship,
     get_db_conn,
+    add_to_pivot_queue,
     list_entities,
     list_findings,
     list_observations,
     list_operations,
+    list_pivot_queue,
     list_relationships,
     get_case,
 )
@@ -39,6 +41,7 @@ def export_case_bundle(case_id: int) -> dict[str, Any]:
             "observations": list_observations(case_id=case_id, conn=conn),
             "operations": list_operations(case_id=case_id, conn=conn),
             "findings": list_findings(case_id=case_id, conn=conn),
+            "pivot_queue": list_pivot_queue(case_id=case_id, conn=conn),
         }
     finally:
         conn.close()
@@ -150,6 +153,11 @@ def import_case_bundle(bundle: dict[str, Any], *, new_case_name: str | None = No
                 status=finding.get("status", "open"),
                 conn=conn,
             )
+
+        for queue_item in bundle.get("pivot_queue", []):
+            entity_id = id_map.get(queue_item.get("entity_id"))
+            if entity_id is not None:
+                add_to_pivot_queue(case_id, entity_id, conn=conn)
 
         return new_case
     finally:

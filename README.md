@@ -1,4 +1,4 @@
-# Project Overwatch v1.7
+# Project Overwatch v1.9
 
 Project Overwatch is a **local** Python/Streamlit dashboard for defensive security intelligence. It helps analysts organise investigations into **cases**, collect data with authorised **active** scans and **passive** lookups, interpret results as advisory **findings**, and export **reports** — all stored in a local SQLite database on your machine.
 
@@ -14,8 +14,9 @@ The sidebar provides case selection and main navigation:
 |------|---------|
 | **Run Operation** | Target entry, module cards, configuration, operation plan, launch |
 | **Findings** | Triage advisory findings |
-| **Entities / Relationships / Observations / Operations** | Investigation archive |
-| **Graph** | Entity relationship view |
+| **Entity Workspace** | Inspect entities, pivot to compatible modules, edit analyst notes |
+| **Relationships / Observations / Operations** | Investigation archive |
+| **Graph** | Entity relationship view; open neighbours in Entity Workspace |
 | **Report** | Generate and export case reports |
 | **Backup** | Case JSON export/import and legacy tables |
 | **Roadmap** | Planned modules (not shown in the run workflow) |
@@ -31,7 +32,26 @@ The sidebar provides case selection and main navigation:
 7. **Step 4 — Operation Plan:** review case, target, run mode, module recommendations, authorisation requirement, and expected outputs.
 8. Confirm **authorisation** if an active module is selected, then click **Run selected modules**.
 9. Review **Latest Results** (summary plus Summary / Interpretation / Output / Raw / Structured tabs).
-10. Move to **Findings**, **Graph**, **Report**, or **Backup** as needed.
+10. Move to **Findings**, **Entity Workspace**, **Graph**, **Report**, or **Backup** as needed.
+
+### Entity Workspace (v1.8)
+
+After collection populates entities, open **Entity Workspace** to pivot between targets:
+
+1. **Select an entity** from the active case (type, value, label, source, confidence, timestamps).
+2. Review **Related intelligence** — findings (with status/notes), observations (raw output collapsed), relationships from/to, and matching operations.
+3. Use **Pivot actions** — compatible modules are recommended from existing target compatibility rules:
+   - **Domain** → Domain Intelligence, Certificate & Subdomain Intelligence, Website Metadata Review
+   - **URL** → Domain Intelligence, Website Metadata Review (hostname normalised)
+   - **IPv4** → Network Service Check (authorisation required)
+   - **Service** → no direct module; review the parent host entity
+   - **Email / username** → no implemented modules yet
+4. **Run compatible modules** from the workspace using the same executor path as Run Operation. Active modules still require the authorisation checkbox; passive modules do not.
+5. **Analyst fields** — edit entity notes, label, and confidence without deleting stored data.
+6. **Pivot queue** — persisted per case in the database; add entities from relationships, findings, or the Graph page; batch passive runs on queued items.
+7. From **Graph**, click a node or select a focus entity to see neighbours with **Open** / **Queue** actions, or **Open in Entity Workspace**.
+
+Entity notes appear in generated reports where entities are listed.
 
 ### Module cards on Run Operation
 
@@ -111,7 +131,7 @@ python scripts/smoke_check.py
 
 ## Typical workflow (summary)
 
-See **Navigation** and **Typical workflow** above for the v1.4 Run Operation flow. Archive pages (Findings, Entities, Graph, Report, Backup) are reached from sidebar navigation rather than a single dashboard tab strip.
+See **Navigation** and **Typical workflow** above for the v1.4 Run Operation flow. Archive pages (Findings, Entity Workspace, Graph, Report, Backup) are reached from sidebar navigation rather than a single dashboard tab strip.
 
 Planned modules are listed on the **Roadmap** page only.
 

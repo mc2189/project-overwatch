@@ -90,6 +90,142 @@ def _check_finding_workflow_helpers() -> None:
         conn.close()
 
 
+def _check_entity_helpers() -> None:
+    db = __import__(
+        "database.db_setup",
+        fromlist=[
+            "create_or_get_entity",
+            "get_entity",
+            "update_entity_notes",
+            "update_entity_label",
+            "update_entity_confidence",
+            "get_or_create_default_case",
+            "get_db_conn",
+        ],
+    )
+    for name in (
+        "get_entity",
+        "update_entity_notes",
+        "update_entity_label",
+        "update_entity_confidence",
+    ):
+        if not callable(getattr(db, name)):
+            raise AssertionError(f"missing helper: {name}")
+
+    case = db.get_or_create_default_case()
+    conn = db.get_db_conn()
+    try:
+        entity = db.create_or_get_entity(
+            case["id"],
+            "domain",
+            "smoke-entity.example",
+            label="Smoke entity",
+            source="smoke_check",
+            conn=conn,
+        )
+        updated_notes = db.update_entity_notes(entity["id"], "Pivot smoke notes", conn=conn)
+        if not updated_notes or updated_notes.get("notes") != "Pivot smoke notes":
+            raise AssertionError("update_entity_notes did not persist")
+        updated_label = db.update_entity_label(entity["id"], "Smoke label", conn=conn)
+        if not updated_label or updated_label.get("label") != "Smoke label":
+            raise AssertionError("update_entity_label did not persist")
+        updated_conf = db.update_entity_confidence(entity["id"], 88, conn=conn)
+        if not updated_conf or updated_conf.get("confidence") != 88:
+            raise AssertionError("update_entity_confidence did not persist")
+        fetched = db.get_entity(entity["id"], conn=conn)
+        if fetched is None:
+            raise AssertionError("get_entity returned None")
+    finally:
+        conn.close()
+
+    pivot = __import__(
+        "utils.entity_pivot",
+        fromlist=[
+            "build_pivot_recommendations",
+            "parse_service_entity_details",
+            "entity_execution_target",
+        ],
+    )
+    domain_entity = {"entity_type": "domain", "value": "example.com"}
+    rec = pivot.build_pivot_recommendations(domain_entity)
+    module_ids = {row["module_id"] for row in rec.get("module_rows", []) if row.get("compatible")}
+    expected = {"infra_domain_intel", "infra_cert_subdomain", "infra_website_metadata"}
+    if not expected.issubset(module_ids):
+        raise AssertionError(f"domain pivot missing modules: {module_ids}")
+
+    service_entity = {
+        "entity_type": "service",
+        "value": "192.0.2.1:443/tcp",
+        "label": "443/tcp https Example",
+    }
+    service_rec = pivot.build_pivot_recommendations(service_entity)
+    if service_rec.get("compatible_modules"):
+        raise AssertionError("service entity should not recommend direct modules")
+    details = pivot.parse_service_entity_details(service_entity)
+    if not details or details.get("port") != "443":
+        raise AssertionError("service entity parse failed")
+
+    email_entity = {"entity_type": "email", "value": "user@example.com"}
+    email_rec = pivot.build_pivot_recommendations(email_entity)
+    if email_rec.get("compatible_modules"):
+        raise AssertionError("email entity should not recommend modules yet")
+
+
+def _check_pivot_queue_helpers() -> None:
+    db = __import__(
+        "database.db_setup",
+        fromlist=[
+            "add_to_pivot_queue",
+            "remove_from_pivot_queue",
+            "clear_pivot_queue",
+            "list_pivot_queue_entity_ids",
+            "pivot_queue_contains",
+            "create_or_get_entity",
+            "get_or_create_default_case",
+            "get_db_conn",
+        ],
+    )
+    for name in (
+        "add_to_pivot_queue",
+        "remove_from_pivot_queue",
+        "clear_pivot_queue",
+        "list_pivot_queue_entity_ids",
+        "pivot_queue_contains",
+    ):
+        if not callable(getattr(db, name)):
+            raise AssertionError(f"missing helper: {name}")
+
+    case = db.get_or_create_default_case()
+    conn = db.get_db_conn()
+    try:
+        entity = db.create_or_get_entity(
+            case["id"],
+            "domain",
+            "pivot-queue.example",
+            label="Pivot queue smoke",
+            source="smoke_check",
+            conn=conn,
+        )
+        row = db.add_to_pivot_queue(case["id"], entity["id"], conn=conn)
+        if row is None:
+            raise AssertionError("add_to_pivot_queue returned None")
+        if not db.pivot_queue_contains(case["id"], entity["id"], conn=conn):
+            raise AssertionError("pivot_queue_contains false after add")
+        ids = db.list_pivot_queue_entity_ids(case["id"], conn=conn)
+        if entity["id"] not in ids:
+            raise AssertionError("entity missing from list_pivot_queue_entity_ids")
+        if not db.remove_from_pivot_queue(case["id"], entity["id"], conn=conn):
+            raise AssertionError("remove_from_pivot_queue failed")
+        if db.pivot_queue_contains(case["id"], entity["id"], conn=conn):
+            raise AssertionError("entity still queued after remove")
+        db.add_to_pivot_queue(case["id"], entity["id"], conn=conn)
+        cleared = db.clear_pivot_queue(case["id"], conn=conn)
+        if cleared < 1:
+            raise AssertionError("clear_pivot_queue removed no rows")
+    finally:
+        conn.close()
+
+
 def _check_cert_subdomain_module() -> None:
     registry = __import__("modules.module_registry", fromlist=["get_module"])
     module = registry.get_module("infra_cert_subdomain")
@@ -602,6 +738,16 @@ def main() -> int:
     run(
         "finding workflow helpers",
         lambda: _check_finding_workflow_helpers(),
+    )
+
+    run(
+        "entity workspace helpers",
+        lambda: _check_entity_helpers(),
+    )
+
+    run(
+        "pivot queue helpers",
+        lambda: _check_pivot_queue_helpers(),
     )
 
     run(
