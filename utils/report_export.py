@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from database.db_setup import PROJECT_ROOT, get_case, get_db_conn
+from database.db_setup import PROJECT_ROOT, REPORT_EXCLUDED_STATUSES, get_case, get_db_conn, normalize_finding_status
 from utils.report_builder import ReportOptions, _load_case_data, _safe_filename_part, build_case_report
 from utils.report_encryption import save_encrypted_export
 from utils.report_settings import ReportBranding
@@ -30,7 +30,11 @@ def build_case_report_json(case_id: int, options: ReportOptions | None = None) -
     if options.include_closed_findings:
         export_findings = findings
     else:
-        export_findings = [item for item in findings if item.get("status") == "open"]
+        export_findings = [
+            item
+            for item in findings
+            if normalize_finding_status(item.get("status")) not in REPORT_EXCLUDED_STATUSES
+        ]
 
     payload: dict[str, Any] = {
         "generated_at": datetime.now(timezone.utc).isoformat(),

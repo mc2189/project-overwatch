@@ -2,6 +2,17 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v1.1.0 — Findings workflow and triage
+
+- Extended finding statuses: `open`, `in_review`, `action_required`, `accepted`, `false_positive`, `closed`
+- Safe SQLite migrations for `analyst_notes`, `user_severity`, `reviewed_at`, `closed_at`, `updated_at`
+- DB helpers: `get_finding`, `update_finding`, `close_finding`, `reopen_finding`, `list_findings_by_entity`, `finding_status_counts`
+- Improved duplicate handling: no duplicate for active or terminal identical findings; no auto-reopen on re-scan
+- Findings tab: status/severity/module filters, severity grouping, detail expanders, review forms
+- Dashboard metrics for in review, action required, closed, and accepted/false positive counts
+- Reports: finding status summary, analyst notes, severity override, exclude terminal findings by default
+- Graph colouring uses active finding severities (`open`, `in_review`, `action_required`)
+
 ## v1.0.1 — Limitation fixes
 
 - Nmap binary detection on PATH with clear error messages

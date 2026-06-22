@@ -24,6 +24,72 @@ def warn(name: str, detail: str) -> None:
     print(f"  WARN {name}: {detail}")
 
 
+def _check_finding_workflow_helpers() -> None:
+    db = __import__(
+        "database.db_setup",
+        fromlist=[
+            "create_finding",
+            "get_finding",
+            "update_finding",
+            "close_finding",
+            "reopen_finding",
+            "list_findings_by_entity",
+            "finding_status_counts",
+            "get_or_create_default_case",
+            "get_db_conn",
+        ],
+    )
+    for name in (
+        "get_finding",
+        "update_finding",
+        "close_finding",
+        "reopen_finding",
+        "list_findings_by_entity",
+        "finding_status_counts",
+    ):
+        if not callable(getattr(db, name)):
+            raise AssertionError(f"missing helper: {name}")
+
+    case = db.get_or_create_default_case()
+    conn = db.get_db_conn()
+    try:
+        finding = db.create_finding(
+            case["id"],
+            "smoke_test",
+            "Smoke check finding workflow",
+            "info",
+            50,
+            "Temporary finding created by smoke_check.py.",
+            conn=conn,
+        )
+        updated = db.update_finding(
+            finding["id"],
+            status="in_review",
+            analyst_notes="Reviewed during smoke check.",
+            conn=conn,
+        )
+        if not updated or updated.get("analyst_notes") != "Reviewed during smoke check.":
+            raise AssertionError("update_finding did not persist analyst notes")
+        counts = db.finding_status_counts(case["id"], conn=conn)
+        if not isinstance(counts, dict) or "in_review" not in counts:
+            raise AssertionError("finding_status_counts returned unexpected data")
+        fetched = db.get_finding(finding["id"], conn=conn)
+        if fetched is None:
+            raise AssertionError("get_finding returned None")
+        closed = db.close_finding(finding["id"], conn=conn)
+        if not closed or db.normalize_finding_status(closed.get("status")) != "closed":
+            raise AssertionError("close_finding did not set closed status")
+        reopened = db.reopen_finding(finding["id"], conn=conn)
+        if not reopened or db.normalize_finding_status(reopened.get("status")) != "open":
+            raise AssertionError("reopen_finding did not set open status")
+        if finding.get("entity_id") is not None:
+            by_entity = db.list_findings_by_entity(finding["entity_id"], conn=conn)
+            if not isinstance(by_entity, list):
+                raise AssertionError("list_findings_by_entity did not return a list")
+    finally:
+        conn.close()
+
+
 def main() -> int:
     print(f"Project Overwatch smoke check (root: {PROJECT_ROOT})")
     errors = 0
@@ -54,6 +120,11 @@ def main() -> int:
     run("case backup", lambda: __import__("utils.case_backup", fromlist=["export_case_bundle"]))
 
     run("local auth", lambda: __import__("utils.local_auth", fromlist=["local_auth_enabled"]))
+
+    run(
+        "finding workflow helpers",
+        lambda: _check_finding_workflow_helpers(),
+    )
 
     run(
         "default case",

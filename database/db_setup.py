@@ -118,12 +118,37 @@ CREATE TABLE IF NOT EXISTS findings (
     explanation TEXT,
     suggested_actions_json TEXT,
     status TEXT DEFAULT 'open',
+    analyst_notes TEXT,
+    user_severity TEXT,
+    reviewed_at TIMESTAMP,
+    closed_at TIMESTAMP,
+    updated_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(case_id) REFERENCES cases(id),
     FOREIGN KEY(entity_id) REFERENCES entities(id),
     FOREIGN KEY(observation_id) REFERENCES observations(id)
 )
 """
+
+FINDING_STATUSES: tuple[str, ...] = (
+    "open",
+    "in_review",
+    "action_required",
+    "accepted",
+    "false_positive",
+    "closed",
+)
+ACTIVE_FINDING_STATUSES: tuple[str, ...] = ("open", "in_review", "action_required")
+TERMINAL_FINDING_STATUSES: tuple[str, ...] = ("closed", "accepted", "false_positive")
+REPORT_EXCLUDED_STATUSES: tuple[str, ...] = TERMINAL_FINDING_STATUSES
+
+FINDING_COLUMN_MIGRATIONS: tuple[tuple[str, str], ...] = (
+    ("analyst_notes", "TEXT"),
+    ("user_severity", "TEXT"),
+    ("reviewed_at", "TIMESTAMP"),
+    ("closed_at", "TIMESTAMP"),
+    ("updated_at", "TIMESTAMP"),
+)
 
 ALL_SCHEMAS = (
     TARGETS_SCHEMA,
@@ -154,7 +179,31 @@ def get_db_conn() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     for schema in ALL_SCHEMAS:
         conn.execute(schema)
+    _migrate_findings_table(conn)
     return conn
+
+
+def normalize_finding_status(status: str | None) -> str:
+    """Map legacy statuses to the current workflow vocabulary."""
+    if status == "reviewed":
+        return "in_review"
+    if status in FINDING_STATUSES:
+        return status
+    return "open"
+
+
+def effective_finding_severity(finding: dict[str, Any]) -> str:
+    return finding.get("user_severity") or finding.get("severity") or "info"
+
+
+def _migrate_findings_table(conn: sqlite3.Connection) -> None:
+    """Add new finding columns safely and migrate legacy status values."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(findings)").fetchall()}
+    for column_name, column_type in FINDING_COLUMN_MIGRATIONS:
+        if column_name not in columns:
+            conn.execute(f"ALTER TABLE findings ADD COLUMN {column_name} {column_type}")
+    conn.execute("UPDATE findings SET status = 'in_review' WHERE status = 'reviewed'")
+    conn.commit()
 
 
 def infer_entity_type(value: str) -> str:
@@ -555,23 +604,28 @@ def create_finding(
     status: str = "open",
     conn: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
-    """Create a finding, returning the existing row if an exact duplicate exists."""
+    """Create a finding, returning the existing row when a duplicate should not be recreated."""
     own_conn = conn is None
     if own_conn:
         conn = get_db_conn()
     try:
         existing = _finding_exists(case_id, entity_id, module_id, title, conn)
         if existing:
+            existing_status = normalize_finding_status(existing.get("status"))
+            # Do not duplicate active or terminal findings; do not auto-reopen terminal items.
+            if existing_status in ACTIVE_FINDING_STATUSES or existing_status in TERMINAL_FINDING_STATUSES:
+                return existing
             return existing
 
         actions_json = json.dumps(suggested_actions or [])
+        now = datetime.now(timezone.utc).isoformat()
         cursor = conn.cursor()
         cursor.execute(
             """
             INSERT INTO findings (
                 case_id, entity_id, observation_id, module_id, title, severity,
-                confidence, explanation, suggested_actions_json, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                confidence, explanation, suggested_actions_json, status, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 case_id,
@@ -583,7 +637,8 @@ def create_finding(
                 confidence,
                 explanation,
                 actions_json,
-                status,
+                normalize_finding_status(status),
+                now,
             ),
         )
         conn.commit()
@@ -608,19 +663,21 @@ def upsert_finding(
     observation_id: int | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
-    """Create or refresh a finding without changing analyst-set closed status."""
+    """Create or refresh a finding without changing analyst-closed terminal status."""
     own_conn = conn is None
     if own_conn:
         conn = get_db_conn()
     try:
         existing = _finding_exists(case_id, entity_id, module_id, title, conn)
         actions_json = json.dumps(suggested_actions or [])
+        now = datetime.now(timezone.utc).isoformat()
         if existing:
+            existing_status = normalize_finding_status(existing.get("status"))
             conn.execute(
                 """
                 UPDATE findings
                 SET observation_id = ?, severity = ?, confidence = ?, explanation = ?,
-                    suggested_actions_json = ?
+                    suggested_actions_json = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
@@ -629,6 +686,7 @@ def upsert_finding(
                     confidence,
                     explanation,
                     actions_json,
+                    now,
                     existing["id"],
                 ),
             )
@@ -638,6 +696,11 @@ def upsert_finding(
             )
             if updated is None:
                 raise RuntimeError("Failed to update finding.")
+            # TODO(v1.2): stale finding handling — optionally reopen terminal findings when re-observed.
+            if existing_status in TERMINAL_FINDING_STATUSES:
+                return updated
+            if existing_status in ACTIVE_FINDING_STATUSES:
+                return updated
             return updated
 
         cursor = conn.cursor()
@@ -645,8 +708,8 @@ def upsert_finding(
             """
             INSERT INTO findings (
                 case_id, entity_id, observation_id, module_id, title, severity,
-                confidence, explanation, suggested_actions_json, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')
+                confidence, explanation, suggested_actions_json, status, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
             """,
             (
                 case_id,
@@ -658,6 +721,7 @@ def upsert_finding(
                 confidence,
                 explanation,
                 actions_json,
+                now,
             ),
         )
         conn.commit()
@@ -677,26 +741,27 @@ def close_superseded_findings(
     active_titles: list[str],
     conn: sqlite3.Connection | None = None,
 ) -> int:
-    """Close open/reviewed findings for a module run that are no longer present."""
+    """Close active findings for a module run that are no longer present."""
     own_conn = conn is None
     if own_conn:
         conn = get_db_conn()
     try:
+        active_status_sql = ", ".join(f"'{status}'" for status in ACTIVE_FINDING_STATUSES)
         if entity_id is None:
             rows = conn.execute(
-                """
+                f"""
                 SELECT id, title, explanation FROM findings
                 WHERE case_id = ? AND entity_id IS NULL AND module_id = ?
-                  AND status IN ('open', 'reviewed')
+                  AND status IN ({active_status_sql})
                 """,
                 (case_id, module_id),
             ).fetchall()
         else:
             rows = conn.execute(
-                """
+                f"""
                 SELECT id, title, explanation FROM findings
                 WHERE case_id = ? AND entity_id = ? AND module_id = ?
-                  AND status IN ('open', 'reviewed')
+                  AND status IN ({active_status_sql})
                 """,
                 (case_id, entity_id, module_id),
             ).fetchall()
@@ -704,14 +769,19 @@ def close_superseded_findings(
         closed = 0
         active_set = set(active_titles)
         suffix = " [Superseded: not observed in latest module run.]"
+        now = datetime.now(timezone.utc).isoformat()
         for row in rows:
             finding = dict(row)
             if finding["title"] in active_set:
                 continue
             explanation = (finding.get("explanation") or "") + suffix
             conn.execute(
-                "UPDATE findings SET status = 'closed', explanation = ? WHERE id = ?",
-                (explanation, finding["id"]),
+                """
+                UPDATE findings
+                SET status = 'closed', explanation = ?, closed_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (explanation, now, now, finding["id"]),
             )
             closed += 1
         if closed:
@@ -765,18 +835,119 @@ def list_findings(
             conn.close()
 
 
+def get_finding(finding_id: int, conn: sqlite3.Connection | None = None) -> dict[str, Any] | None:
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        return _row_to_dict(conn.execute("SELECT * FROM findings WHERE id = ?", (finding_id,)).fetchone())
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def update_finding(
+    finding_id: int,
+    *,
+    status: str | None = None,
+    analyst_notes: str | None = None,
+    user_severity: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any] | None:
+    """Update analyst workflow fields on a finding."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        existing = get_finding(finding_id, conn=conn)
+        if existing is None:
+            return None
+
+        now = datetime.now(timezone.utc).isoformat()
+        fields: list[str] = ["updated_at = ?"]
+        params: list[Any] = [now]
+
+        if status is not None:
+            normalized = normalize_finding_status(status)
+            fields.append("status = ?")
+            params.append(normalized)
+            if normalized == "in_review" and not existing.get("reviewed_at"):
+                fields.append("reviewed_at = ?")
+                params.append(now)
+            if normalized in TERMINAL_FINDING_STATUSES and not existing.get("closed_at"):
+                fields.append("closed_at = ?")
+                params.append(now)
+            if normalized in ACTIVE_FINDING_STATUSES:
+                fields.append("closed_at = ?")
+                params.append(None)
+
+        if analyst_notes is not None:
+            fields.append("analyst_notes = ?")
+            params.append(analyst_notes)
+
+        if user_severity is not None:
+            fields.append("user_severity = ?")
+            params.append(user_severity or None)
+
+        params.append(finding_id)
+        conn.execute(f"UPDATE findings SET {', '.join(fields)} WHERE id = ?", params)
+        conn.commit()
+        return get_finding(finding_id, conn=conn)
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def close_finding(
+    finding_id: int,
+    analyst_notes: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any] | None:
+    notes = analyst_notes
+    if notes is None:
+        existing = get_finding(finding_id, conn=conn)
+        notes = existing.get("analyst_notes") if existing else None
+    return update_finding(
+        finding_id,
+        status="closed",
+        analyst_notes=notes,
+        conn=conn,
+    )
+
+
+def reopen_finding(finding_id: int, conn: sqlite3.Connection | None = None) -> dict[str, Any] | None:
+    return update_finding(finding_id, status="open", conn=conn)
+
+
+def list_findings_by_entity(
+    entity_id: int,
+    conn: sqlite3.Connection | None = None,
+) -> list[dict[str, Any]]:
+    return list_findings(entity_id=entity_id, conn=conn)
+
+
+def finding_status_counts(case_id: int, conn: sqlite3.Connection | None = None) -> dict[str, int]:
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        rows = conn.execute(
+            "SELECT status, COUNT(*) AS count FROM findings WHERE case_id = ? GROUP BY status",
+            (case_id,),
+        ).fetchall()
+        counts = {normalize_finding_status(row["status"]): row["count"] for row in rows}
+        for status in FINDING_STATUSES:
+            counts.setdefault(status, 0)
+        return counts
+    finally:
+        if own_conn:
+            conn.close()
+
+
 def update_finding_status(
     finding_id: int,
     status: str,
     conn: sqlite3.Connection | None = None,
 ) -> dict[str, Any] | None:
-    own_conn = conn is None
-    if own_conn:
-        conn = get_db_conn()
-    try:
-        conn.execute("UPDATE findings SET status = ? WHERE id = ?", (status, finding_id))
-        conn.commit()
-        return _row_to_dict(conn.execute("SELECT * FROM findings WHERE id = ?", (finding_id,)).fetchone())
-    finally:
-        if own_conn:
-            conn.close()
+    """Backward-compatible status update wrapper."""
+    return update_finding(finding_id, status=status, conn=conn)

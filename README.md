@@ -89,11 +89,34 @@ Planned modules appear in the sidebar but are **disabled** — they are not avai
 | **Observation** | Structured module result (summary + JSON + optional raw output) |
 | **Operation** | Audit log of each module run |
 | **Relationship** | Link between entities (`exposes_service`, `resolves_to`, …) |
-| **Finding** | Advisory interpretation with severity, confidence, suggested actions |
+| **Finding** | Advisory interpretation with severity, confidence, suggested actions, and analyst workflow fields |
 
 **Cases → Download case backup (JSON)** exports the full investigation for migration. Import creates a new case with remapped entity IDs.
 
 Findings are **analyst aids**, not proof of vulnerability. Review before acting or sharing.
+
+### Finding workflow (v1.1)
+
+Each finding has a **status** that tracks triage through an investigation:
+
+| Status | Meaning |
+|--------|---------|
+| `open` | New or unreviewed finding from a module |
+| `in_review` | Analyst is reviewing the finding |
+| `action_required` | Follow-up or remediation is needed |
+| `accepted` | Risk acknowledged and accepted |
+| `false_positive` | Not a genuine issue for this case |
+| `closed` | Finding closed without accepting risk |
+
+Legacy `reviewed` rows are migrated automatically to `in_review`.
+
+**Analyst notes** — free-text field on each finding for review context, decisions, and follow-up.
+
+**Severity override** — optional `user_severity` lets an analyst override the module-assigned severity. Reports and the Findings tab use the effective severity (override when set, otherwise module severity).
+
+**Typical workflow:** module creates an `open` finding → analyst sets `in_review` and adds notes → mark `action_required` if needed → resolve as `accepted`, `false_positive`, or `closed`. Closed or resolved findings can be **reopened** from the Findings tab if the issue resurfaces.
+
+Re-running a module does not automatically reopen closed/accepted/false positive duplicates; a new observation may still be recorded separately.
 
 ### Nmap (active)
 
@@ -113,7 +136,8 @@ Findings are **analyst aids**, not proof of vulnerability. Review before acting 
 **Archive → Report** generates Markdown previews with optional:
 
 - Full technical or executive template
-- Closed findings and raw output appendix (off by default)
+- Active findings only by default (`open`, `in_review`, `action_required`); optional inclusion of closed, accepted, and false positive findings
+- Finding status summary in the executive summary; analyst notes and severity overrides in the findings section
 - Redaction (IPs, emails, domains, custom terms/regex)
 - Organisation branding (`config/report_settings.json`, local only)
 - Export: Markdown, HTML, JSON, PDF (WeasyPrint), encrypted (cryptography)
@@ -125,7 +149,7 @@ Saved reports go to `reports/` (gitignored). Encrypted exports go to `exports/`.
 
 ```
 main.py                    Streamlit entry point
-version.py                 PROJECT_VERSION = "1.0.1"
+version.py                 PROJECT_VERSION = "1.1.0"
 scripts/smoke_check.py     Local sanity checks
 requirements-optional.txt  kaleido, weasyprint (optional)
 database/db_setup.py       SQLite schema and helpers
@@ -163,7 +187,7 @@ Check **Sidebar → System status** for Nmap, modules, and optional dependency r
 ## v1.1 roadmap
 
 - Additional passive collection modules wired through the findings pipeline
-- Improved report templates and redaction UX
+- Stale finding handling on re-scan (reopen terminal findings when the same issue is observed again)
 - Finding-driven graph filters and export presets
 - Hardening for long-running local deployments
 

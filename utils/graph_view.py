@@ -7,6 +7,8 @@ from typing import Any
 import networkx as nx
 import plotly.graph_objects as go
 
+from database.db_setup import effective_finding_severity, normalize_finding_status
+
 SEVERITY_ORDER = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}
 SEVERITY_COLORS = {
     "critical": "#d62728",
@@ -21,17 +23,18 @@ SEVERITY_COLORS = {
 def entity_max_severity(
     findings: list[dict[str, Any]],
     *,
-    statuses: tuple[str, ...] = ("open", "reviewed"),
+    statuses: tuple[str, ...] = ("open", "in_review", "action_required"),
 ) -> dict[int, str]:
-    """Map entity IDs to their highest open/reviewed finding severity."""
+    """Map entity IDs to their highest active finding severity."""
     entity_severity: dict[int, str] = {}
     for finding in findings:
-        if finding.get("status") not in statuses:
+        status = normalize_finding_status(finding.get("status"))
+        if status not in statuses:
             continue
         entity_id = finding.get("entity_id")
         if entity_id is None:
             continue
-        severity = finding.get("severity", "info")
+        severity = effective_finding_severity(finding)
         current = entity_severity.get(entity_id, "none")
         if SEVERITY_ORDER.get(severity, 0) > SEVERITY_ORDER.get(current, 0):
             entity_severity[entity_id] = severity

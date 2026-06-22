@@ -12,6 +12,9 @@ from typing import Any, Literal
 
 from database.db_setup import (
     PROJECT_ROOT,
+    REPORT_EXCLUDED_STATUSES,
+    effective_finding_severity,
+    finding_status_counts,
     get_case,
     get_db_conn,
     list_entities,
@@ -19,6 +22,7 @@ from database.db_setup import (
     list_observations,
     list_operations,
     list_relationships,
+    normalize_finding_status,
 )
 from modules.module_registry import get_module
 from utils.report_redaction import (
@@ -207,10 +211,27 @@ def build_case_report(
     if options.include_closed_findings:
         report_findings = list(all_findings)
     else:
-        report_findings = [finding for finding in all_findings if finding.get("status") == "open"]
+        report_findings = [
+            finding
+            for finding in all_findings
+            if normalize_finding_status(finding.get("status")) not in REPORT_EXCLUDED_STATUSES
+        ]
 
-    open_findings = [finding for finding in all_findings if finding.get("status") == "open"]
-    highest = _highest_severity(report_findings if report_findings else open_findings)
+    open_findings = [
+        finding for finding in all_findings if normalize_finding_status(finding.get("status")) == "open"
+    ]
+    status_counts = finding_status_counts(case["id"])
+    status_summary = ", ".join(
+        f"{status}: {status_counts.get(status, 0)}"
+        for status in ("open", "in_review", "action_required", "accepted", "false_positive", "closed")
+        if status_counts.get(status, 0)
+    ) or "None recorded"
+    highest = _highest_severity(
+        [
+            {**finding, "severity": effective_finding_severity(finding)}
+            for finding in (report_findings if report_findings else open_findings)
+        ]
+    )
 
     modules_used = sorted(
         {
@@ -248,6 +269,7 @@ def build_case_report(
         f"- Total operations: {len(operations)}",
         f"- Total findings: {len(all_findings)}",
         f"- Open findings: {len(open_findings)}",
+        f"- Finding status summary: {status_summary}",
         f"- Highest severity finding: {highest or 'None recorded'}",
         f"- Main modules used: {modules_summary}",
         "",
@@ -337,14 +359,14 @@ def build_case_report(
     lines.extend(["## Findings", ""])
     if not report_findings:
         if not options.include_closed_findings:
-            lines.append("_No open findings recorded for this case._")
+            lines.append("_No active findings recorded for this case._")
         else:
             lines.append("_No findings recorded for this case._")
         lines.append("")
     else:
         findings_by_severity: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for finding in report_findings:
-            severity = (finding.get("severity") or "info").lower()
+            severity = effective_finding_severity(finding).lower()
             if severity not in SEVERITY_SECTION_ORDER:
                 severity = "info"
             findings_by_severity[severity].append(finding)
@@ -360,13 +382,22 @@ def build_case_report(
                     entity_by_id.get(finding.get("entity_id")),
                     finding.get("entity_id"),
                 )
+                display_severity = effective_finding_severity(finding)
                 lines.append(f"#### {finding.get('title', 'Finding')}")
                 lines.append("")
-                lines.append(f"- Severity: {finding.get('severity', 'info')}")
+                lines.append(f"- Status: {normalize_finding_status(finding.get('status', 'open'))}")
+                lines.append(f"- Module severity: {finding.get('severity', 'info')}")
+                if finding.get("user_severity"):
+                    lines.append(f"- Analyst severity override: {finding.get('user_severity')}")
+                else:
+                    lines.append(f"- Effective severity: {display_severity}")
                 lines.append(f"- Confidence: {finding.get('confidence', 50)}")
                 lines.append(f"- Affected entity: {entity}")
                 lines.append(f"- Module: `{finding.get('module_id', '-')}`")
-                lines.append(f"- Status: {finding.get('status', 'open')}")
+                if finding.get("reviewed_at"):
+                    lines.append(f"- Reviewed at: {finding.get('reviewed_at')}")
+                if finding.get("closed_at"):
+                    lines.append(f"- Closed at: {finding.get('closed_at')}")
                 lines.append("")
                 explanation = finding.get("explanation") or "_No explanation provided._"
                 if options.template == "executive":
@@ -375,6 +406,10 @@ def build_case_report(
                         explanation += "."
                 lines.append(explanation)
                 lines.append("")
+                if finding.get("analyst_notes"):
+                    lines.append("**Analyst notes:**")
+                    lines.append(finding.get("analyst_notes"))
+                    lines.append("")
                 if options.template == "full":
                     actions = _parse_suggested_actions(finding)
                     if actions:
@@ -388,6 +423,8 @@ def build_case_report(
     combined_actions: list[str] = []
     seen_actions: set[str] = set()
     for finding in open_findings:
+        if normalize_finding_status(finding.get("status")) != "open":
+            continue
         for action in _parse_suggested_actions(finding):
             normalized = action.strip()
             if not normalized or normalized in seen_actions:

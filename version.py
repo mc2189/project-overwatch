@@ -1,3 +1,3 @@
 """Project Overwatch version marker."""
 
-PROJECT_VERSION = "1.0.1"
+PROJECT_VERSION = "1.1.0"

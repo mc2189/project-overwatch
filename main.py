@@ -6,8 +6,12 @@ import pandas as pd
 import streamlit as st
 
 from database.db_setup import (
+    FINDING_STATUSES,
+    TERMINAL_FINDING_STATUSES,
     create_case,
     create_or_get_entity,
+    effective_finding_severity,
+    finding_status_counts,
     get_case,
     get_or_create_default_case,
     get_db_conn,
@@ -18,7 +22,9 @@ from database.db_setup import (
     list_observations,
     list_operations,
     list_relationships,
-    update_finding_status,
+    normalize_finding_status,
+    reopen_finding,
+    update_finding,
 )
 from modules.executor import execute_module, get_runtime_error, is_runtime_ready
 from modules.module_registry import (
@@ -101,33 +107,156 @@ def selection_requires_authorisation(module_ids: list[str]) -> bool:
         for module_id in module_ids
     )
 
-def set_finding_status(finding_id: int, status: str) -> None:
+FINDING_SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")
+FINDING_SEVERITY_OPTIONS = ("",) + FINDING_SEVERITY_ORDER
+FINDING_STATUS_LABELS = {
+    "open": "Open",
+    "in_review": "In review",
+    "action_required": "Action required",
+    "accepted": "Accepted",
+    "false_positive": "False positive",
+    "closed": "Closed",
+}
+
+
+def finding_status_label(status: str | None) -> str:
+    return FINDING_STATUS_LABELS.get(normalize_finding_status(status), "Open")
+
+
+def save_finding_update(
+    finding_id: int,
+    *,
+    status: str | None = None,
+    analyst_notes: str | None = None,
+    user_severity: str | None = None,
+) -> None:
     conn = get_db_conn()
     try:
-        update_finding_status(finding_id, status, conn=conn)
+        update_finding(
+            finding_id,
+            status=status,
+            analyst_notes=analyst_notes,
+            user_severity=user_severity,
+            conn=conn,
+        )
     finally:
         conn.close()
 
 
-def render_finding_status_controls(finding: dict) -> None:
-    """Render workflow controls for a single finding."""
-    current = finding.get("status", "open")
-    st.caption(f"Status: **{current}**")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if current != "open" and st.button("Reopen", key=f"finding_open_{finding['id']}", width="stretch"):
-            set_finding_status(finding["id"], "open")
+def render_finding_review_controls(finding: dict) -> None:
+    """Render triage controls for a single finding."""
+    finding_id = finding["id"]
+    current_status = normalize_finding_status(finding.get("status"))
+    is_terminal = current_status in TERMINAL_FINDING_STATUSES
+
+    st.markdown(f"**Status:** {finding_status_label(current_status)}")
+
+    with st.form(key=f"finding_review_{finding_id}"):
+        status_index = FINDING_STATUSES.index(current_status) if current_status in FINDING_STATUSES else 0
+        new_status = st.selectbox(
+            "Update status",
+            FINDING_STATUSES,
+            index=status_index,
+            format_func=lambda value: FINDING_STATUS_LABELS.get(value, value),
+        )
+        analyst_notes = st.text_area(
+            "Analyst notes",
+            value=finding.get("analyst_notes") or "",
+            help="Document review decisions, context, or follow-up.",
+        )
+        current_override = finding.get("user_severity") or ""
+        override_index = (
+            FINDING_SEVERITY_OPTIONS.index(current_override)
+            if current_override in FINDING_SEVERITY_OPTIONS
+            else 0
+        )
+        user_severity = st.selectbox(
+            "Severity override",
+            FINDING_SEVERITY_OPTIONS,
+            index=override_index,
+            format_func=lambda value: "(module default)" if not value else value,
+            help="Optional analyst override. Leave as module default to use module severity.",
+        )
+        button_col1, button_col2 = st.columns(2)
+        with button_col1:
+            save_clicked = st.form_submit_button("Save update", width="stretch")
+        with button_col2:
+            close_clicked = (
+                st.form_submit_button("Close finding", width="stretch") if not is_terminal else False
+            )
+
+    if save_clicked:
+        save_finding_update(
+            finding_id,
+            status=new_status,
+            analyst_notes=analyst_notes,
+            user_severity=user_severity or None,
+        )
+        st.rerun()
+    if close_clicked:
+        save_finding_update(
+            finding_id,
+            status="closed",
+            analyst_notes=analyst_notes,
+            user_severity=user_severity or None,
+        )
+        st.rerun()
+
+    if is_terminal:
+        if st.button("Reopen finding", key=f"finding_reopen_{finding_id}", width="stretch"):
+            conn = get_db_conn()
+            try:
+                reopen_finding(finding_id, conn=conn)
+            finally:
+                conn.close()
             st.rerun()
-    with col2:
-        if current != "reviewed" and st.button(
-            "Mark reviewed", key=f"finding_reviewed_{finding['id']}", width="stretch"
-        ):
-            set_finding_status(finding["id"], "reviewed")
-            st.rerun()
-    with col3:
-        if current != "closed" and st.button("Close", key=f"finding_closed_{finding['id']}", width="stretch"):
-            set_finding_status(finding["id"], "closed")
-            st.rerun()
+
+
+def render_finding_detail(finding: dict, entity_lookup: dict) -> None:
+    """Render read-only finding detail inside an expander."""
+    entity_label = entity_lookup.get(finding.get("entity_id"), finding.get("entity_id") or "-")
+    module_severity = finding.get("severity", "info")
+    effective_severity = effective_finding_severity(finding)
+
+    st.markdown(f"**Title:** {finding.get('title', 'Finding')}")
+    st.markdown(f"**Module:** `{finding.get('module_id', '-')}`")
+    st.markdown(f"**Entity:** {entity_label}")
+    st.markdown(f"**Module severity:** {module_severity}")
+    if finding.get("user_severity"):
+        st.markdown(f"**Analyst severity override:** {finding.get('user_severity')}")
+    st.markdown(f"**Effective severity:** {effective_severity}")
+    st.markdown(f"**Confidence:** {finding.get('confidence', 50)}")
+    st.markdown(f"**Status:** {finding_status_label(finding.get('status'))}")
+
+    st.markdown("**Explanation**")
+    st.write(finding.get("explanation") or "_No explanation provided._")
+
+    try:
+        suggested_actions = json.loads(finding.get("suggested_actions_json") or "[]")
+    except json.JSONDecodeError:
+        suggested_actions = []
+    if suggested_actions:
+        st.markdown("**Suggested actions**")
+        for action in suggested_actions:
+            st.markdown(f"- {action}")
+
+    if finding.get("analyst_notes"):
+        st.markdown("**Analyst notes**")
+        st.write(finding.get("analyst_notes"))
+
+    timestamp_parts = []
+    if finding.get("created_at"):
+        timestamp_parts.append(f"Created: {finding.get('created_at')}")
+    if finding.get("updated_at"):
+        timestamp_parts.append(f"Updated: {finding.get('updated_at')}")
+    if finding.get("reviewed_at"):
+        timestamp_parts.append(f"Reviewed: {finding.get('reviewed_at')}")
+    if finding.get("closed_at"):
+        timestamp_parts.append(f"Closed: {finding.get('closed_at')}")
+    if timestamp_parts:
+        st.caption(" · ".join(timestamp_parts))
+
+    render_finding_review_controls(finding)
 
 
 def get_current_case() -> dict:
@@ -427,10 +556,14 @@ relationship_count = conn.execute(
     "SELECT count(*) FROM relationships WHERE case_id = ?",
     (st.session_state.case_id,),
 ).fetchone()[0]
-open_findings_count = conn.execute(
-    "SELECT count(*) FROM findings WHERE case_id = ? AND status = 'open'",
-    (st.session_state.case_id,),
-).fetchone()[0]
+finding_counts = finding_status_counts(st.session_state.case_id, conn=conn)
+open_findings_count = finding_counts.get("open", 0)
+in_review_count = finding_counts.get("in_review", 0)
+action_required_count = finding_counts.get("action_required", 0)
+closed_findings_count = finding_counts.get("closed", 0)
+resolved_findings_count = (
+    finding_counts.get("accepted", 0) + finding_counts.get("false_positive", 0)
+)
 conn.close()
 
 m1, m2, m3, m4, m5 = st.columns(5)
@@ -439,6 +572,13 @@ m2.metric("Relationships", relationship_count)
 m3.metric("Observations", observation_count)
 m4.metric("Open findings", open_findings_count)
 m5.metric("Operations", operation_count)
+
+f1, f2, f3, f4, f5 = st.columns(5)
+f1.metric("In review", in_review_count)
+f2.metric("Action required", action_required_count)
+f3.metric("Closed", closed_findings_count)
+f4.metric("Accepted / false positive", resolved_findings_count)
+f5.metric("Total findings", sum(finding_counts.values()))
 
 st.divider()
 
@@ -608,63 +748,86 @@ with tab_findings:
         "Findings are analyst aids, not final proof of risk."
     )
 
-    filter_col1, filter_col2 = st.columns(2)
+    module_options = sorted({finding.get("module_id") for finding in findings if finding.get("module_id")})
+    filter_col1, filter_col2, filter_col3 = st.columns(3)
     with filter_col1:
         severity_filter = st.selectbox(
             "Filter by severity",
-            ["All", "critical", "high", "medium", "low", "info"],
+            ["All", *FINDING_SEVERITY_ORDER],
             key="findings_severity_filter",
         )
     with filter_col2:
         status_filter = st.selectbox(
             "Filter by status",
-            ["All", "open", "reviewed", "closed"],
+            ["All", *FINDING_STATUSES],
+            format_func=lambda value: "All" if value == "All" else FINDING_STATUS_LABELS.get(value, value),
             key="findings_status_filter",
+        )
+    with filter_col3:
+        module_filter = st.selectbox(
+            "Filter by module",
+            ["All", *module_options],
+            key="findings_module_filter",
         )
 
     filtered_findings = findings
     if severity_filter != "All":
-        filtered_findings = [f for f in filtered_findings if f.get("severity") == severity_filter]
+        filtered_findings = [
+            finding
+            for finding in filtered_findings
+            if effective_finding_severity(finding) == severity_filter
+        ]
     if status_filter != "All":
-        filtered_findings = [f for f in filtered_findings if f.get("status") == status_filter]
+        filtered_findings = [
+            finding
+            for finding in filtered_findings
+            if normalize_finding_status(finding.get("status")) == status_filter
+        ]
+    if module_filter != "All":
+        filtered_findings = [
+            finding for finding in filtered_findings if finding.get("module_id") == module_filter
+        ]
 
     if not filtered_findings:
-        st.info("No findings recorded for this case yet.")
+        st.info("No findings match the current filters.")
     else:
         summary_rows = []
         for finding in filtered_findings:
             summary_rows.append(
                 {
                     "id": finding["id"],
-                    "severity": finding.get("severity"),
+                    "severity": effective_finding_severity(finding),
                     "confidence": finding.get("confidence"),
                     "module": finding.get("module_id"),
                     "entity": entity_lookup.get(finding.get("entity_id"), finding.get("entity_id") or "-"),
                     "title": finding.get("title"),
-                    "status": finding.get("status"),
+                    "status": finding_status_label(finding.get("status")),
                     "created_at": finding.get("created_at"),
                 }
             )
         st.dataframe(pd.DataFrame(summary_rows), width="stretch")
 
+        findings_by_severity: dict[str, list[dict]] = {severity: [] for severity in FINDING_SEVERITY_ORDER}
         for finding in filtered_findings:
-            severity = (finding.get("severity") or "info").upper()
-            entity_label = entity_lookup.get(finding.get("entity_id"), finding.get("entity_id") or "-")
-            expander_label = (
-                f"[{severity}] {finding.get('title', 'Finding')} · "
-                f"{finding.get('module_id')} · {entity_label} · {finding.get('status', 'open')}"
-            )
-            with st.expander(expander_label, expanded=False):
-                st.write(finding.get("explanation", ""))
-                try:
-                    suggested_actions = json.loads(finding.get("suggested_actions_json") or "[]")
-                except json.JSONDecodeError:
-                    suggested_actions = []
-                if suggested_actions:
-                    st.markdown("**Suggested next actions**")
-                    for action in suggested_actions:
-                        st.markdown(f"- {action}")
-                render_finding_status_controls(finding)
+            severity = effective_finding_severity(finding).lower()
+            if severity not in findings_by_severity:
+                severity = "info"
+            findings_by_severity[severity].append(finding)
+
+        for severity in FINDING_SEVERITY_ORDER:
+            severity_findings = findings_by_severity.get(severity, [])
+            if not severity_findings:
+                continue
+            st.subheader(f"{severity.upper()} ({len(severity_findings)})")
+            for finding in severity_findings:
+                entity_label = entity_lookup.get(finding.get("entity_id"), finding.get("entity_id") or "-")
+                status_text = finding_status_label(finding.get("status"))
+                expander_label = (
+                    f"[{effective_finding_severity(finding).upper()}] {finding.get('title', 'Finding')} · "
+                    f"{finding.get('module_id')} · {entity_label} · {status_text}"
+                )
+                with st.expander(expander_label, expanded=False):
+                    render_finding_detail(finding, entity_lookup)
 
 with tab_report:
     st.caption(
@@ -738,9 +901,9 @@ with tab_report:
             help="Executive omits detailed entities, relationships, and observations.",
         )
         include_closed_findings = st.checkbox(
-            "Include closed findings",
+            "Include closed / accepted / false positive findings",
             value=False,
-            help="When unchecked, only open findings are included in the report.",
+            help="When unchecked, only active findings (open, in review, action required) are included.",
         )
         include_raw_appendix = st.checkbox(
             "Include raw output appendix",
@@ -978,7 +1141,7 @@ with tab_graph:
     conn.close()
     st.caption(
         "Graph built from stored entities and relationships for the active case. "
-        "Node colour reflects the highest open or reviewed finding severity. "
+        "Node colour reflects the highest active finding severity (open, in review, action required). "
         "This view does not perform new scanning."
     )
     figure = entity_graph_figure(entities, relationships, findings)
