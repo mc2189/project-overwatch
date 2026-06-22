@@ -92,6 +92,8 @@ nmap_runtime_ready = is_runtime_ready("infra_nmap")
 nmap_module_error = get_runtime_error("infra_nmap")
 domain_intel_ready = is_runtime_ready("infra_domain_intel")
 domain_intel_error = get_runtime_error("infra_domain_intel")
+cert_subdomain_ready = is_runtime_ready("infra_cert_subdomain")
+cert_subdomain_error = get_runtime_error("infra_cert_subdomain")
 
 
 def module_runtime_ready(module_id: str) -> bool:
@@ -99,6 +101,8 @@ def module_runtime_ready(module_id: str) -> bool:
         return nmap_runtime_ready
     if module_id == "infra_domain_intel":
         return domain_intel_ready
+    if module_id == "infra_cert_subdomain":
+        return cert_subdomain_ready
     return False
 
 
@@ -107,6 +111,8 @@ def module_runtime_error(module_id: str) -> str | None:
         return nmap_module_error
     if module_id == "infra_domain_intel":
         return domain_intel_error
+    if module_id == "infra_cert_subdomain":
+        return cert_subdomain_error
     return None
 
 
@@ -340,6 +346,44 @@ def render_execution_result(result: dict) -> None:
     st.write(f"**{display_name}:** {result['summary']}")
 
     parsed_data = result.get("parsed_data") or {}
+    if result["module_id"] == "infra_cert_subdomain" and parsed_data:
+        st.write("### Certificate & Subdomain Intelligence Summary")
+        subdomains = parsed_data.get("subdomains") or []
+        st.write(f"**Subdomains discovered:** {len(subdomains)}")
+        if subdomains:
+            st.dataframe(
+                pd.DataFrame({"subdomain": subdomains}),
+                width="stretch",
+                hide_index=True,
+            )
+        else:
+            st.caption("No related public names were returned for this domain.")
+
+        certificates = parsed_data.get("certificates") or []
+        if certificates:
+            st.markdown("**Certificate references (sample)**")
+            cert_rows = []
+            for cert in certificates[:15]:
+                cert_rows.append(
+                    {
+                        "id": cert.get("id"),
+                        "common_name": cert.get("common_name"),
+                        "issuer": cert.get("issuer"),
+                        "not_before": cert.get("not_before"),
+                        "not_after": cert.get("not_after"),
+                    }
+                )
+            st.dataframe(pd.DataFrame(cert_rows), width="stretch", hide_index=True)
+
+        if parsed_data.get("source"):
+            st.caption(f"Source: {parsed_data.get('source')}")
+        if parsed_data.get("warning"):
+            st.warning(parsed_data["warning"])
+        if parsed_data.get("wildcard_observed"):
+            st.caption("Wildcard certificate names were observed in the source data.")
+        if parsed_data.get("truncated"):
+            st.caption("Subdomain list was truncated for usability.")
+
     if result["module_id"] == "infra_domain_intel" and parsed_data:
         st.write("### Domain Intelligence Summary")
         dns_records = parsed_data.get("dns", {})
@@ -461,6 +505,11 @@ with st.sidebar:
     if domain_intel_entry and is_executable(domain_intel_entry) and domain_intel_error:
         st.error("Domain Intelligence module unavailable")
         st.caption(domain_intel_error)
+
+    cert_subdomain_entry = get_module("infra_cert_subdomain")
+    if cert_subdomain_entry and is_executable(cert_subdomain_entry) and cert_subdomain_error:
+        st.error("Certificate & Subdomain Intelligence module unavailable")
+        st.caption(cert_subdomain_error)
 
     target_ip = st.text_input(
         "Target",

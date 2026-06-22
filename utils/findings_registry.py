@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from utils.cert_subdomain_interpreter import interpret_cert_subdomain_results
 from utils.domain_intel_interpreter import interpret_domain_intel_results
 from utils.nmap_interpreter import interpret_nmap_results
 
 InterpreterFn = Callable[[dict[str, Any], dict[str, Any]], list[dict[str, Any]]]
+
+
+def _interpret_cert_subdomain(parsed_data: dict[str, Any], _options: dict[str, Any]) -> list[dict[str, Any]]:
+    return interpret_cert_subdomain_results(parsed_data)
 
 
 def _interpret_domain_intel(parsed_data: dict[str, Any], _options: dict[str, Any]) -> list[dict[str, Any]]:
@@ -21,6 +26,7 @@ def _interpret_nmap(parsed_data: dict[str, Any], options: dict[str, Any]) -> lis
 MODULE_FINDING_INTERPRETERS: dict[str, InterpreterFn] = {
     "infra_nmap": _interpret_nmap,
     "infra_domain_intel": _interpret_domain_intel,
+    "infra_cert_subdomain": _interpret_cert_subdomain,
 }
 
 

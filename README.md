@@ -1,8 +1,8 @@
-# Project Overwatch v1.2
+# Project Overwatch v1.3
 
 Project Overwatch is a **local** Python/Streamlit dashboard for defensive security intelligence. It helps analysts organise investigations into **cases**, collect data with authorised **active** scans and **passive** lookups, interpret results as advisory **findings**, and export **reports** — all stored in a local SQLite database on your machine.
 
-**v1.2 executable modules:** Nmap (active port scan) and Domain Intelligence (passive domain lookup). The sidebar guides which modules are compatible with each target type.
+**v1.3 executable modules:** Nmap (active port scan), Domain Intelligence (passive DNS/HTTP/TLS/Wayback), and Certificate & Subdomain Intelligence (passive certificate transparency lookup). The sidebar guides which modules are compatible with each target type.
 
 Use only on systems you own, lab environments, or targets with **written permission**.
 
@@ -65,6 +65,7 @@ python scripts/smoke_check.py
 3. **Enable compatible modules** under **Modules** (incompatible modules are greyed out with a reason):
    - **Nmap [Active]** — port/service scan for IPv4 or domain; requires authorisation checkbox.
    - **Domain Intelligence [Passive]** — DNS, HTTP, TLS, Wayback for domain or URL; no authorisation needed.
+   - **Certificate & Subdomain Intelligence [Passive]** — public certificate transparency names for domain or URL; no authorisation needed.
 4. Review the **Operation Plan** on the dashboard, then click **Run selected modules**.
 5. Review results in the main panel (raw output stays in expanders).
 6. Browse **Archive** tabs: Cases (backup/restore), Entities, Relationships, Graph, Observations, Operations, Findings, Report.
@@ -161,6 +162,22 @@ Re-running a module does not automatically reopen closed/accepted/false positive
 - Creates domain/IP/MX/NS entities and relationships
 - Cautious findings (missing headers **not observed**, not confirmed vulns)
 
+### Certificate & Subdomain Intelligence (passive)
+
+- Queries public certificate transparency data via [crt.sh](https://crt.sh/) for names related to a domain or URL
+- Does **not** run port scans, service checks, or active probing
+- Discovered names are **leads for review** — they do not prove a host is live or in scope
+- Creates `has_subdomain` relationships from the queried domain to discovered names
+- Cautious findings for discovered names, large result sets, wildcard entries, and unavailable source data
+
+**How to test:** against an authorised or public domain such as `example.com`:
+
+1. Enter `example.com` as the target.
+2. Enable **Certificate & Subdomain Intelligence [Passive]** (no authorisation checkbox required).
+3. Run the module and review the subdomain table, certificate sample, findings, graph links, and report output.
+
+If crt.sh is rate limited or unavailable, the module returns a structured warning instead of crashing.
+
 ## Reports
 
 **Archive → Report** generates Markdown previews with optional:
@@ -179,7 +196,7 @@ Saved reports go to `reports/` (gitignored). Encrypted exports go to `exports/`.
 
 ```
 main.py                    Streamlit entry point
-version.py                 PROJECT_VERSION = "1.2.0"
+version.py                 PROJECT_VERSION = "1.3.0"
 scripts/smoke_check.py     Local sanity checks
 requirements-optional.txt  kaleido, weasyprint (optional)
 database/db_setup.py       SQLite schema and helpers
@@ -214,11 +231,11 @@ config/                    Local report settings (gitignored)
 
 Check **Sidebar → System status** for Nmap, modules, and optional dependency readiness.
 
-## v1.3 roadmap
+## v1.4 roadmap
 
-- Additional passive collection modules wired through the findings pipeline
 - Stale finding handling on re-scan (reopen terminal findings when the same issue is observed again)
 - Finding-driven graph filters and export presets
+- Additional passive collection modules wired through the findings pipeline
 - Hardening for long-running local deployments
 
 Previously planned case backup is **available now** on the Cases tab (v1.0.1).

@@ -90,6 +90,61 @@ def _check_finding_workflow_helpers() -> None:
         conn.close()
 
 
+def _check_cert_subdomain_module() -> None:
+    registry = __import__("modules.module_registry", fromlist=["get_module"])
+    module = registry.get_module("infra_cert_subdomain")
+    if module is None or not module.implemented:
+        raise AssertionError("infra_cert_subdomain registry entry missing or not implemented")
+    for field in (
+        "accepted_target_types",
+        "short_help",
+        "detailed_help",
+        "example_inputs",
+        "output_summary",
+        "caution_notes",
+    ):
+        if not getattr(module, field):
+            raise AssertionError(f"infra_cert_subdomain missing registry metadata: {field}")
+
+    import importlib.util
+    from pathlib import Path
+
+    module_path = Path(PROJECT_ROOT) / "modules" / "2_infrastructure" / "infra_cert_subdomain.py"
+    spec = importlib.util.spec_from_file_location("infra_cert_subdomain", module_path)
+    if spec is None or spec.loader is None:
+        raise AssertionError("could not load infra_cert_subdomain module spec")
+    loaded = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(loaded)
+    if not callable(getattr(loaded, "run_cert_subdomain_intel", None)):
+        raise AssertionError("run_cert_subdomain_intel missing")
+
+    executor = __import__("modules.executor", fromlist=["is_runtime_ready", "get_module"])
+    if not executor.is_runtime_ready("infra_cert_subdomain"):
+        raise AssertionError("executor cannot load infra_cert_subdomain backend")
+
+    findings = __import__(
+        "utils.cert_subdomain_interpreter",
+        fromlist=["interpret_cert_subdomain_results"],
+    )
+    sample_findings = findings.interpret_cert_subdomain_results(
+        {
+            "domain": "example.com",
+            "subdomains": ["www.example.com", "api.example.com"],
+            "wildcard_observed": True,
+            "source": "crt.sh",
+        }
+    )
+    if not sample_findings:
+        raise AssertionError("cert subdomain interpreter returned no findings for sample data")
+
+    registry_pipeline = __import__(
+        "utils.findings_registry",
+        fromlist=["module_has_findings_pipeline"],
+    )
+    if not registry_pipeline.module_has_findings_pipeline("infra_cert_subdomain"):
+        raise AssertionError("findings pipeline not registered for infra_cert_subdomain")
+
+
 def _check_target_compatibility() -> None:
     target_detection = __import__(
         "utils.target_detection",
@@ -122,7 +177,8 @@ def _check_target_compatibility() -> None:
 
     nmap = registry.get_module("infra_nmap")
     domain_intel = registry.get_module("infra_domain_intel")
-    if nmap is None or domain_intel is None:
+    cert_subdomain = registry.get_module("infra_cert_subdomain")
+    if nmap is None or domain_intel is None or cert_subdomain is None:
         raise AssertionError("expected implemented modules missing from registry")
 
     for field in (
@@ -143,6 +199,10 @@ def _check_target_compatibility() -> None:
         raise AssertionError("Domain Intelligence should not accept IPv4 targets")
     if not compatibility.module_accepts_target(domain_intel, "url"):
         raise AssertionError("Domain Intelligence should accept URL targets")
+    if not compatibility.module_accepts_target(cert_subdomain, "domain"):
+        raise AssertionError("Certificate & Subdomain Intelligence should accept domain targets")
+    if compatibility.module_accepts_target(cert_subdomain, "ipv4"):
+        raise AssertionError("Certificate & Subdomain Intelligence should not accept IPv4 targets")
 
     ip_reason = compatibility.get_incompatible_reason(domain_intel, "ipv4")
     if "domain" not in ip_reason.lower():
@@ -150,8 +210,12 @@ def _check_target_compatibility() -> None:
 
     compatible = compatibility.get_compatible_modules("example.com")
     module_ids = {module.module_id for module in compatible}
-    if "infra_nmap" not in module_ids or "infra_domain_intel" not in module_ids:
-        raise AssertionError("example.com should be compatible with both implemented modules")
+    if (
+        "infra_nmap" not in module_ids
+        or "infra_domain_intel" not in module_ids
+        or "infra_cert_subdomain" not in module_ids
+    ):
+        raise AssertionError("example.com should be compatible with all implemented domain modules")
 
     plan = compatibility.build_operation_plan(
         case_name="Smoke",
@@ -208,6 +272,11 @@ def main() -> int:
     run(
         "target compatibility",
         lambda: _check_target_compatibility(),
+    )
+
+    run(
+        "cert subdomain module",
+        lambda: _check_cert_subdomain_module(),
     )
 
     run(

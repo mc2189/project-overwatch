@@ -28,6 +28,7 @@ from utils.privileges import detect_nmap_privilege_issue
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 NMAP_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_nmap.py"
 DOMAIN_INTEL_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_domain_intel.py"
+CERT_SUBDOMAIN_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_cert_subdomain.py"
 
 _nmap_handlers: tuple[Any, Any] | None = None
 _nmap_load_error: str | None = None
@@ -35,6 +36,9 @@ _nmap_load_attempted = False
 _domain_intel_handler: Any | None = None
 _domain_intel_load_error: str | None = None
 _domain_intel_load_attempted = False
+_cert_subdomain_handler: Any | None = None
+_cert_subdomain_load_error: str | None = None
+_cert_subdomain_load_attempted = False
 
 
 def make_result(
@@ -115,6 +119,29 @@ def _load_domain_intel_handler() -> None:
         _domain_intel_load_error = str(exc)
 
 
+def _load_cert_subdomain_handler() -> None:
+    global _cert_subdomain_handler, _cert_subdomain_load_error, _cert_subdomain_load_attempted
+
+    if _cert_subdomain_load_attempted:
+        return
+
+    _cert_subdomain_load_attempted = True
+
+    if not CERT_SUBDOMAIN_MODULE_PATH.is_file():
+        _cert_subdomain_load_error = f"Module file not found: {CERT_SUBDOMAIN_MODULE_PATH}"
+        return
+
+    try:
+        spec = importlib.util.spec_from_file_location("infra_cert_subdomain", CERT_SUBDOMAIN_MODULE_PATH)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load module spec from {CERT_SUBDOMAIN_MODULE_PATH}")
+        infra_cert_subdomain = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(infra_cert_subdomain)
+        _cert_subdomain_handler = infra_cert_subdomain.run_cert_subdomain_intel
+    except Exception as exc:
+        _cert_subdomain_load_error = str(exc)
+
+
 def _nmap_binary_available() -> bool:
     return shutil.which("nmap") is not None
 
@@ -127,6 +154,9 @@ def is_runtime_ready(module_id: str) -> bool:
     if module_id == "infra_domain_intel":
         _load_domain_intel_handler()
         return _domain_intel_handler is not None
+    if module_id == "infra_cert_subdomain":
+        _load_cert_subdomain_handler()
+        return _cert_subdomain_handler is not None
     return False
 
 
@@ -143,6 +173,9 @@ def get_runtime_error(module_id: str) -> str | None:
     if module_id == "infra_domain_intel":
         _load_domain_intel_handler()
         return _domain_intel_load_error
+    if module_id == "infra_cert_subdomain":
+        _load_cert_subdomain_handler()
+        return _cert_subdomain_load_error
     return None
 
 
@@ -414,6 +447,95 @@ def _persist_domain_intel_records(
         )
 
 
+def _persist_cert_subdomain_records(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    domain_entity_id: int,
+    module_id: str,
+    target: str,
+    result: dict[str, Any],
+    authorisation_confirmed: bool,
+) -> None:
+    """Save certificate/subdomain operations, observations, entities, and relationships."""
+    create_operation_log(
+        case_id,
+        module_id,
+        target,
+        result["status"],
+        authorisation_confirmed=authorisation_confirmed,
+        summary=result["summary"],
+        conn=conn,
+    )
+
+    if result["status"] != "completed":
+        return
+
+    parsed_data = result.get("parsed_data") or {}
+    domain = parsed_data.get("domain") or target
+
+    for subdomain in parsed_data.get("subdomains", []):
+        if subdomain == domain:
+            continue
+        subdomain_entity = create_or_get_entity(
+            case_id,
+            "domain",
+            subdomain,
+            label=subdomain,
+            source=module_id,
+            confidence=75,
+            conn=conn,
+        )
+        create_relationship(
+            case_id,
+            domain_entity_id,
+            "has_subdomain",
+            subdomain_entity["id"],
+            source_module=module_id,
+            confidence=75,
+            conn=conn,
+        )
+
+    observation = create_observation(
+        case_id,
+        domain_entity_id,
+        module_id,
+        "certificate_subdomain_intelligence",
+        "Certificate and subdomain intelligence result",
+        summary=result["summary"],
+        data_json=json.dumps(
+            {
+                "module_id": module_id,
+                "success": result["success"],
+                "status": result["status"],
+                "findings": result.get("findings", []),
+                "interpreter_findings": result.get("interpreter_findings", []),
+                "original_target": parsed_data.get("original_target"),
+                "domain": domain,
+                "subdomains": parsed_data.get("subdomains", []),
+                "certificates": parsed_data.get("certificates", []),
+                "source": parsed_data.get("source"),
+                "warning": parsed_data.get("warning"),
+                "wildcard_observed": parsed_data.get("wildcard_observed"),
+                "truncated": parsed_data.get("truncated"),
+            }
+        ),
+        raw_output=result["raw_output"],
+        conn=conn,
+    )
+
+    interpreter_findings = result.get("interpreter_findings") or []
+    if interpreter_findings:
+        _persist_module_findings(
+            conn,
+            case_id=case_id,
+            entity_id=domain_entity_id,
+            observation_id=observation["id"],
+            module_id=module_id,
+            interpreter_findings=interpreter_findings,
+        )
+
+
 def _scan_output_text(scan_data: dict[str, Any]) -> str:
     parts = [
         scan_data.get("raw_output", ""),
@@ -664,6 +786,74 @@ def _execute_domain_intel(
     return result
 
 
+def _execute_cert_subdomain(
+    module_id: str,
+    target: str,
+    db_context: sqlite3.Connection | None,
+    authorisation_confirmed: bool,
+    case_id: int | None,
+    entity_id: int | None,
+) -> dict[str, Any]:
+    _load_cert_subdomain_handler()
+    if _cert_subdomain_handler is None:
+        error_message = _cert_subdomain_load_error or "Certificate & Subdomain Intelligence module is not available."
+        return make_result(
+            module_id,
+            success=False,
+            status="error",
+            summary="Certificate & Subdomain Intelligence module is not available.",
+            errors=[error_message],
+        )
+
+    intel_data = _cert_subdomain_handler(target)
+    if not intel_data.get("success"):
+        errors = intel_data.get("errors") or ["Certificate and subdomain intelligence collection failed."]
+        return make_result(
+            module_id,
+            success=False,
+            status="error",
+            summary=errors[0],
+            raw_output=intel_data.get("raw_output", ""),
+            errors=errors,
+            parsed_data=intel_data.get("data"),
+        )
+
+    parsed_data = intel_data.get("data") or {}
+    domain = parsed_data.get("domain") or target
+    interpreter_findings = interpret_module_findings(module_id, parsed_data)
+    result = make_result(
+        module_id,
+        success=True,
+        status=intel_data.get("status", "completed"),
+        summary=intel_data.get("summary", f"Certificate intelligence collected for {domain}."),
+        raw_output=intel_data.get("raw_output", ""),
+        findings=intel_data.get("findings", []),
+        parsed_data=parsed_data,
+        interpreter_findings=interpreter_findings,
+    )
+
+    if db_context is not None and case_id is not None:
+        domain_entity = create_or_get_entity(
+            case_id,
+            "domain",
+            domain,
+            label=domain,
+            source=module_id,
+            conn=db_context,
+        )
+        _persist_cert_subdomain_records(
+            db_context,
+            case_id=case_id,
+            domain_entity_id=domain_entity["id"],
+            module_id=module_id,
+            target=domain,
+            result=result,
+            authorisation_confirmed=authorisation_confirmed,
+        )
+
+    return result
+
+
 def execute_module(
     module_id: str,
     target: str,
@@ -780,6 +970,25 @@ def execute_module(
                 errors=[error_message],
             )
         return _execute_domain_intel(
+            module_id,
+            target,
+            db_context,
+            authorisation_confirmed,
+            case_id,
+            entity_id,
+        )
+
+    if module_id == "infra_cert_subdomain":
+        if not is_runtime_ready(module_id):
+            error_message = get_runtime_error(module_id) or "Certificate & Subdomain Intelligence runtime is not ready."
+            return make_result(
+                module_id,
+                success=False,
+                status="error",
+                summary="Certificate & Subdomain Intelligence module is not available.",
+                errors=[error_message],
+            )
+        return _execute_cert_subdomain(
             module_id,
             target,
             db_context,

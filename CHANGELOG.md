@@ -2,6 +2,14 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v1.3.0 — Certificate and subdomain intelligence
+
+- New passive module `infra_cert_subdomain` (Certificate & Subdomain Intelligence)
+- Certificate transparency lookup via crt.sh for domain/URL targets
+- Subdomain cleaning, deduplication, domain scoping, and 100-name UI limit
+- `has_subdomain` entities and relationships; cautious interpreter findings
+- Executor, graph, archive, findings, and report integration
+
 ## v1.2.0 — Target compatibility and launch planner
 
 - Central target type detection (`ipv4`, `domain`, `url`, `email`, `username`, `unknown`)

@@ -65,6 +65,19 @@ def collect_health_checks() -> list[HealthCheck]:
             )
         )
 
+    cert_ready = is_runtime_ready("infra_cert_subdomain")
+    cert_error = get_runtime_error("infra_cert_subdomain")
+    if cert_ready:
+        checks.append(HealthCheck("Certificate & Subdomain Intelligence", True, "Backend loaded"))
+    else:
+        checks.append(
+            HealthCheck(
+                "Certificate & Subdomain Intelligence",
+                False,
+                cert_error or "Backend failed to load — run pip install -r requirements.txt",
+            )
+        )
+
     checks.append(
         HealthCheck(
             "Graph PNG (kaleido)",

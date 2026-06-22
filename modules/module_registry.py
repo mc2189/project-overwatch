@@ -135,6 +135,33 @@ MODULES: list[ModuleEntry] = [
         ),
     ),
     ModuleEntry(
+        module_id="infra_cert_subdomain",
+        display_name="Certificate & Subdomain Intelligence",
+        category="Infrastructure",
+        description="Passive discovery of public certificate names and related subdomains.",
+        status="active",
+        mode="passive",
+        risk_level="low",
+        requires_authorisation=False,
+        requires_api_key=False,
+        implemented=True,
+        accepted_target_types=("domain", "url"),
+        short_help="Passive certificate transparency lookup for related public subdomain names.",
+        detailed_help=(
+            "Queries public certificate transparency data (crt.sh) to discover hostnames that have appeared "
+            "in certificates related to the target domain or URL. This module does not run port scans, "
+            "service checks, or intrusive probes. Certificate-derived names are leads for review — they "
+            "do not confirm that a host is live, reachable, or in scope."
+        ),
+        example_inputs=("example.com", "https://www.example.com/path"),
+        output_summary="Discovered subdomain names, certificate references, and cautious advisory findings.",
+        caution_notes=(
+            "Passive public lookup only — no active scanning.",
+            "Certificate-derived names are leads, not proof of live systems.",
+            "Results depend on public transparency logs and may be incomplete or rate limited.",
+        ),
+    ),
+    ModuleEntry(
         module_id="infra_amass",
         display_name="Amass",
         category="Infrastructure",
