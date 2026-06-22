@@ -21,6 +21,7 @@ venv/
 database/*.db
 database/*.sqlite
 database/*.sqlite3
+database/evidence_files/
 
 # Streamlit
 .streamlit/secrets.toml

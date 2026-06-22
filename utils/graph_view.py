@@ -103,6 +103,8 @@ def entity_graph_figure(
     finding_statuses: tuple[str, ...] = ("open", "in_review", "action_required"),
     min_severity: str | None = None,
     hide_entities_without_findings: bool = False,
+    entities_with_evidence: set[int] | None = None,
+    hide_entities_without_evidence: bool = False,
 ) -> go.Figure | None:
     """Create a simple Plotly figure for the entity graph."""
     all_findings = findings or []
@@ -116,6 +118,10 @@ def entity_graph_figure(
     if hide_entities_without_findings:
         visible_ids = set(severity_by_entity.keys())
         display_entities = [entity for entity in entities if entity["id"] in visible_ids]
+    if hide_entities_without_evidence and entities_with_evidence is not None:
+        display_entities = [
+            entity for entity in display_entities if entity["id"] in entities_with_evidence
+        ]
 
     graph = build_entity_graph(display_entities, relationships)
     if graph.number_of_nodes() == 0:
@@ -148,6 +154,8 @@ def entity_graph_figure(
     node_hover: list[str] = []
     node_colors: list[str] = []
     node_ids: list[int] = []
+    marker_sizes: list[int] = []
+    marker_lines: list[dict[str, Any]] = []
 
     for node_id in graph.nodes():
         x, y = positions[node_id]
@@ -158,11 +166,18 @@ def entity_graph_figure(
         node_type = graph.nodes[node_id].get("entity_type", "unknown")
         severity = severity_by_entity.get(node_id, "none")
         severity_label = severity if severity != "none" else "no open findings"
+        has_evidence = entities_with_evidence is not None and node_id in entities_with_evidence
+        evidence_note = "yes" if has_evidence else "no"
         node_hover.append(
             f"{labels.get(node_id, node_id)}<br>type: {node_type}<br>"
-            f"finding severity: {severity_label}<br>id: {node_id}"
+            f"finding severity: {severity_label}<br>"
+            f"evidence locker: {evidence_note}<br>id: {node_id}"
         )
         node_colors.append(SEVERITY_COLORS.get(severity, SEVERITY_COLORS["none"]))
+        marker_sizes.append(22 if has_evidence else 18)
+        marker_lines.append(
+            {"width": 3 if has_evidence else 1, "color": "#2ca02c" if has_evidence else "#ffffff"}
+        )
 
     node_trace = go.Scatter(
         x=node_x,
@@ -173,7 +188,11 @@ def entity_graph_figure(
         hovertext=node_hover,
         hoverinfo="text",
         customdata=node_ids,
-        marker={"size": 18, "color": node_colors, "line": {"width": 1, "color": "#ffffff"}},
+        marker={
+            "size": marker_sizes,
+            "color": node_colors,
+            "line": {"width": [line["width"] for line in marker_lines], "color": [line["color"] for line in marker_lines]},
+        },
         name="Entities",
     )
 

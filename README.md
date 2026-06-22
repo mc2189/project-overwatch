@@ -1,4 +1,4 @@
-# Project Overwatch v1.11
+# Project Overwatch v1.13
 
 Project Overwatch is a **local** Python/Streamlit dashboard for defensive security intelligence. It helps analysts organise investigations into **cases**, collect data with authorised **active** scans and **passive** lookups, interpret results as advisory **findings**, and export **reports** — all stored in a local SQLite database on your machine.
 
@@ -16,7 +16,9 @@ The sidebar provides case selection and main navigation:
 | **Findings** | Triage advisory findings |
 | **Entity Workspace** | Inspect entities, pivot to compatible modules, edit analyst notes |
 | **Batch Queue** | Queue passive follow-up modules for multiple entities; controlled batch runner |
-| **Relationships / Observations / Operations** | Investigation archive |
+| **Observations** | Investigation archive with evidence metadata |
+| **Evidence Locker** | Source artefacts, raw captures, hashes, and provenance |
+| **Operations** | Module run history |
 | **Graph** | Entity relationship view; open neighbours in Entity Workspace |
 | **Report** | Generate and export case reports |
 | **Backup** | Case JSON export/import and legacy tables |
@@ -446,6 +448,35 @@ Guidance bands:
 Certificate transparency names, DNS answers, and archive lookups are **leads**. They may reflect historical or mis-issued certificates, not confirmed live hosts. Overwatch uses cautious wording for third-party and inferred records (for example “Observed via certificate transparency data”).
 
 When a lookup is unavailable, Overwatch records a source notice — that indicates a collection limit during the run, not that the target lacks the attribute.
+
+### Evidence Locker (v1.12)
+
+The **Evidence Locker** preserves source artefacts from module runs:
+
+- **What** was collected (raw Nmap output, DNS summaries, homepage metadata, crt.sh results)
+- **When** it was captured (`captured_at`)
+- **Which module** and **source** produced it
+- **SHA-256 content hash** for change detection (empty when content is absent or secret-like)
+- **Links** to observations, findings, and entities
+
+**Evidence items** are distinct from:
+
+| Record | Role |
+|--------|------|
+| **Observation** | Structured module result attached to an entity |
+| **Finding** | Advisory interpreter output for analyst triage |
+| **Evidence item** | Raw or summary artefact with provenance and hash |
+
+**Current limitation:** text artefacts are stored in the local SQLite database (`content_text`). Content larger than 32 KB spills to `database/evidence_files/` with a preview retained in the database.
+
+**TODO (v1.14+):** binary attachments, external object storage, and first API-backed collection module with evidence preflight.
+
+### Evidence linking and filters (v1.13)
+
+- **Many-to-many links** between evidence items and findings via `evidence_finding_links`
+- **Findings page** filters by evidence type, reliability, and linked evidence presence
+- **Graph page** can highlight or hide entities based on Evidence Locker items
+- **Domain Intelligence** observations use source-aware evidence metadata (DNS vs HTTP/TLS)
 
 ## Development
 

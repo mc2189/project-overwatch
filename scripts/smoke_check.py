@@ -1002,6 +1002,172 @@ def _check_evidence_model() -> None:
     __import__("utils.report_builder", fromlist=["build_case_report"])
 
 
+def _check_evidence_locker() -> None:
+    db = __import__(
+        "database.db_setup",
+        fromlist=[
+            "calculate_content_hash",
+            "create_evidence_item",
+            "create_finding",
+            "create_observation",
+            "create_or_get_entity",
+            "get_evidence_item",
+            "get_db_conn",
+            "get_or_create_default_case",
+            "link_evidence_to_finding",
+            "link_evidence_to_observation",
+            "list_evidence_finding_links",
+            "list_evidence_for_finding",
+            "list_evidence_items",
+        ],
+    )
+    storage = __import__(
+        "utils.evidence_storage",
+        fromlist=["should_spill_content", "EVIDENCE_INLINE_MAX_BYTES"],
+    )
+    capture = __import__(
+        "utils.evidence_capture",
+        fromlist=["capture_module_evidence", "capture_nmap_evidence"],
+    )
+    backup = __import__(
+        "utils.case_backup",
+        fromlist=["export_case_bundle"],
+    )
+
+    sample_hash = db.calculate_content_hash("evidence locker smoke")
+    if not sample_hash or len(sample_hash) != 64:
+        raise AssertionError("calculate_content_hash should return SHA-256 hex digest")
+    if db.calculate_content_hash("") is not None:
+        raise AssertionError("empty content should not produce a hash")
+    if db.calculate_content_hash("api_key=super_secret_value_12345") is not None:
+        raise AssertionError("secret-like content should not be hashed")
+
+    case = db.get_or_create_default_case()
+    conn = db.get_db_conn()
+    try:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(evidence_items)").fetchall()}
+        required = {
+            "id",
+            "case_id",
+            "entity_id",
+            "observation_id",
+            "finding_id",
+            "module_id",
+            "content_text",
+            "content_hash",
+            "captured_at",
+        }
+        if not required.issubset(columns):
+            raise AssertionError(f"evidence_items missing columns: {required - columns}")
+        link_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(evidence_finding_links)").fetchall()
+        }
+        if "evidence_id" not in link_columns or "finding_id" not in link_columns:
+            raise AssertionError("evidence_finding_links table missing")
+
+        if not storage.should_spill_content("x" * (storage.EVIDENCE_INLINE_MAX_BYTES + 1)):
+            raise AssertionError("should_spill_content threshold failed")
+
+        entity = db.create_or_get_entity(
+            case["id"],
+            "domain",
+            "locker-smoke.example",
+            source="smoke_check",
+            conn=conn,
+        )
+        observation = db.create_observation(
+            case["id"],
+            entity["id"],
+            "infra_nmap",
+            "network_scan",
+            "Locker smoke observation",
+            summary="Smoke test",
+            conn=conn,
+        )
+        item = db.create_evidence_item(
+            case["id"],
+            "infra_nmap",
+            "Smoke evidence item",
+            summary="Raw output capture",
+            content_text="Starting Nmap 7.94 ( https://nmap.org )",
+            entity_id=entity["id"],
+            observation_id=observation["id"],
+            source_name="local_nmap",
+            conn=conn,
+        )
+        if not item.get("content_hash"):
+            raise AssertionError("create_evidence_item did not store content_hash")
+        fetched = db.get_evidence_item(item["id"], conn=conn)
+        if fetched is None:
+            raise AssertionError("get_evidence_item returned None")
+        linked = db.link_evidence_to_observation(item["id"], observation["id"], conn=conn)
+        if linked is None or linked.get("observation_id") != observation["id"]:
+            raise AssertionError("link_evidence_to_observation failed")
+
+        nmap_items = capture.capture_nmap_evidence(
+            conn,
+            case_id=case["id"],
+            entity_id=entity["id"],
+            observation_id=observation["id"],
+            module_id="infra_nmap",
+            result={
+                "raw_output": "PORT STATE SERVICE\n22/tcp open ssh",
+                "parsed_data": {
+                    "xml_output": "<nmaprun></nmaprun>",
+                    "parsed_ports": [{"port": "22", "protocol": "tcp", "state": "open"}],
+                },
+            },
+        )
+        if len(nmap_items) < 2:
+            raise AssertionError("capture_nmap_evidence should create multiple items")
+
+        listed = db.list_evidence_items(case_id=case["id"], observation_id=observation["id"], conn=conn)
+        if len(listed) < 2:
+            raise AssertionError("list_evidence_items observation filter failed")
+
+        finding = db.create_finding(
+            case["id"],
+            "infra_nmap",
+            "Locker link smoke finding",
+            "info",
+            50,
+            "Evidence link smoke test.",
+            entity_id=entity["id"],
+            observation_id=observation["id"],
+            conn=conn,
+        )
+        db.link_evidence_to_finding(item["id"], finding["id"], conn=conn)
+        links = db.list_evidence_finding_links(finding_id=finding["id"], conn=conn)
+        if not links:
+            raise AssertionError("evidence_finding_links not created")
+        resolved = db.list_evidence_for_finding(finding, conn=conn)
+        if not resolved:
+            raise AssertionError("list_evidence_for_finding returned no items")
+
+        large_item = db.create_evidence_item(
+            case["id"],
+            "infra_nmap",
+            "Large spill smoke item",
+            content_text="A" * (storage.EVIDENCE_INLINE_MAX_BYTES + 100),
+            entity_id=entity["id"],
+            conn=conn,
+        )
+        if not large_item.get("storage_path"):
+            raise AssertionError("large evidence item should spill to storage_path")
+    finally:
+        conn.close()
+
+    bundle = backup.export_case_bundle(case["id"])
+    if "evidence_items" not in bundle:
+        raise AssertionError("case backup export missing evidence_items")
+    if "evidence_finding_links" not in bundle:
+        raise AssertionError("case backup export missing evidence_finding_links")
+
+    __import__("utils.report_builder", fromlist=["build_case_report"])
+    __import__("modules.executor", fromlist=["execute_module"])
+    __import__("ui.evidence_page", fromlist=["render_evidence_page"])
+
+
 def _check_result_quality() -> None:
     result_status = __import__(
         "utils.result_status",
@@ -1187,6 +1353,11 @@ def main() -> int:
     run(
         "evidence model",
         lambda: _check_evidence_model(),
+    )
+
+    run(
+        "evidence locker",
+        lambda: _check_evidence_locker(),
     )
 
     run(

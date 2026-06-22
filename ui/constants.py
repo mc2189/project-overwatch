@@ -9,6 +9,7 @@ NAV_PAGES: tuple[str, ...] = (
     "Batch Queue",
     "Relationships",
     "Observations",
+    "Evidence Locker",
     "Operations",
     "Graph",
     "Report",

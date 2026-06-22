@@ -13,6 +13,7 @@ from database.db_setup import (
     effective_finding_severity,
     get_db_conn,
     list_entities,
+    list_evidence_for_finding,
     list_findings,
     normalize_finding_status,
     reopen_finding,
@@ -20,7 +21,7 @@ from database.db_setup import (
 )
 from ui.constants import FINDING_SEVERITY_OPTIONS, FINDING_SEVERITY_ORDER, FINDING_STATUS_LABELS
 from ui.metrics import render_compact_metrics
-from utils.evidence_model import evidence_type_label, evidence_wording, reliability_label
+from utils.evidence_model import EVIDENCE_TYPES, RELIABILITY_LEVELS, evidence_type_label, evidence_wording, reliability_label
 
 
 def finding_status_label(status: str | None) -> str:
@@ -114,7 +115,11 @@ def render_finding_review_controls(finding: dict) -> None:
             st.rerun()
 
 
-def render_finding_detail(finding: dict, entity_lookup: dict) -> None:
+def render_finding_detail(
+    finding: dict,
+    entity_lookup: dict,
+    evidence_items: list[dict] | None = None,
+) -> None:
     entity_label = entity_lookup.get(finding.get("entity_id"), finding.get("entity_id") or "-")
     st.markdown(f"**Title:** {finding.get('title', 'Finding')}")
     st.markdown(f"**Module:** `{finding.get('module_id', '-')}`")
@@ -132,6 +137,17 @@ def render_finding_detail(finding: dict, entity_lookup: dict) -> None:
         if finding.get("source_name"):
             st.markdown(f"**Source:** `{finding.get('source_name')}`")
         st.caption(evidence_wording(finding.get("evidence_type")))
+    linked = evidence_items or []
+    if linked:
+        st.markdown(f"**Linked evidence items:** {len(linked)}")
+        for item in linked[:5]:
+            hash_note = f" · hash `{item['content_hash']}`" if item.get("content_hash") else ""
+            st.markdown(
+                f"- {item.get('title', 'Evidence')} · `{item.get('source_name') or '-'}` · "
+                f"{reliability_label(item.get('reliability'))}{hash_note}"
+            )
+        if len(linked) > 5:
+            st.caption(f"_Plus {len(linked) - 5} more — see Evidence Locker._")
     st.markdown(f"**Status:** {finding_status_label(finding.get('status'))}")
     st.markdown("**Explanation**")
     st.write(finding.get("explanation") or "_No explanation provided._")
@@ -161,7 +177,13 @@ def render_findings_page(case_id: int, metrics: dict) -> None:
         for entity in entities
     }
     findings = list_findings(case_id=case_id, conn=conn)
+    linked_evidence_map = {
+        int(finding["id"]): list_evidence_for_finding(finding, conn=conn) for finding in findings
+    }
     conn.close()
+
+    def linked_evidence_for_finding(finding: dict) -> list[dict]:
+        return linked_evidence_map.get(int(finding["id"]), [])
 
     st.caption(
         f"Showing findings for case #{case_id}. "
@@ -190,6 +212,28 @@ def render_findings_page(case_id: int, metrics: dict) -> None:
             key="findings_module_filter",
         )
 
+    filter_col4, filter_col5, filter_col6 = st.columns(3)
+    with filter_col4:
+        evidence_type_filter = st.selectbox(
+            "Filter by evidence type",
+            ["All", *EVIDENCE_TYPES],
+            format_func=lambda value: "All" if value == "All" else evidence_type_label(value),
+            key="findings_evidence_type_filter",
+        )
+    with filter_col5:
+        reliability_filter = st.selectbox(
+            "Filter by reliability",
+            ["All", *RELIABILITY_LEVELS],
+            format_func=lambda value: "All" if value == "All" else reliability_label(value),
+            key="findings_reliability_filter",
+        )
+    with filter_col6:
+        evidence_link_filter = st.selectbox(
+            "Linked evidence",
+            ["All", "With linked evidence", "Without linked evidence"],
+            key="findings_evidence_link_filter",
+        )
+
     filtered_findings = findings
     if severity_filter != "All":
         filtered_findings = [
@@ -206,6 +250,26 @@ def render_findings_page(case_id: int, metrics: dict) -> None:
     if module_filter != "All":
         filtered_findings = [
             finding for finding in filtered_findings if finding.get("module_id") == module_filter
+        ]
+    if evidence_type_filter != "All":
+        filtered_findings = [
+            finding
+            for finding in filtered_findings
+            if finding.get("evidence_type") == evidence_type_filter
+        ]
+    if reliability_filter != "All":
+        filtered_findings = [
+            finding
+            for finding in filtered_findings
+            if finding.get("reliability") == reliability_filter
+        ]
+    if evidence_link_filter == "With linked evidence":
+        filtered_findings = [
+            finding for finding in filtered_findings if linked_evidence_for_finding(finding)
+        ]
+    elif evidence_link_filter == "Without linked evidence":
+        filtered_findings = [
+            finding for finding in filtered_findings if not linked_evidence_for_finding(finding)
         ]
 
     if not filtered_findings:
@@ -248,4 +312,4 @@ def render_findings_page(case_id: int, metrics: dict) -> None:
                 f"{finding.get('module_id')} · {entity_label} · {status_text}"
             )
             with st.expander(expander_label, expanded=False):
-                render_finding_detail(finding, entity_lookup)
+                render_finding_detail(finding, entity_lookup, linked_evidence_for_finding(finding))

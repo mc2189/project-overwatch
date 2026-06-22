@@ -29,6 +29,7 @@ from utils.result_status import (
     should_persist_observation,
 )
 from utils.evidence_model import observation_evidence_for_module
+from utils.evidence_capture import capture_module_evidence, link_observation_evidence_to_findings
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 NMAP_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_nmap.py"
@@ -290,13 +291,34 @@ def _persist_module_findings(
     interpreter_findings: list[dict[str, Any]],
 ) -> None:
     """Sync structured interpreter findings (close superseded, upsert current)."""
-    sync_module_findings(
+    stored = sync_module_findings(
         conn,
         case_id=case_id,
         entity_id=entity_id,
         observation_id=observation_id,
         module_id=module_id,
         interpreter_findings=interpreter_findings,
+    )
+    if observation_id and stored:
+        link_observation_evidence_to_findings(conn, observation_id, stored)
+
+
+def _persist_observation_evidence(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    observation_id: int,
+    module_id: str,
+    result: dict[str, Any],
+) -> None:
+    capture_module_evidence(
+        conn,
+        case_id=case_id,
+        entity_id=entity_id,
+        observation_id=observation_id,
+        module_id=module_id,
+        result=result,
     )
 
 
@@ -371,6 +393,15 @@ def _persist_investigation_records(
         raw_output=result["raw_output"],
         **_observation_evidence_kwargs(module_id, result),
         conn=conn,
+    )
+
+    _persist_observation_evidence(
+        conn,
+        case_id=case_id,
+        entity_id=entity_id,
+        observation_id=observation["id"],
+        module_id=module_id,
+        result=result,
     )
 
     interpreter_findings = result.get("interpreter_findings") or []
@@ -505,6 +536,15 @@ def _persist_domain_intel_records(
         conn=conn,
     )
 
+    _persist_observation_evidence(
+        conn,
+        case_id=case_id,
+        entity_id=domain_entity_id,
+        observation_id=observation["id"],
+        module_id=module_id,
+        result=result,
+    )
+
     interpreter_findings = result.get("interpreter_findings") or []
     if interpreter_findings:
         _persist_module_findings(
@@ -598,6 +638,15 @@ def _persist_cert_subdomain_records(
         raw_output=result["raw_output"],
         **_observation_evidence_kwargs(module_id, result),
         conn=conn,
+    )
+
+    _persist_observation_evidence(
+        conn,
+        case_id=case_id,
+        entity_id=domain_entity_id,
+        observation_id=observation["id"],
+        module_id=module_id,
+        result=result,
     )
 
     interpreter_findings = result.get("interpreter_findings") or []
@@ -714,6 +763,15 @@ def _persist_website_metadata_records(
         raw_output=result["raw_output"],
         **_observation_evidence_kwargs(module_id, result),
         conn=conn,
+    )
+
+    _persist_observation_evidence(
+        conn,
+        case_id=case_id,
+        entity_id=domain_entity_id,
+        observation_id=observation["id"],
+        module_id=module_id,
+        result=result,
     )
 
     interpreter_findings = result.get("interpreter_findings") or []
@@ -836,6 +894,8 @@ def _execute_nmap(
     is_error = _scan_failed(scan_data)
 
     parsed_data = parse_nmap_results(raw_output, xml_output)
+    if xml_output:
+        parsed_data["xml_output"] = xml_output
     interpreter_findings = interpret_module_findings(
         module_id,
         parsed_data,

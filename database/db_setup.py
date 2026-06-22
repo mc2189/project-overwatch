@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sqlite3
@@ -231,6 +232,47 @@ RELATIONSHIP_EVIDENCE_MIGRATIONS: tuple[tuple[str, str], ...] = (
     ("reliability", "TEXT"),
 )
 
+EVIDENCE_ITEMS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS evidence_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER,
+    entity_id INTEGER,
+    observation_id INTEGER,
+    finding_id INTEGER,
+    module_id TEXT,
+    evidence_type TEXT,
+    source_name TEXT,
+    source_url TEXT,
+    collection_method TEXT,
+    title TEXT,
+    summary TEXT,
+    content_type TEXT,
+    content_text TEXT,
+    content_hash TEXT,
+    storage_path TEXT,
+    reliability TEXT,
+    confidence INTEGER,
+    captured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(case_id) REFERENCES cases(id),
+    FOREIGN KEY(entity_id) REFERENCES entities(id),
+    FOREIGN KEY(observation_id) REFERENCES observations(id),
+    FOREIGN KEY(finding_id) REFERENCES findings(id)
+)
+"""
+
+EVIDENCE_FINDING_LINKS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS evidence_finding_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    evidence_id INTEGER NOT NULL,
+    finding_id INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(evidence_id) REFERENCES evidence_items(id),
+    FOREIGN KEY(finding_id) REFERENCES findings(id),
+    UNIQUE(evidence_id, finding_id)
+)
+"""
+
 ALL_SCHEMAS = (
     TARGETS_SCHEMA,
     RECON_DATA_SCHEMA,
@@ -243,6 +285,8 @@ ALL_SCHEMAS = (
     PIVOT_QUEUE_SCHEMA,
     BATCH_QUEUE_ITEMS_SCHEMA,
     BATCH_QUEUE_RUNS_SCHEMA,
+    EVIDENCE_ITEMS_SCHEMA,
+    EVIDENCE_FINDING_LINKS_SCHEMA,
 )
 
 
@@ -1682,3 +1726,353 @@ def update_finding_status(
 ) -> dict[str, Any] | None:
     """Backward-compatible status update wrapper."""
     return update_finding(finding_id, status=status, conn=conn)
+
+
+_SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*\S+"),
+    re.compile(r"(?i)(vt_[a-z0-9]{20,})"),
+    re.compile(r"(?i)(sk_[a-z0-9]{20,})"),
+)
+
+
+def _content_looks_like_secret(content_text: str) -> bool:
+    return any(pattern.search(content_text) for pattern in _SECRET_PATTERNS)
+
+
+def calculate_content_hash(content_text: str | None) -> str | None:
+    """Return a SHA-256 hash for text content, or None when empty or secret-like."""
+    if content_text is None:
+        return None
+    text = str(content_text)
+    if not text.strip():
+        return None
+    if _content_looks_like_secret(text):
+        return None
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def create_evidence_item(
+    case_id: int,
+    module_id: str,
+    title: str,
+    *,
+    summary: str | None = None,
+    content_text: str | None = None,
+    content_type: str = "text/plain",
+    entity_id: int | None = None,
+    observation_id: int | None = None,
+    finding_id: int | None = None,
+    evidence_type: str | None = None,
+    source_name: str | None = None,
+    source_url: str | None = None,
+    collection_method: str | None = None,
+    reliability: str | None = None,
+    confidence: int | None = None,
+    storage_path: str | None = None,
+    captured_at: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any]:
+    """Create a text artefact in the evidence locker."""
+    from utils.evidence_storage import (
+        inline_evidence_content,
+        should_spill_content,
+        spill_evidence_content,
+    )
+
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        raw_content = None if content_text and _content_looks_like_secret(content_text) else content_text
+        spill = should_spill_content(raw_content) and storage_path is None
+        hash_source = raw_content if raw_content else None
+        content_hash = calculate_content_hash(hash_source)
+        stored_text = inline_evidence_content(raw_content or "", spilled=spill) if raw_content else None
+        now = captured_at or datetime.now(timezone.utc).isoformat()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO evidence_items (
+                case_id, entity_id, observation_id, finding_id, module_id,
+                evidence_type, source_name, source_url, collection_method,
+                title, summary, content_type, content_text, content_hash,
+                storage_path, reliability, confidence, captured_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                case_id,
+                entity_id,
+                observation_id,
+                finding_id,
+                module_id,
+                normalise_evidence_type(evidence_type),
+                source_name,
+                source_url,
+                collection_method,
+                title,
+                summary,
+                content_type,
+                stored_text,
+                content_hash,
+                storage_path,
+                normalise_reliability(reliability),
+                confidence,
+                now,
+            ),
+        )
+        evidence_id = cursor.lastrowid
+        if spill and raw_content and evidence_id is not None:
+            spilled_path = spill_evidence_content(
+                case_id,
+                int(evidence_id),
+                raw_content,
+                content_type=content_type,
+            )
+            conn.execute(
+                "UPDATE evidence_items SET storage_path = ? WHERE id = ?",
+                (spilled_path, evidence_id),
+            )
+        if finding_id is not None and evidence_id is not None:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO evidence_finding_links (evidence_id, finding_id)
+                VALUES (?, ?)
+                """,
+                (evidence_id, finding_id),
+            )
+        conn.commit()
+        item = _row_to_dict(
+            conn.execute("SELECT * FROM evidence_items WHERE id = ?", (evidence_id,)).fetchone()
+        )
+        if item is None:
+            raise RuntimeError("Failed to create evidence item.")
+        return item
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def get_evidence_item(evidence_id: int, conn: sqlite3.Connection | None = None) -> dict[str, Any] | None:
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        row = conn.execute("SELECT * FROM evidence_items WHERE id = ?", (evidence_id,)).fetchone()
+        return _row_to_dict(row)
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def list_evidence_items(
+    case_id: int | None = None,
+    entity_id: int | None = None,
+    observation_id: int | None = None,
+    finding_id: int | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> list[dict[str, Any]]:
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        query = "SELECT * FROM evidence_items"
+        params: list[Any] = []
+        filters: list[str] = []
+        if case_id is not None:
+            filters.append("case_id = ?")
+            params.append(case_id)
+        if entity_id is not None:
+            filters.append("entity_id = ?")
+            params.append(entity_id)
+        if observation_id is not None:
+            filters.append("observation_id = ?")
+            params.append(observation_id)
+        if finding_id is not None:
+            filters.append("finding_id = ?")
+            params.append(finding_id)
+        if filters:
+            query += " WHERE " + " AND ".join(filters)
+        query += " ORDER BY captured_at DESC, id DESC"
+        rows = conn.execute(query, params).fetchall()
+        return _rows_to_dicts(rows)
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def count_evidence_items(case_id: int, conn: sqlite3.Connection | None = None) -> int:
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM evidence_items WHERE case_id = ?",
+            (case_id,),
+        ).fetchone()
+        return int(row[0]) if row else 0
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def link_evidence_to_observation(
+    evidence_id: int,
+    observation_id: int,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any] | None:
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        conn.execute(
+            "UPDATE evidence_items SET observation_id = ? WHERE id = ?",
+            (observation_id, evidence_id),
+        )
+        conn.commit()
+        return get_evidence_item(evidence_id, conn=conn)
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def link_evidence_to_finding(
+    evidence_id: int,
+    finding_id: int,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any] | None:
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO evidence_finding_links (evidence_id, finding_id)
+            VALUES (?, ?)
+            """,
+            (evidence_id, finding_id),
+        )
+        conn.execute(
+            """
+            UPDATE evidence_items
+            SET finding_id = COALESCE(finding_id, ?)
+            WHERE id = ?
+            """,
+            (finding_id, evidence_id),
+        )
+        conn.commit()
+        return get_evidence_item(evidence_id, conn=conn)
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def list_evidence_finding_links(
+    *,
+    case_id: int | None = None,
+    evidence_id: int | None = None,
+    finding_id: int | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> list[dict[str, Any]]:
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        query = """
+            SELECT l.*, e.case_id AS evidence_case_id
+            FROM evidence_finding_links l
+            INNER JOIN evidence_items e ON e.id = l.evidence_id
+        """
+        params: list[Any] = []
+        filters: list[str] = []
+        if case_id is not None:
+            filters.append("e.case_id = ?")
+            params.append(case_id)
+        if evidence_id is not None:
+            filters.append("l.evidence_id = ?")
+            params.append(evidence_id)
+        if finding_id is not None:
+            filters.append("l.finding_id = ?")
+            params.append(finding_id)
+        if filters:
+            query += " WHERE " + " AND ".join(filters)
+        query += " ORDER BY l.created_at DESC, l.id DESC"
+        rows = conn.execute(query, params).fetchall()
+        return _rows_to_dicts(rows)
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def list_evidence_for_finding(
+    finding: dict[str, Any],
+    conn: sqlite3.Connection | None = None,
+) -> list[dict[str, Any]]:
+    """Return evidence items linked to a finding via junction table or observation."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        finding_id = finding.get("id")
+        if finding_id is None:
+            return []
+        rows = conn.execute(
+            """
+            SELECT e.* FROM evidence_items e
+            INNER JOIN evidence_finding_links l ON l.evidence_id = e.id
+            WHERE l.finding_id = ?
+            ORDER BY e.captured_at DESC, e.id DESC
+            """,
+            (finding_id,),
+        ).fetchall()
+        linked = _rows_to_dicts(rows)
+        seen = {item["id"] for item in linked}
+        observation_id = finding.get("observation_id")
+        if observation_id is not None:
+            for item in list_evidence_items(observation_id=observation_id, conn=conn):
+                if item["id"] not in seen:
+                    linked.append(item)
+                    seen.add(item["id"])
+        legacy_id = finding_id
+        legacy_rows = conn.execute(
+            """
+            SELECT * FROM evidence_items
+            WHERE finding_id = ? AND id NOT IN (
+                SELECT evidence_id FROM evidence_finding_links WHERE finding_id = ?
+            )
+            ORDER BY captured_at DESC, id DESC
+            """,
+            (legacy_id, legacy_id),
+        ).fetchall()
+        for item in _rows_to_dicts(legacy_rows):
+            if item["id"] not in seen:
+                linked.append(item)
+        return linked
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def entity_ids_with_evidence(
+    case_id: int,
+    *,
+    evidence_types: tuple[str, ...] | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> set[int]:
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        query = """
+            SELECT DISTINCT entity_id FROM evidence_items
+            WHERE case_id = ? AND entity_id IS NOT NULL
+        """
+        params: list[Any] = [case_id]
+        if evidence_types:
+            placeholders = ", ".join("?" for _ in evidence_types)
+            query += f" AND evidence_type IN ({placeholders})"
+            params.extend(evidence_types)
+        rows = conn.execute(query, params).fetchall()
+        return {int(row["entity_id"]) for row in rows if row["entity_id"] is not None}
+    finally:
+        if own_conn:
+            conn.close()

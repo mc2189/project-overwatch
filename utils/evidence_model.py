@@ -221,7 +221,18 @@ def observation_evidence_for_module(
         parsed = result.get("parsed_data") or {}
         http = parsed.get("http") or {}
         tls = parsed.get("tls") or {}
+        dns = parsed.get("dns") or {}
+        wayback = parsed.get("wayback") or {}
         if http or tls:
+            meta["evidence_type"] = EVIDENCE_DIRECT_OBSERVATION
+            meta["source_name"] = "http_response"
+            meta["reliability"] = RELIABILITY_HIGH
+            meta["collection_method"] = "mixed_passive_lookup"
+        elif dns and not http and not tls:
+            meta["evidence_type"] = EVIDENCE_THIRD_PARTY_SOURCE
+            meta["source_name"] = "dns_lookup"
+            meta["reliability"] = RELIABILITY_HIGH
+        if wayback.get("error"):
             meta["collection_method"] = "mixed_passive_lookup"
     if module_id == "infra_cert_subdomain":
         meta["source_name"] = "crt.sh"

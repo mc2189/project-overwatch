@@ -11,8 +11,10 @@ from database.db_setup import (
     FINDING_STATUSES,
     get_case,
     get_db_conn,
+    entity_ids_with_evidence,
     list_cases,
     list_entities,
+    list_evidence_items,
     list_findings,
     list_observations,
     list_operations,
@@ -112,7 +114,14 @@ def render_observations_page(case_id: int, metrics: dict[str, int]) -> None:
 
     conn = get_db_conn()
     observations = list_observations(case_id=case_id, conn=conn)
+    evidence_items = list_evidence_items(case_id=case_id, conn=conn)
     conn.close()
+    evidence_by_observation: dict[int, list[dict]] = {}
+    for item in evidence_items:
+        obs_id = item.get("observation_id")
+        if obs_id is not None:
+            evidence_by_observation.setdefault(int(obs_id), []).append(item)
+
     st.caption(f"Showing observations for case #{case_id}.")
     if observations:
         display_rows = []
@@ -131,12 +140,15 @@ def render_observations_page(case_id: int, metrics: dict[str, int]) -> None:
                 row["evidence_type"] = evidence_type_label(row["evidence_type"])
             if row.get("reliability"):
                 row["reliability"] = reliability_label(row["reliability"])
+            linked = evidence_by_observation.get(int(observation["id"]), [])
+            row["evidence_items"] = len(linked)
             display_rows.append(row)
         column_order = [
             "id",
             "module_id",
             "observation_type",
             "title",
+            "evidence_items",
             *evidence_columns,
             "summary",
             "created_at",
@@ -145,6 +157,26 @@ def render_observations_page(case_id: int, metrics: dict[str, int]) -> None:
         visible = [column for column in column_order if column in frame.columns]
         remaining = [column for column in frame.columns if column not in visible]
         st.dataframe(frame[visible + remaining], width="stretch")
+
+        st.subheader("Linked evidence")
+        for observation in observations:
+            linked = evidence_by_observation.get(int(observation["id"]), [])
+            if not linked:
+                continue
+            label = observation.get("title") or f"Observation #{observation['id']}"
+            with st.expander(f"{label} · {len(linked)} evidence item(s)", expanded=False):
+                for item in linked:
+                    st.markdown(
+                        f"- **{item.get('title', 'Evidence')}** · "
+                        f"`{item.get('source_name') or '-'}` · "
+                        f"{evidence_type_label(item.get('evidence_type'))} · "
+                        f"{reliability_label(item.get('reliability'))}"
+                    )
+                    if item.get("content_hash"):
+                        st.caption(f"Hash: `{item['content_hash']}`")
+                    preview = (item.get("content_text") or "")[:400]
+                    if preview:
+                        st.code(preview + ("..." if len(item.get("content_text") or "") > 400 else ""))
     else:
         st.info("No observations recorded for this case yet.")
 
@@ -198,7 +230,10 @@ def render_graph_page(case_id: int, metrics: dict[str, int]) -> None:
     entities = list_entities(case_id=case_id, conn=conn)
     relationships = list_relationships(case_id=case_id, conn=conn)
     findings = list_findings(case_id=case_id, conn=conn)
+    evidence_items = list_evidence_items(case_id=case_id, conn=conn)
     conn.close()
+
+    evidence_type_options = sorted({item.get("evidence_type") for item in evidence_items if item.get("evidence_type")})
 
     filter_col1, filter_col2, filter_col3 = st.columns(3)
     with filter_col1:
@@ -221,6 +256,38 @@ def render_graph_page(case_id: int, metrics: dict[str, int]) -> None:
             key="graph_hide_without_findings",
         )
 
+    filter_col4, filter_col5, filter_col6 = st.columns(3)
+    if evidence_type_options:
+        with filter_col4:
+            evidence_type_filter = st.multiselect(
+                "Evidence types (entity highlight)",
+                options=evidence_type_options,
+                default=evidence_type_options,
+                format_func=evidence_type_label,
+                key="graph_evidence_types",
+            )
+        filtered_evidence_entity_ids = entity_ids_with_evidence(
+            case_id,
+            evidence_types=tuple(evidence_type_filter) if evidence_type_filter else None,
+        )
+    else:
+        evidence_type_filter = []
+        filtered_evidence_entity_ids = set()
+        with filter_col4:
+            st.caption("No evidence locker items yet.")
+    with filter_col5:
+        hide_without_evidence = st.checkbox(
+            "Hide entities without evidence locker items",
+            value=False,
+            key="graph_hide_without_evidence",
+        )
+    with filter_col6:
+        highlight_evidence = st.checkbox(
+            "Highlight entities with evidence (green border)",
+            value=True,
+            key="graph_highlight_evidence",
+        )
+
     statuses = tuple(status_filter) if status_filter else ("open", "in_review", "action_required")
     min_sev = None if min_severity == "All" else min_severity
 
@@ -231,12 +298,14 @@ def render_graph_page(case_id: int, metrics: dict[str, int]) -> None:
         finding_statuses=statuses,
         min_severity=min_sev,
         hide_entities_without_findings=hide_without_findings,
+        entities_with_evidence=filtered_evidence_entity_ids if highlight_evidence else None,
+        hide_entities_without_evidence=hide_without_evidence,
     )
 
     st.caption(
         "Graph built from stored entities and relationships. "
         "Node colour reflects the highest finding severity matching the filters above. "
-        "Click a node to focus it below."
+        "Green borders indicate entities with Evidence Locker artefacts."
     )
     if figure is None:
         st.info(

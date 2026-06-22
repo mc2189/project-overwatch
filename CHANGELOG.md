@@ -2,6 +2,29 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v1.13.0 — Evidence linking, filters and file spill
+
+- **`evidence_finding_links` table** — many-to-many evidence↔finding relationships
+- `list_evidence_for_finding()`, `list_evidence_finding_links()`, `entity_ids_with_evidence()`
+- All module-run findings link to observation evidence items (not just the first finding)
+- **File spill** for artefacts >32 KB to `database/evidence_files/` with DB preview
+- **Findings page** filters: evidence type, reliability, linked evidence
+- **Graph page** evidence highlight (green border) and hide-without-evidence filter
+- Domain Intelligence observation evidence metadata refined per source type
+- Backup export/import includes evidence finding links
+
+## v1.12.0 — Evidence Locker and raw source capture
+
+- **`evidence_items` table** — stores text artefacts with provenance, reliability, and SHA-256 hashes
+- Helpers: `create_evidence_item`, `list_evidence_items`, `get_evidence_item`, `calculate_content_hash`, linking helpers
+- **`utils/evidence_capture.py`** — module-specific evidence capture on run completion (Nmap, Domain Intel, Cert/Subdomain, Website Metadata)
+- Findings linked to observation evidence items after sync
+- **Evidence Locker** navigation page with filters and content expanders
+- Observations and Findings pages show linked evidence counts/summaries
+- Reports: **Evidence Summary** section; evidence content in raw appendix when enabled
+- Case backup export/import includes `evidence_items`
+- TODO noted for future file-based artefact storage
+
 ## v1.11.0 — Source reliability, confidence and evidence model
 
 - **`utils/evidence_model.py`** — evidence types, reliability levels, confidence guidance, module defaults

@@ -8,7 +8,9 @@ from typing import Any
 
 from database.db_setup import (
     create_case,
+    create_evidence_item,
     create_finding,
+    link_evidence_to_finding,
     create_observation,
     create_operation_log,
     create_or_get_entity,
@@ -16,6 +18,8 @@ from database.db_setup import (
     get_db_conn,
     add_to_pivot_queue,
     list_entities,
+    list_evidence_finding_links,
+    list_evidence_items,
     list_findings,
     list_observations,
     list_operations,
@@ -45,6 +49,8 @@ def export_case_bundle(case_id: int) -> dict[str, Any]:
             "findings": list_findings(case_id=case_id, conn=conn),
             "pivot_queue": list_pivot_queue(case_id=case_id, conn=conn),
             "batch_queue_items": list_batch_queue_items(case_id=case_id, conn=conn),
+            "evidence_items": list_evidence_items(case_id=case_id, conn=conn),
+            "evidence_finding_links": list_evidence_finding_links(case_id=case_id, conn=conn),
         }
     finally:
         conn.close()
@@ -76,6 +82,9 @@ def import_case_bundle(bundle: dict[str, Any], *, new_case_name: str | None = No
         new_case = create_case(name, description, conn=conn)
         case_id = new_case["id"]
         id_map: dict[int, int] = {}
+        observation_id_map: dict[int, int] = {}
+        finding_id_map: dict[int, int] = {}
+        evidence_id_map: dict[int, int] = {}
 
         for entity in bundle.get("entities", []):
             created = create_or_get_entity(
@@ -101,6 +110,8 @@ def import_case_bundle(bundle: dict[str, Any], *, new_case_name: str | None = No
                 target_id,
                 source_module=relationship.get("source_module"),
                 confidence=relationship.get("confidence", 50),
+                evidence_type=relationship.get("evidence_type"),
+                reliability=relationship.get("reliability"),
                 conn=conn,
             )
 
@@ -108,7 +119,7 @@ def import_case_bundle(bundle: dict[str, Any], *, new_case_name: str | None = No
             entity_id = id_map.get(observation.get("entity_id"))
             if entity_id is None:
                 continue
-            create_observation(
+            created_observation = create_observation(
                 case_id,
                 entity_id,
                 observation.get("module_id", "unknown"),
@@ -117,8 +128,17 @@ def import_case_bundle(bundle: dict[str, Any], *, new_case_name: str | None = No
                 summary=observation.get("summary"),
                 data_json=observation.get("data_json"),
                 raw_output=observation.get("raw_output"),
+                evidence_type=observation.get("evidence_type"),
+                source_name=observation.get("source_name"),
+                source_url=observation.get("source_url"),
+                reliability=observation.get("reliability"),
+                collection_method=observation.get("collection_method"),
+                collected_at=observation.get("collected_at"),
+                module_version=observation.get("module_version"),
                 conn=conn,
             )
+            if observation.get("id") is not None:
+                observation_id_map[int(observation["id"])] = created_observation["id"]
 
         for operation in bundle.get("operations", []):
             create_operation_log(
@@ -143,7 +163,7 @@ def import_case_bundle(bundle: dict[str, Any], *, new_case_name: str | None = No
                     actions_list = []
             else:
                 actions_list = finding.get("suggested_actions") or []
-            create_finding(
+            created_finding = create_finding(
                 case_id,
                 finding.get("module_id", "unknown"),
                 finding.get("title", "Imported finding"),
@@ -152,10 +172,57 @@ def import_case_bundle(bundle: dict[str, Any], *, new_case_name: str | None = No
                 finding.get("explanation", ""),
                 actions_list,
                 entity_id=entity_id,
-                observation_id=None,
+                observation_id=observation_id_map.get(finding.get("observation_id"))
+                if finding.get("observation_id")
+                else None,
                 status=finding.get("status", "open"),
+                evidence_type=finding.get("evidence_type"),
+                source_name=finding.get("source_name"),
+                reliability=finding.get("reliability"),
                 conn=conn,
             )
+            if finding.get("id") is not None:
+                finding_id_map[int(finding["id"])] = created_finding["id"]
+
+        for item in bundle.get("evidence_items", []):
+            entity_id = id_map.get(item.get("entity_id")) if item.get("entity_id") else None
+            observation_id = (
+                observation_id_map.get(item.get("observation_id"))
+                if item.get("observation_id")
+                else None
+            )
+            finding_id = finding_id_map.get(item.get("finding_id")) if item.get("finding_id") else None
+            if entity_id is None:
+                continue
+            created_item = create_evidence_item(
+                case_id,
+                item.get("module_id", "unknown"),
+                item.get("title", "Imported evidence item"),
+                summary=item.get("summary"),
+                content_text=item.get("content_text"),
+                content_type=item.get("content_type") or "text/plain",
+                entity_id=entity_id,
+                observation_id=observation_id,
+                finding_id=finding_id,
+                evidence_type=item.get("evidence_type"),
+                source_name=item.get("source_name"),
+                source_url=item.get("source_url"),
+                collection_method=item.get("collection_method"),
+                reliability=item.get("reliability"),
+                confidence=item.get("confidence"),
+                storage_path=item.get("storage_path"),
+                captured_at=item.get("captured_at"),
+                conn=conn,
+            )
+            if item.get("id") is not None:
+                evidence_id_map[int(item["id"])] = created_item["id"]
+
+        for link in bundle.get("evidence_finding_links", []):
+            evidence_id = evidence_id_map.get(link.get("evidence_id"))
+            finding_id = finding_id_map.get(link.get("finding_id"))
+            if evidence_id is None or finding_id is None:
+                continue
+            link_evidence_to_finding(evidence_id, finding_id, conn=conn)
 
         for queue_item in bundle.get("pivot_queue", []):
             entity_id = id_map.get(queue_item.get("entity_id"))

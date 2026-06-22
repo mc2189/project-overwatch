@@ -16,6 +16,7 @@ from ui.archive_pages import (
 from ui.settings_page import render_settings_page
 from ui.batch_queue_page import render_batch_queue_page
 from ui.entity_workspace import render_entity_workspace_page
+from ui.evidence_page import render_evidence_page
 from ui.findings_page import render_findings_page
 from ui.metrics import load_case_metrics
 from ui.roadmap import render_roadmap_page
@@ -78,6 +79,8 @@ elif nav_page == "Relationships":
     render_relationships_page(st.session_state.case_id, metrics)
 elif nav_page == "Observations":
     render_observations_page(st.session_state.case_id, metrics)
+elif nav_page == "Evidence Locker":
+    render_evidence_page(st.session_state.case_id, metrics)
 elif nav_page == "Operations":
     render_operations_page(st.session_state.case_id, metrics)
 elif nav_page == "Graph":

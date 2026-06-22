@@ -18,6 +18,8 @@ from database.db_setup import (
     get_case,
     get_db_conn,
     list_entities,
+    list_evidence_finding_links,
+    list_evidence_items,
     list_findings,
     list_observations,
     list_operations,
@@ -27,6 +29,7 @@ from database.db_setup import (
 )
 from modules.module_registry import get_module
 from utils.finding_interpreter import is_source_notice
+from utils.evidence_storage import read_spilled_content
 from utils.evidence_model import (
     CONFIDENCE_GUIDANCE,
     EVIDENCE_TYPES,
@@ -137,7 +140,68 @@ def _load_case_data(case_id: int, conn) -> dict[str, Any]:
         "operations": list_operations(case_id=case_id, conn=conn),
         "findings": list_findings(case_id=case_id, conn=conn),
         "batch_queue_runs": list_batch_queue_runs(case_id, limit=10, conn=conn),
+        "evidence_items": list_evidence_items(case_id=case_id, conn=conn),
+        "evidence_finding_links": list_evidence_finding_links(case_id=case_id, conn=conn),
     }
+
+
+def _linked_evidence_for_finding(
+    finding: dict[str, Any],
+    evidence_items: list[dict[str, Any]],
+    evidence_links: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    finding_id = finding.get("id")
+    observation_id = finding.get("observation_id")
+    linked_ids = {
+        link["evidence_id"]
+        for link in evidence_links
+        if link.get("finding_id") == finding_id
+    }
+    linked: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for item in evidence_items:
+        if item["id"] in linked_ids or item.get("finding_id") == finding_id:
+            linked.append(item)
+            seen.add(item["id"])
+    if observation_id is not None:
+        for item in evidence_items:
+            if item.get("observation_id") == observation_id and item["id"] not in seen:
+                linked.append(item)
+                seen.add(item["id"])
+    return linked
+
+
+def _evidence_summary_lines(evidence_items: list[dict[str, Any]]) -> list[str]:
+    lines = ["## Evidence Summary", ""]
+    if not evidence_items:
+        lines.append("_No evidence locker items recorded for this case._")
+        lines.append("")
+        return lines
+
+    lines.append(f"- Total evidence items: {len(evidence_items)}")
+    lines.append("")
+
+    by_module: dict[str, int] = defaultdict(int)
+    by_type: dict[str, int] = defaultdict(int)
+    by_reliability: dict[str, int] = defaultdict(int)
+    for item in evidence_items:
+        by_module[item.get("module_id") or "unknown"] += 1
+        by_type[item.get("evidence_type") or "unknown"] += 1
+        by_reliability[item.get("reliability") or "unknown"] += 1
+
+    lines.append("**By module:**")
+    for module_id in sorted(by_module):
+        lines.append(f"- `{module_id}`: {by_module[module_id]}")
+    lines.append("")
+    lines.append("**By evidence type:**")
+    for evidence_type in sorted(by_type):
+        lines.append(f"- {evidence_type_label(evidence_type)}: {by_type[evidence_type]}")
+    lines.append("")
+    lines.append("**By reliability:**")
+    for reliability in sorted(by_reliability):
+        lines.append(f"- {reliability_label(reliability)}: {by_reliability[reliability]}")
+    lines.append("")
+    return lines
 
 
 def _graph_appendix_lines(
@@ -248,6 +312,8 @@ def build_case_report(
     operations = data["operations"]
     all_findings = data["findings"]
     batch_queue_runs = data.get("batch_queue_runs") or []
+    evidence_items = data.get("evidence_items") or []
+    evidence_links = data.get("evidence_finding_links") or []
 
     entity_by_id = {entity["id"]: entity for entity in entities}
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -456,6 +522,8 @@ def build_case_report(
             lines.append(f"- {notice}")
         lines.append("")
 
+    lines.extend(_evidence_summary_lines(evidence_items))
+
     lines.extend(["## Evidence and Reliability Notes", ""])
     lines.append(
         "_Project Overwatch distinguishes how information was collected. "
@@ -528,6 +596,16 @@ def build_case_report(
                     if finding.get("source_name"):
                         lines.append(f"- Source: `{finding.get('source_name')}`")
                     lines.append(f"- Evidence note: {evidence_wording(finding.get('evidence_type'))}")
+                linked_evidence = _linked_evidence_for_finding(finding, evidence_items, evidence_links)
+                if linked_evidence:
+                    lines.append("- Linked evidence:")
+                    for item in linked_evidence:
+                        hash_note = f", hash `{item['content_hash']}`" if item.get("content_hash") else ""
+                        lines.append(
+                            f"  - {item.get('title', 'Evidence item')} "
+                            f"({item.get('source_name') or 'unknown source'}, "
+                            f"{reliability_label(item.get('reliability'))}{hash_note})"
+                        )
                 lines.append(f"- Affected entity: {entity}")
                 lines.append(f"- Module: `{finding.get('module_id', '-')}`")
                 if finding.get("reviewed_at"):
@@ -588,11 +666,32 @@ def build_case_report(
             )
 
         if options.include_raw_appendix and options.template == "full":
-            if not observations:
-                appendix_parts.append("_No observation raw output available._")
-            else:
+            if evidence_items:
+                appendix_parts.append("### Evidence locker content")
+                appendix_parts.append("")
+                for item in evidence_items:
+                    appendix_parts.append(f"#### {item.get('title', 'Evidence item')}")
+                    appendix_parts.append("")
+                    appendix_parts.append(f"- Module: `{item.get('module_id', '-')}`")
+                    appendix_parts.append(f"- Source: `{item.get('source_name') or '-'}`")
+                    if item.get("content_hash"):
+                        appendix_parts.append(f"- Hash: `{item['content_hash']}`")
+                    if item.get("storage_path"):
+                        appendix_parts.append(f"- Storage: `{item['storage_path']}`")
+                    appendix_parts.append("")
+                    content = item.get("content_text") or read_spilled_content(item.get("storage_path"))
+                    content = content or "_No content stored._"
+                    appendix_parts.append("```text")
+                    appendix_parts.append(content)
+                    appendix_parts.append("```")
+                    appendix_parts.append("")
+            if not observations and not evidence_items:
+                appendix_parts.append("_No observation raw output or evidence locker content available._")
+            elif observations:
+                appendix_parts.append("### Observation raw output")
+                appendix_parts.append("")
                 for observation in observations:
-                    appendix_parts.append(f"### {observation.get('title', 'Observation')}")
+                    appendix_parts.append(f"#### {observation.get('title', 'Observation')}")
                     appendix_parts.append("")
                     raw_output = observation.get("raw_output") or "_No raw output stored._"
                     appendix_parts.append("```text")
