@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -112,11 +113,15 @@ def _load_domain_intel_handler() -> None:
         _domain_intel_load_error = str(exc)
 
 
+def _nmap_binary_available() -> bool:
+    return shutil.which("nmap") is not None
+
+
 def is_runtime_ready(module_id: str) -> bool:
     """Return True when a module's backend is loaded and ready to run."""
     if module_id == "infra_nmap":
         _load_nmap_handlers()
-        return _nmap_handlers is not None
+        return _nmap_handlers is not None and _nmap_binary_available()
     if module_id == "infra_domain_intel":
         _load_domain_intel_handler()
         return _domain_intel_handler is not None
@@ -127,6 +132,11 @@ def get_runtime_error(module_id: str) -> str | None:
     """Return a load-time error message for a module, if any."""
     if module_id == "infra_nmap":
         _load_nmap_handlers()
+        if not _nmap_binary_available():
+            return (
+                "Nmap is not installed or not on your PATH. "
+                "Install from https://nmap.org/download.html and restart the app."
+            )
         return _nmap_load_error
     if module_id == "infra_domain_intel":
         _load_domain_intel_handler()
@@ -558,6 +568,28 @@ def _execute_nmap(
     return result
 
 
+def _domain_intel_connectivity_note(parsed_data: dict[str, Any]) -> str | None:
+    """Return a user-friendly note when collection looks blocked by network issues."""
+    dns = parsed_data.get("dns", {})
+    has_dns = any(dns.get(record_type) for record_type in ("A", "AAAA", "MX", "NS", "TXT", "CNAME"))
+    http = parsed_data.get("http", {})
+    http_ok = http.get("https", {}).get("reachable") or http.get("http", {}).get("reachable")
+    errors: list[str] = []
+    for key in ("http", "https"):
+        err = (http.get(key) or {}).get("error") or ""
+        if err:
+            errors.append(err.lower())
+    wayback_error = (parsed_data.get("wayback") or {}).get("error") or ""
+    if wayback_error:
+        errors.append(wayback_error.lower())
+    network_keywords = ("timeout", "timed out", "connection", "network", "unreachable", "failed to establish")
+    if not has_dns and not http_ok:
+        return "Limited or no DNS/HTTP response — check your network connection and try again."
+    if any(any(word in err for word in network_keywords) for err in errors):
+        return "Some lookups failed — results may be incomplete. Check your network connection."
+    return None
+
+
 def _execute_domain_intel(
     module_id: str,
     target: str,
@@ -593,11 +625,15 @@ def _execute_domain_intel(
     parsed_data = intel_data.get("parsed_data") or {}
     domain = parsed_data.get("domain") or target
     interpreter_findings = interpret_module_findings(module_id, parsed_data)
+    summary = f"Domain intelligence collected for {domain}."
+    connectivity_note = _domain_intel_connectivity_note(parsed_data)
+    if connectivity_note:
+        summary += f" {connectivity_note}"
     result = make_result(
         module_id,
         success=True,
         status="completed",
-        summary=f"Domain intelligence collected for {domain}.",
+        summary=summary,
         raw_output=intel_data.get("raw_output", ""),
         findings=intel_data.get("findings", []),
         parsed_data=parsed_data,

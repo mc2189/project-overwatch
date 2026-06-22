@@ -1,0 +1,3 @@
+# Optional Project Overwatch dependencies (install after requirements.txt)
+kaleido>=0.2
+weasyprint>=62.0

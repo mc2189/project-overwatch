@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import html
 import json
 import re
@@ -189,27 +188,6 @@ def export_graph_snapshot(
         return None
 
 
-def graph_snapshot_base64(
-    entities: list[dict[str, Any]],
-    relationships: list[dict[str, Any]],
-    findings: list[dict[str, Any]],
-) -> str | None:
-    """Return a base64 PNG data URI for inline graph embedding, if available."""
-    temp_path = PROJECT_ROOT / "reports" / ".graph_snapshot_temp.png"
-    temp_path.parent.mkdir(parents=True, exist_ok=True)
-    saved = export_graph_snapshot(entities, relationships, findings, temp_path)
-    if saved is None or not saved.exists():
-        return None
-    try:
-        encoded = base64.b64encode(saved.read_bytes()).decode("ascii")
-        return f"data:image/png;base64,{encoded}"
-    finally:
-        try:
-            saved.unlink(missing_ok=True)
-        except OSError:
-            pass
-
-
 def _report_basename(case_id: int, case_name: str | None = None) -> str:
     conn = get_db_conn()
     try:
@@ -222,12 +200,7 @@ def _report_basename(case_id: int, case_name: str | None = None) -> str:
 
 
 def is_pdf_export_available() -> bool:
-    try:
-        import weasyprint  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
+    return _optional_import("weasyprint")
 
 
 def html_to_pdf_bytes(html_text: str) -> bytes:

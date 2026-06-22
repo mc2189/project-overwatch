@@ -1,445 +1,183 @@
-# Project Overwatch
+# Project Overwatch v1.0
 
-Defensive security intelligence dashboard built with Python and Streamlit. Project Overwatch v0.7 adds passive Domain Intelligence alongside guided Nmap scanning, XML parsing, and the investigation case model.
+Project Overwatch is a **local** Python/Streamlit dashboard for defensive security intelligence. It helps analysts organise investigations into **cases**, collect data with authorised **active** scans and **passive** lookups, interpret results as advisory **findings**, and export **reports** — all stored in a local SQLite database on your machine.
 
-## Requirements
+**v1.0 executable modules:** Nmap (active port scan) and Domain Intelligence (passive domain lookup).
 
-- Python 3.11 or later
-- [Nmap](https://nmap.org/download.html) installed and available on your `PATH` (required only when running port scans)
+Use only on systems you own, lab environments, or targets with **written permission**.
 
-## Setup
+## Quick start
 
-1. Clone or copy this repository to your machine.
+### Requirements
 
-2. Create and activate a virtual environment:
+- Python 3.11+
+- [Nmap](https://nmap.org/download.html) on your `PATH` (only for port scans)
 
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate   # macOS/Linux
-   # .venv\Scripts\activate    # Windows
-   ```
+### Install
 
-3. Install dependencies:
+```bash
+python3 -m venv .venv
+source .venv/bin/activate          # macOS/Linux
+pip install -r requirements.txt
+```
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+Optional extras (graph PNG and native PDF):
 
-The `database/` folder and `overwatch.db` SQLite file are created automatically on first run if they do not already exist.
+```bash
+pip install -r requirements-optional.txt
+```
 
-## Run
+### Optional local password
 
-From the project root (the directory containing `main.py`):
+Protect the dashboard on shared machines:
+
+```bash
+export OVERWATCH_APP_PASSWORD='your-local-password'
+streamlit run main.py
+```
+
+Or add to `.streamlit/secrets.toml` (gitignored):
+
+```toml
+app_password = "your-local-password"
+```
+
+Leave unset for an open local instance.
+
+### Run
 
 ```bash
 streamlit run main.py
 ```
 
-Streamlit opens the dashboard in your browser, typically at `http://localhost:8501`.
+Open `http://localhost:8501` in your browser.
 
-## Usage
+### Smoke check (no network)
 
-1. Select or create a **case** in the sidebar (a container for an investigation).
-2. Enter a target IP or domain and click **Acquire Target** to add it to the legacy archive and create an **entity** in the active case.
-3. Select modules under **Select Modules**. The sidebar is generated from `modules/module_registry.py`.
-4. If you select an **active** module that requires authorisation (such as Nmap), tick the authorisation checkbox in the sidebar.
-5. Click **LAUNCH OPERATION** to run selected modules. Scans are never started automatically.
-6. Review results in the main panel and browse stored data under **Archive** tabs, including **Relationships** and **Graph**.
-
-Only modules marked **active** and **implemented** in the registry can be executed. Planned modules appear in the UI but are disabled.
-
-If the Nmap Python module or the `nmap` binary is missing, the dashboard still loads and shows a clear error in the sidebar.
-
-## Module registry
-
-`modules/module_registry.py` is the single source of truth for module metadata. Each entry defines:
-
-| Field | Purpose |
-|-------|---------|
-| `module_id` | Stable identifier used in code and UI state |
-| `display_name` | Sidebar label |
-| `category` | Grouping (Identity, Infrastructure, Threat Intel, etc.) |
-| `description` | Tooltip / help text |
-| `status` | `active`, `planned`, or `disabled` |
-| `mode` | `passive`, `active`, or `analysis` |
-| `risk_level` | `low`, `medium`, or `high` |
-| `requires_authorisation` | Whether explicit permission is expected |
-| `requires_api_key` | Whether an API key will be needed when implemented |
-| `implemented` | Whether backend code is wired for execution |
-
-Helper functions:
-
-- `get_modules_by_category()` — modules grouped for the sidebar
-- `get_module(module_id)` — lookup a single entry
-- `is_executable(module)` — returns `True` only when `implemented` and `status == "active"`
-
-To add a module later: register it in `module_registry.py`, implement its backend file, then wire execution in `modules/executor.py`. Do not hard-code sidebar entries in `main.py`.
-
-Current executable module: **Nmap** (`infra_nmap`) under Infrastructure.
-
-## Execution dispatcher
-
-`modules/executor.py` routes all module execution. `main.py` calls:
-
-```python
-execute_module(module_id, target, options, db_context, authorisation_confirmed)
+```bash
+python scripts/smoke_check.py
 ```
 
-The executor:
+## Typical workflow
 
-1. Looks up the module in `module_registry.py`
-2. Blocks unimplemented, inactive, or non-executable modules
-3. Enforces authorisation for modules with `requires_authorisation=True`
-4. Runs the module backend (Nmap today)
-5. Returns a structured result:
+1. **Select or create a case** in the sidebar (investigation container).
+2. **Enter a target** (IP or domain) and click **Acquire Target**.
+3. **Enable modules** under **Modules**:
+   - **Nmap [Active]** — port/service scan; requires authorisation checkbox.
+   - **Domain Intelligence [Passive]** — DNS, HTTP, TLS, Wayback; no authorisation needed.
+4. Click **Run selected modules**.
+5. Review results in the main panel (raw output stays in expanders).
+6. Browse **Archive** tabs: Cases (backup/restore), Entities, Relationships, Graph, Observations, Operations, Findings, Report.
+7. Legacy v0.1 target tables are under **Legacy (v0.1)**.
 
-```python
-{
-    "module_id": "...",
-    "success": True,
-    "status": "completed",  # or "blocked" / "error"
-    "summary": "...",
-    "raw_output": "...",
-    "findings": [],
-    "errors": [],
-}
-```
+Planned modules appear in the sidebar but are **disabled** — they are not available in v1.0.
 
 ## Active vs passive modules
 
-| Mode | Description | Authorisation gate |
-|------|-------------|-------------------|
-| `passive` | Public or read-only lookups | Only if `requires_authorisation=True` |
-| `active` | Sends probes or scans to a target | Usually required |
-| `analysis` | Local file or capture analysis | Only if `requires_authorisation=True` |
-
-Passive and analysis modules do not show the authorisation checkbox unless their registry entry sets `requires_authorisation=True`.
-
-## Authorisation gating
-
-When any **selected** module has `requires_authorisation=True`, the sidebar shows:
-
-> I confirm I am authorised to run active checks against this target.
-
-**LAUNCH OPERATION** is blocked until this box is ticked. The executor performs the same check and returns `status: "blocked"` if authorisation is missing.
-
-Selecting Nmap **Vuln Scripts** (`--script=vuln`) shows an additional high-risk warning. Vuln scripts also require the authorisation checkbox even if other checks pass.
-
-## Guided Nmap scan profiles
-
-When Nmap is enabled under **2. Infrastructure**, choose a guided profile:
-
-| Profile | Purpose |
-|---------|---------|
-| Quick check | Fast scan of common ports with open-only output |
-| Standard service scan | Default service/version detection (`-sV`) |
-| Detailed authorised scan | Service detection, OS detection, safe scripts, reasons |
-| Host discovery only | Ping/discovery only (`-sn`) with no port/script/version checks |
-| Custom guided scan | Individual options with compatibility rules |
-
-Each option includes a tooltip/description in the UI. Project Overwatch does **not** accept arbitrary raw Nmap command input.
-
-### Compatibility rules
-
-- **Host discovery only** disables port scanning, version detection, OS detection, and all script options.
-- **Fast scan** and **custom ports** cannot be active together.
-- **Top ports** and **custom ports** cannot be active together.
-- Only **one script category** may be selected: None, Safe, Default, Discovery, or Vuln.
-- Only **one timing profile** may be selected: Polite, Normal, or Aggressive.
-- **Vuln scripts** remain high-warning and require authorisation.
-- **OS detection**, **traceroute**, and **script scanning** require authorisation.
-
-**OS detection (`-O`) and traceroute (`--traceroute`) may require elevated (root) privileges** on macOS and Linux. Project Overwatch does not automatically request `sudo`. If the Streamlit session is not running as root, those options are disabled or skipped and a service/version scan (`-sV`) is used instead. Service/version detection is the recommended default for most authorised assessments.
-
-If Nmap still reports a privilege error at runtime (for example if privileges change mid-session), Overwatch retries the scan without the failing option and records it as skipped in **Analyst Interpretation**.
-
-### Elevated privileges for lab use only
-
-Project Overwatch never prompts for a password or escalates privileges automatically. For **authorised lab testing only**, you may start Streamlit from an elevated shell yourself:
-
-```bash
-# macOS / Linux — lab environments only
-sudo "$(which python)" -m streamlit run main.py
-```
-
-When running elevated, the sidebar shows **Running with elevated privileges**. Only use this in controlled lab environments you own or are explicitly authorised to test. Prefer normal (`streamlit run main.py`) service scans for day-to-day use.
-
-No stealth, evasion, spoofing, decoy, SYN-only, UDP, or proxy-bypass options are exposed in v0.6.
-
-### XML parsing and structured results
-
-Nmap runs capture both human-readable output and XML (`-oX` via a temporary file). XML is preferred because it provides structured port, service, OS, and script data. If XML parsing fails, Overwatch falls back to the existing text parser.
-
-Observations store:
-
-- `raw_output` — human-readable Nmap text
-- `data_json` — profile, selected options, parsed ports/services, OS matches, script results, interpreter findings
-
-### Analyst interpretation
-
-After a scan, Overwatch shows an **Analyst Interpretation** section with advisory defensive findings such as:
-
-- Remote desktop, web, SMB, SSH, FTP/Telnet exposure review notes
-- OS fingerprint caveats
-- NSE script output treated as potential findings requiring validation
-
-The interpreter is **advisory only**. An open port does not automatically mean a vulnerability, missing script results do not mean a host is safe, and NSE vuln output is not proof of compromise.
-
-## Domain Intelligence (passive)
-
-**Domain Intelligence** (`infra_domain_intel`) is an active passive module under **2. Infrastructure**. It does **not** use Nmap and does **not** require the authorisation checkbox.
-
-For a domain or URL, it collects:
-
-- DNS records: A, AAAA, MX, NS, TXT, CNAME
-- Basic HTTP/HTTPS response details
-- Presence or absence of common security headers
-- Basic TLS certificate issuer and validity dates (when HTTPS is reachable)
-- Basic Wayback Machine availability via the public CDX API
-
-Results are stored in the case model as:
-
-- **Operation** log entry
-- **Observation** with structured JSON and raw text summary
-- **Entities** for the domain, resolved IPs, MX hosts, and nameservers
-- **Relationships**:
-  - `resolves_to` (domain → IP)
-  - `uses_mail_server` (domain → MX host)
-  - `uses_nameserver` (domain → NS host)
-
-### How to test with example.com
-
-1. Start the app: `streamlit run main.py`
-2. Enter `example.com` as the target
-3. Under **2. Infrastructure**, enable **Domain Intelligence** only (leave Nmap unchecked if you want a passive-only test)
-4. Click **LAUNCH OPERATION**
-5. Review the **Domain Intelligence Summary**, then check **Archive → Relationships**, **Observations**, and **Graph**
-
-No authorisation checkbox is required for this module.
-
-## Findings and suggested actions (v0.8)
-
-Project Overwatch stores **findings** as structured analyst aids derived from module results. Findings are **not** final proof of risk, compromise, or misconfiguration. They highlight items worth reviewing and suggest practical next steps.
-
-Each finding includes:
-
-| Field | Purpose |
-|-------|---------|
-| `title` | Short summary of what was observed |
-| `severity` | Relative priority for analyst review (`critical`, `high`, `medium`, `low`, `info`) |
-| `confidence` | How strongly the module supports the observation (0–100) |
-| `explanation` | Cautious narrative describing what was or was not observed |
-| `suggested_actions_json` | Practical follow-up steps for the analyst |
-| `status` | Workflow state (`open` by default) |
-
-**Severity** indicates how urgently an analyst may want to review an item. It does not automatically mean a vulnerability exists. For example, an `info` finding may simply record that MX records were observed.
-
-**Confidence** reflects how reliable the underlying observation is given the module and data source. Low confidence findings should be validated before acting on them.
-
-**Suggested actions** are guidance only. Use them to decide what to verify next — for example, confirming whether an exposed service is expected, checking TLS and security headers, reviewing Wayback snapshots, or documenting that a result is benign.
-
-Findings are created when **Nmap** or **Domain Intelligence** completes successfully. The executor links each finding to the active case, entity, and observation where possible. Exact duplicate findings (same case, entity, module, and title) are not created again.
-
-View findings in **Archive → Findings**. The dashboard shows an **Open Findings** metric for the active case.
-
-### Finding workflow (v0.9)
-
-Each finding can move through analyst workflow states:
-
-| Status | Meaning |
-|--------|---------|
-| `open` | New or awaiting review |
-| `reviewed` | Analyst has reviewed; may still need follow-up |
-| `closed` | Resolved, accepted risk, or no further action |
-
-Use the controls inside each finding expander to **Reopen**, **Mark reviewed**, or **Close**.
-
-Re-running the same module against the same entity **refreshes** matching findings and **closes** open/reviewed items that are no longer observed (marked as superseded in the explanation).
-
-### Case reports (v0.9)
-
-Generate a readable Markdown report for the active case under **Archive → Report**.
-
-1. Select the case in the sidebar.
-2. Open **Archive → Report**.
-3. Choose options:
-   - **Include closed findings** — off by default; only open findings are included when unchecked.
-   - **Include raw output appendix** — off by default; when enabled, observation raw output is appended in code blocks.
-4. Click **Generate / refresh report preview**.
-5. Review the preview, then **Save report to reports/** or **Download Markdown report**.
-
-Reports are saved locally to the project `reports/` directory (for example `reports/my_case_1_20260622_143000.md`). This folder is excluded from Git.
-
-#### Report sections
-
-| Section | Contents |
-|---------|----------|
-| Case Summary | Name, status, dates, description |
-| Executive Summary | Counts, open findings, highest severity, modules used |
-| Scope and Notes | Local-data disclaimer |
-| Entities | Grouped by type with value, label, source, confidence, notes |
-| Relationships | `source → type → target` with module and confidence |
-| Observations | Grouped by module; title, type, date, summary (no raw output by default) |
-| Findings | Grouped by severity; explanation and suggested actions |
-| Suggested Next Actions | Deduplicated list from open findings |
-| Appendix | Raw outputs when enabled, otherwise a short note |
-
-Findings in reports are analyst aids, not proof of risk. Review and redact sensitive content before sharing externally.
-
-#### Report templates and export formats (v1.0)
-
-| Template | Contents |
-|----------|----------|
-| **Full technical** | All sections including entities, relationships, observations, findings, and appendix |
-| **Executive summary** | Case summary, executive summary, findings (condensed), and suggested actions |
-
-Additional options:
-
-- **JSON export** — structured case data for tooling or archival
-- **HTML export** — browser-readable report; use Print → Save as PDF for a PDF copy
-- **Entity graph snapshot** — PNG in the appendix when Plotly/kaleido is available
-- **Redaction** — optional masking of IP addresses, emails, and domain names before export
-- **Batch export** — export multiple cases to `reports/` in Markdown, HTML, or JSON
-
-Optional dependency for graph PNG snapshots: `pip install kaleido`
-
-#### Advanced reporting (v1.1)
-
-| Feature | Description |
+| Mode | Behaviour | Authorisation |
+|------|-----------|---------------|
+| **Active** | Sends probes (e.g. Nmap) | Required |
+| **Passive** | Public/read-only lookups | Not required by default |
+| **Analysis** | Local file analysis (planned) | If registry requires it |
+
+## Investigation model
+
+| Concept | Description |
 |---------|-------------|
-| **Native PDF** | Save/download PDF via WeasyPrint (`pip install weasyprint`) |
-| **Encrypted export** | Password-protected `.enc` files in `exports/` (`cryptography` package) |
-| **Organisation branding** | Organisation name, analyst, classification label, footer — saved in `config/report_settings.json` |
-| **Advanced redaction** | Custom terms (one per line) and regex patterns (`pattern|||replacement`) |
-| **Scheduled export** | Auto-export open cases when the Report tab is opened — configure in `config/report_schedule.json` |
+| **Case** | Groups one investigation (name, description, status) |
+| **Entity** | IP, domain, email, service, etc. linked to a case |
+| **Observation** | Structured module result (summary + JSON + optional raw output) |
+| **Operation** | Audit log of each module run |
+| **Relationship** | Link between entities (`exposes_service`, `resolves_to`, …) |
+| **Finding** | Advisory interpretation with severity, confidence, suggested actions |
 
-Review and redact all exports before sharing externally. Encrypted files require the same password to decrypt.
+**Cases → Download case backup (JSON)** exports the full investigation for migration. Import creates a new case with remapped entity IDs.
 
-### Entity graph severity (v0.9)
+Findings are **analyst aids**, not proof of vulnerability. Review before acting or sharing.
 
-The **Graph** tab colours entity nodes by the highest **open** or **reviewed** finding severity linked to that entity. Grey nodes have no open/reviewed findings.
+### Nmap (active)
 
-### Adding findings to new modules
+- Guided profiles: Quick, Standard, Detailed, Host discovery, Custom
+- XML parsing with text fallback; service entities and relationships
+- Advisory interpreter creates findings (open ports, exposure notes, script output caveats)
+- OS detection / traceroute may need elevated privileges in lab environments only
 
-Register an interpreter in `utils/findings_registry.py` (`MODULE_FINDING_INTERPRETERS`), wire module execution in `modules/executor.py`, and call `_persist_module_findings()` after creating an observation. The shared `sync_module_findings()` helper handles upsert and superseded closing.
+### Domain Intelligence (passive)
 
-### Domain Intelligence interpretation
+- DNS (A, AAAA, MX, NS, TXT, CNAME), HTTP/HTTPS, security headers, TLS, Wayback CDX
+- Creates domain/IP/MX/NS entities and relationships
+- Cautious findings (missing headers **not observed**, not confirmed vulns)
 
-The domain interpreter uses cautious language. Missing security headers are described as **not observed**, not as confirmed vulnerabilities. Example finding types:
+## Reports
 
-- Common security headers not observed on HTTPS
-- HTTPS unavailable or failed
-- TLS certificate expiry approaching
-- No A or AAAA records observed
-- MX or nameserver records found (informational)
-- Wayback snapshots available
+**Archive → Report** generates Markdown previews with optional:
 
-## Investigation data model
+- Full technical or executive template
+- Closed findings and raw output appendix (off by default)
+- Redaction (IPs, emails, domains, custom terms/regex)
+- Organisation branding (`config/report_settings.json`, local only)
+- Export: Markdown, HTML, JSON, PDF (WeasyPrint), encrypted (cryptography)
+- Batch export and scheduled export (`config/report_schedule.json`)
 
-Project Overwatch v0.4 stores investigation data in a structured model alongside the legacy `targets` / `recon_data` tables.
-
-| Table | Purpose |
-|-------|---------|
-| `cases` | Investigation containers (name, description, status) |
-| `entities` | Things under investigation: IPs, domains, emails, usernames, companies, documents, etc. |
-| `observations` | Module results linked to a case and entity |
-| `relationships` | Links between entities such as `exposes_service` |
-| `operations` | Audit log of module runs (module, target, status, authorisation) |
-| `findings` | Analyst findings with severity, confidence, explanation, and suggested actions |
-
-### Cases
-
-A **case** groups everything related to one investigation. A default case is created automatically on first run if none exists. Select a case in the sidebar or create a new one.
-
-### Entities
-
-An **entity** is a concrete item being investigated within a case. When you acquire a target, Overwatch infers a basic type:
-
-| Input pattern | Entity type |
-|---------------|-------------|
-| IPv4 address | `ip_address` |
-| Domain name | `domain` |
-| Email address | `email` |
-| Other | `unknown` |
-| Discovered open port/service | `service` (created from Nmap output) |
-
-Service entities use values such as `192.168.1.1:5900/tcp` and labels such as `5900/tcp vnc Apple remote desktop vnc`.
-
-### Observations
-
-An **observation** is a structured module result. When Nmap completes, the executor saves:
-
-- `title`: "Nmap scan result"
-- `observation_type`: "network_scan"
-- `summary`: executor result summary
-- `raw_output`: full Nmap text output
-- `data_json`: structured metadata including parsed ports, services, OS matches, script results, interpreter findings, and selected scan options
-
-Legacy `recon_data` rows are still written for backwards compatibility.
-
-### Relationships
-
-A **relationship** links two entities within a case. When Nmap completes against an authorised scan, Overwatch:
-
-1. Parses open ports from the stored Nmap output
-2. Creates or reuses **service** entities for each open port
-3. Creates `exposes_service` relationships from the scanned target entity to each service entity
-4. Avoids duplicate relationships if the same scan is run again
-
-Example: scanning `192.168.68.122` and finding port 5900 creates:
-
-- Service entity: `192.168.68.122:5900/tcp`
-- Relationship: `192.168.68.122` → `exposes_service` → `192.168.68.122:5900/tcp`
-
-View relationships in the **Relationships** archive tab.
-
-### Entity graph
-
-The **Graph** archive tab renders a simple network view using stored entities and relationships. It uses NetworkX to build the graph and Plotly to display it:
-
-- **Nodes** = entities (label if present, otherwise value)
-- **Edges** = relationships (`exposes_service`, etc.)
-
-The graph is read-only and does **not** perform new scanning. Entity nodes are coloured by the highest open or reviewed finding severity when findings exist (v0.9).
-
-## Lawful use
-
-Project Overwatch is intended for **lawful OSINT**, **systems you own**, **lab environments**, and **authorised security assessments** only. Do not use it to scan, probe, or investigate targets without permission.
+Saved reports go to `reports/` (gitignored). Encrypted exports go to `exports/`.
 
 ## Project layout
 
 ```
-main.py                          Streamlit entry point
-database/
-  db_setup.py                    SQLite schema, cases/entities/observations helpers
-  overwatch.db                   Local investigation and legacy data (auto-created)
+main.py                    Streamlit entry point
+version.py                 PROJECT_VERSION = "1.0.1"
+scripts/smoke_check.py     Local sanity checks
+requirements-optional.txt  kaleido, weasyprint (optional)
+database/db_setup.py       SQLite schema and helpers
 modules/
-  module_registry.py           Module metadata and helpers
-  executor.py                  Execution dispatcher and result format
-  2_infrastructure/
-    infra_nmap.py                Nmap subprocess wrapper
-    infra_domain_intel.py        Passive DNS/HTTP/TLS/Wayback lookups
-utils/
-  nmap_options.py              Scan profiles, compatibility rules, flag builder
-  nmap_ui.py                   Streamlit Nmap option UI
-  nmap_parser.py               Text fallback parser for open ports
-  nmap_xml_parser.py           XML parser for structured Nmap results
-  nmap_interpreter.py          Advisory defensive result interpreter
-  domain_intel_interpreter.py  Domain intelligence findings interpreter
-  findings_registry.py       Module interpreter registry for findings pipeline
-  findings_sync.py           Upsert and supersede findings on module completion
-  report_builder.py          Markdown case report builder and save helper
-  report_export.py           HTML/JSON/PDF export, batch export, graph snapshots
-  report_encryption.py       Password-protected encrypted exports
-  report_settings.py         Branding and schedule settings (local config)
-  report_scheduler.py        Scheduled export runner
-  report_redaction.py        Redaction helpers for external sharing
-  graph_view.py                NetworkX + Plotly graph rendering
-requirements.txt                 Python dependencies
+  module_registry.py       Module metadata (single source of truth)
+  executor.py                Execution dispatcher
+  2_infrastructure/        Nmap and Domain Intelligence backends
+utils/                     Parsers, interpreters, graph, reports
+reports/                   Generated reports (gitignored)
+exports/                   Encrypted exports (gitignored)
+config/                    Local report settings (gitignored)
 ```
 
-Paths are resolved relative to `main.py`, so the project can be moved without editing source code.
+## Safe and local usage
+
+- Data stays in `database/overwatch.db` on your machine.
+- Scans never start automatically — you must click **Run selected modules**.
+- No stealth, evasion, or exploit features.
+- Review and redact reports before external sharing.
+- Unauthorised scanning may be illegal in your jurisdiction.
+
+## Known limitations
+
+| Area | Status |
+|------|--------|
+| Collection modules | **Two** implemented (Nmap, Domain Intelligence). Others show as planned in the sidebar. |
+| Live lookups | Domain Intelligence and Nmap need network / local `nmap` when you run them. Smoke test does not use the network. |
+| PDF / graph PNG | Install `requirements-optional.txt` (WeasyPrint, kaleido). System libraries may be needed for WeasyPrint on some platforms. |
+| Scheduled export | Runs when the app starts and when the Report tab opens — not a background OS daemon. |
+| Multi-user | Optional single shared password only — not multi-tenant user accounts. |
+| Legacy tables | Preserved under **Legacy (v0.1)**; new work uses cases/entities/observations. |
+
+Check **Sidebar → System status** for Nmap, modules, and optional dependency readiness.
+
+## v1.1 roadmap
+
+- Additional passive collection modules wired through the findings pipeline
+- Improved report templates and redaction UX
+- Finding-driven graph filters and export presets
+- Hardening for long-running local deployments
+
+Previously planned case backup is **available now** on the Cases tab (v1.0.1).
+
+## Development
+
+See `CHANGELOG.md` for version history.
+
+```bash
+python scripts/smoke_check.py
+streamlit run main.py
+```
 
 ## Legal notice
 
-Use Project Overwatch only against systems you own or have explicit written permission to assess. Unauthorised scanning or reconnaissance may be illegal in your jurisdiction.
+Use Project Overwatch only against systems you own or have explicit written permission to assess.

@@ -1,4 +1,4 @@
-"""Scheduled case report export (runs when the Report tab is opened)."""
+"""Scheduled case report export (runs at app startup and when the Report tab is opened)."""
 
 from __future__ import annotations
 

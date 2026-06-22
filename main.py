@@ -53,9 +53,21 @@ from utils.report_settings import (
 )
 from utils.nmap_options import SCRIPT_VULN
 from utils.nmap_ui import render_nmap_options, render_privilege_status
+from utils.case_backup import export_case_bundle_json, import_case_bundle, parse_case_bundle_json
+from utils.local_auth import local_auth_enabled, render_local_auth_gate
+from utils.runtime_health import collect_health_checks
+from version import PROJECT_VERSION
 
 if "case_id" not in st.session_state:
     st.session_state.case_id = get_or_create_default_case()["id"]
+
+render_local_auth_gate()
+
+if "startup_tasks_done" not in st.session_state:
+    _scheduled_paths, scheduled_message = maybe_run_scheduled_exports()
+    if scheduled_message:
+        st.session_state.startup_notice = scheduled_message
+    st.session_state.startup_tasks_done = True
 
 modules_by_category = get_modules_by_category()
 selected_modules: dict[str, bool] = {}
@@ -88,10 +100,6 @@ def selection_requires_authorisation(module_ids: list[str]) -> bool:
         (module := get_module(module_id)) is not None and module.requires_authorisation
         for module_id in module_ids
     )
-
-
-FINDING_STATUSES = ("open", "reviewed", "closed")
-
 
 def set_finding_status(finding_id: int, status: str) -> None:
     conn = get_db_conn()
@@ -250,8 +258,16 @@ current_case = get_current_case()
 
 # --- Sidebar ---
 with st.sidebar:
-    st.title("🛡️ Arsenal Control")
+    st.title("Project Overwatch")
+    st.caption(f"v{PROJECT_VERSION} · Local intelligence dashboard")
+    if local_auth_enabled():
+        st.caption("Local password protection enabled")
     render_privilege_status()
+
+    with st.expander("System status", expanded=False):
+        for check in collect_health_checks():
+            icon = "✅" if check.ok else ("⚠️" if not check.required else "❌")
+            st.write(f"{icon} **{check.name}** — {check.detail}")
 
     st.subheader("Case")
     cases = list_cases()
@@ -321,7 +337,8 @@ with st.sidebar:
                 conn.close()
 
     st.divider()
-    st.subheader("Select Modules")
+    st.subheader("Modules")
+    st.caption("**Active** modules send probes (authorisation required). **Passive** modules use public lookups only.")
 
     for category in CATEGORIES:
         category_key = str(category["key"])
@@ -346,7 +363,11 @@ with st.sidebar:
                 )
 
                 if not selectable and not is_executable(module):
-                    st.caption(f"{module.mode.title()} · {module.risk_level.title()} risk · planned")
+                    st.caption(
+                        f"Planned · {module.mode.title()} · {module.risk_level.title()} risk — not available in v1.0"
+                    )
+                elif not selectable and is_executable(module):
+                    st.caption("Unavailable — check runtime error above.")
 
                 if module.module_id == "infra_nmap" and selectable:
                     nmap_options = render_nmap_options(selectable)
@@ -374,18 +395,26 @@ with st.sidebar:
         )
 
     st.divider()
-    execute_btn = st.button("LAUNCH OPERATION", type="primary", width="stretch")
+    execute_btn = st.button("Run selected modules", type="primary", width="stretch")
 
 # --- Main Dashboard ---
-st.title("Project Overwatch")
+st.title("Investigation dashboard")
 st.caption(
-    f"Intelligence Command Centre · Case: **{current_case['name']}** (#{current_case['id']}) · "
-    f"Status: {current_case['status']}"
+    f"Case: **{current_case['name']}** (#{current_case['id']}) · Status: {current_case['status']} · "
+    f"v{PROJECT_VERSION}"
 )
 
+if st.session_state.get("startup_notice") and not st.session_state.get("startup_notice_dismissed"):
+    st.info(st.session_state.startup_notice)
+    if st.button("Dismiss", key="dismiss_startup_notice"):
+        st.session_state.startup_notice_dismissed = True
+        st.rerun()
+
 conn = get_db_conn()
-t_count = conn.execute("SELECT count(*) FROM targets").fetchone()[0]
-s_count = conn.execute("SELECT count(*) FROM recon_data").fetchone()[0]
+operation_count = conn.execute(
+    "SELECT count(*) FROM operations WHERE case_id = ?",
+    (st.session_state.case_id,),
+).fetchone()[0]
 entity_count = conn.execute(
     "SELECT count(*) FROM entities WHERE case_id = ?",
     (st.session_state.case_id,),
@@ -404,13 +433,12 @@ open_findings_count = conn.execute(
 ).fetchone()[0]
 conn.close()
 
-m1, m2, m3, m4, m5, m6 = st.columns(6)
-m1.metric("Legacy Targets", t_count)
-m2.metric("Case Entities", entity_count)
-m3.metric("Relationships", relationship_count)
-m4.metric("Observations", observation_count)
-m5.metric("Open Findings", open_findings_count)
-m6.metric("Legacy Logs", s_count)
+m1, m2, m3, m4, m5 = st.columns(5)
+m1.metric("Entities", entity_count)
+m2.metric("Relationships", relationship_count)
+m3.metric("Observations", observation_count)
+m4.metric("Open findings", open_findings_count)
+m5.metric("Operations", operation_count)
 
 st.divider()
 
@@ -420,12 +448,12 @@ if execute_btn:
     else:
         selected_ids = selected_module_ids()
 
-        with st.status("Executing Active Intelligence Stack...", expanded=True) as status:
+        with st.status("Running selected modules...", expanded=True) as status:
             if not selected_ids:
-                st.warning("No executable modules selected.")
+                st.warning("No modules selected. Enable Nmap or Domain Intelligence in the sidebar.")
             elif auth_required and not authorisation_confirmed:
                 st.error(
-                    "Authorisation confirmation is required before running the selected active modules."
+                    "Authorisation is required before running active modules such as Nmap."
                 )
             else:
                 conn = get_db_conn()
@@ -464,13 +492,11 @@ if execute_btn:
                 finally:
                     conn.close()
 
-            status.update(label="Operation Complete", state="complete")
+            status.update(label="Module run complete", state="complete")
 
 # --- Archive ---
 st.header("📂 Archive")
 (
-    tab_manifest,
-    tab_history,
     tab_cases,
     tab_entities,
     tab_relationships,
@@ -479,10 +505,9 @@ st.header("📂 Archive")
     tab_findings,
     tab_report,
     tab_graph,
+    tab_legacy,
 ) = st.tabs(
     [
-        "Manifest",
-        "History",
         "Cases",
         "Entities",
         "Relationships",
@@ -491,23 +516,40 @@ st.header("📂 Archive")
         "Findings",
         "Report",
         "Graph",
+        "Legacy (v0.1)",
     ]
 )
-
-with tab_manifest:
-    conn = get_db_conn()
-    st.dataframe(pd.read_sql_query("SELECT * FROM targets", conn), width="stretch")
-    conn.close()
-
-with tab_history:
-    conn = get_db_conn()
-    st.dataframe(pd.read_sql_query("SELECT * FROM recon_data", conn), width="stretch")
-    conn.close()
 
 with tab_cases:
     conn = get_db_conn()
     st.dataframe(pd.read_sql_query("SELECT * FROM cases", conn), width="stretch")
     conn.close()
+    st.caption("Case backup — export or import investigation data as JSON.")
+    backup_col1, backup_col2 = st.columns(2)
+    with backup_col1:
+        bundle_json = export_case_bundle_json(st.session_state.case_id)
+        st.download_button(
+            "Download case backup (JSON)",
+            data=bundle_json,
+            file_name=f"case_{st.session_state.case_id}_backup.json",
+            mime="application/json",
+            width="stretch",
+        )
+    with backup_col2:
+        uploaded = st.file_uploader("Import case backup", type=["json"], key="case_backup_upload")
+        import_name = st.text_input("New case name (optional)", key="case_import_name")
+        if uploaded and st.button("Import backup as new case", width="stretch"):
+            try:
+                bundle = parse_case_bundle_json(uploaded.getvalue().decode("utf-8"))
+                imported = import_case_bundle(
+                    bundle,
+                    new_case_name=import_name.strip() or None,
+                )
+                st.session_state.case_id = imported["id"]
+                st.success(f"Imported case '{imported['name']}' (#{imported['id']}).")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Import failed: {exc}")
 
 with tab_entities:
     conn = get_db_conn()
@@ -944,3 +986,15 @@ with tab_graph:
         st.info("No graph data yet. Run Domain Intelligence or Nmap against a target to populate entities and relationships.")
     else:
         st.plotly_chart(figure, width="stretch")
+
+with tab_legacy:
+    st.caption(
+        "Legacy v0.1 tables kept for backwards compatibility. "
+        "Use **Cases**, **Entities**, and **Observations** for current investigations."
+    )
+    conn = get_db_conn()
+    st.markdown("**Targets (legacy manifest)**")
+    st.dataframe(pd.read_sql_query("SELECT * FROM targets", conn), width="stretch")
+    st.markdown("**Scan logs (legacy recon_data)**")
+    st.dataframe(pd.read_sql_query("SELECT * FROM recon_data", conn), width="stretch")
+    conn.close()

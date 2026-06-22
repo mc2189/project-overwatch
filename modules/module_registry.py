@@ -400,7 +400,10 @@ def is_executable(module: ModuleEntry) -> bool:
 
 
 def module_ui_label(module: ModuleEntry) -> str:
-    """Build a sidebar label that marks planned or disabled modules clearly."""
+    """Build a sidebar label with mode and status for clarity."""
     if is_executable(module):
-        return module.display_name
-    return f"{module.display_name} ({module.status.title()})"
+        mode_label = {"active": "Active", "passive": "Passive", "analysis": "Analysis"}.get(
+            module.mode, module.mode.title()
+        )
+        return f"{module.display_name} [{mode_label}]"
+    return f"{module.display_name} (planned)"
