@@ -23,9 +23,9 @@ def render_sidebar() -> str:
     render_privilege_status()
 
     with st.expander("System status", expanded=False):
-        for check in collect_health_checks():
-            icon = "✅" if check.ok else ("⚠️" if not check.required else "❌")
-            st.write(f"{icon} **{check.name}** — {check.detail}")
+        from utils.runtime_health import render_runtime_health_panel
+
+        render_runtime_health_panel(collect_health_checks())
 
     st.subheader("Case")
     cases = list_cases()

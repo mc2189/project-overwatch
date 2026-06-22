@@ -5,7 +5,16 @@ from __future__ import annotations
 import shutil
 from dataclasses import dataclass
 
+import streamlit as st
+
 from modules.executor import get_runtime_error, is_runtime_ready
+from utils.settings_manager import (
+    active_modules_enabled,
+    configured_api_providers_count,
+    general_settings_summary,
+    missing_optional_api_providers_count,
+)
+from version import PROJECT_VERSION
 
 
 @dataclass
@@ -27,6 +36,41 @@ def _optional_import(module_name: str) -> bool:
 def collect_health_checks() -> list[HealthCheck]:
     """Return health status for core and optional runtime dependencies."""
     checks: list[HealthCheck] = []
+    settings = general_settings_summary()
+
+    checks.append(
+        HealthCheck(
+            "Python",
+            True,
+            settings["python_version"],
+            required=False,
+        )
+    )
+    checks.append(
+        HealthCheck(
+            "Project Overwatch",
+            True,
+            f"v{PROJECT_VERSION}",
+            required=False,
+        )
+    )
+    checks.append(
+        HealthCheck(
+            "Active modules globally",
+            active_modules_enabled(),
+            "Enabled" if active_modules_enabled() else "Disabled via PROJECT_OVERWATCH_ENABLE_ACTIVE_MODULES",
+            required=False,
+        )
+    )
+    checks.append(
+        HealthCheck(
+            "API providers configured",
+            configured_api_providers_count() > 0,
+            f"{configured_api_providers_count()} configured · "
+            f"{missing_optional_api_providers_count()} optional missing",
+            required=False,
+        )
+    )
 
     nmap_on_path = shutil.which("nmap") is not None
     nmap_module_loaded = is_runtime_ready("infra_nmap")
@@ -122,3 +166,11 @@ def collect_health_checks() -> list[HealthCheck]:
 def required_checks_passed(checks: list[HealthCheck] | None = None) -> bool:
     checks = checks or collect_health_checks()
     return all(check.ok for check in checks if check.required)
+
+
+def render_runtime_health_panel(checks: list[HealthCheck] | None = None) -> None:
+    """Render runtime health checks in Streamlit."""
+    checks = checks or collect_health_checks()
+    for check in checks:
+        icon = "✅" if check.ok else ("⚠️" if not check.required else "❌")
+        st.write(f"{icon} **{check.name}** — {check.detail}")

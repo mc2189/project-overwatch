@@ -128,9 +128,24 @@ def build_queue_item(
     module: ModuleEntry,
 ) -> dict[str, Any]:
     """Build a queue item dictionary for an entity/module pair."""
+    from utils.settings_manager import active_modules_enabled, module_api_key_status
+
     execution_target = entity_execution_target(entity)
     target_type = entity_target_type(entity)
     incompatible = get_incompatible_reason(module, target_type)
+
+    if module.mode == "active" and not active_modules_enabled():
+        incompatible = (
+            "Active modules are disabled in settings "
+            "(PROJECT_OVERWATCH_ENABLE_ACTIVE_MODULES=false)."
+        )
+
+    if module.requires_api_key and not incompatible:
+        key_status = module_api_key_status(module)
+        if not key_status["configured"]:
+            missing = ", ".join(key_status["missing_keys"])
+            incompatible = f"Missing required API key(s): {missing}. Add them to your local .env file."
+
     return {
         "queue_id": str(uuid.uuid4()),
         "case_id": case_id,
@@ -192,6 +207,12 @@ def add_queue_item(
 
     if is_duplicate_queue_item(items, case_id, entity["id"], module_id):
         return items, None, "Already queued for this entity and module."
+
+    from utils.settings_manager import max_batch_items
+
+    queued_count = sum(1 for item in items if item.get("status", "queued") == "queued")
+    if queued_count >= max_batch_items():
+        return items, None, f"Batch queue limit reached ({max_batch_items()} items)."
 
     item = build_queue_item(case_id, entity, module)
     item["position"] = len(items)

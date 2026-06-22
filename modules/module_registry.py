@@ -23,6 +23,9 @@ class ModuleEntry:
     requires_api_key: bool
     implemented: bool
     accepted_target_types: tuple[str, ...] = ()
+    api_key_names: tuple[str, ...] = ()
+    config_notes: str = ""
+    rate_limit_notes: str = ""
     short_help: str = ""
     detailed_help: str = ""
     example_inputs: tuple[str, ...] = ()
@@ -94,6 +97,8 @@ MODULES: list[ModuleEntry] = [
         requires_api_key=False,
         implemented=True,
         accepted_target_types=("ipv4", "domain"),
+        config_notes="No API key required. Requires Nmap on PATH and authorisation before running.",
+        rate_limit_notes="Active scan — use sparingly; not subject to passive lookup rate limits.",
         short_help="Active scan of reachable network services on an IPv4 address or domain.",
         detailed_help=(
             "Runs Nmap against an IPv4 address or domain to discover open ports, services, and optional "
@@ -120,6 +125,8 @@ MODULES: list[ModuleEntry] = [
         requires_api_key=False,
         implemented=True,
         accepted_target_types=("domain", "url"),
+        config_notes="No API key required. Uses public DNS/HTTP/TLS/Wayback lookups only.",
+        rate_limit_notes="Respect public source rate limits; batch queue courtesy delay applies.",
         short_help="Passive DNS, HTTP/TLS, security headers, and Wayback checks for a domain or URL.",
         detailed_help=(
             "Collects public DNS records, HTTP/HTTPS responses, TLS certificate details, security headers, "
@@ -146,6 +153,8 @@ MODULES: list[ModuleEntry] = [
         requires_api_key=False,
         implemented=True,
         accepted_target_types=("domain", "url"),
+        config_notes="No API key required. Queries public certificate transparency data (crt.sh).",
+        rate_limit_notes="crt.sh may rate limit or timeout — handled as source notices, not hard failures.",
         short_help="Passive certificate transparency lookup for related public subdomain names.",
         detailed_help=(
             "Queries public certificate transparency data (crt.sh) to discover hostnames that have appeared "
@@ -173,6 +182,8 @@ MODULES: list[ModuleEntry] = [
         requires_api_key=False,
         implemented=True,
         accepted_target_types=("domain", "url"),
+        config_notes="No API key required. Performs passive HTTP GET requests only.",
+        rate_limit_notes="Uses PROJECT_OVERWATCH_RATE_LIMIT_SECONDS between batch queue passive runs.",
         short_help="Passive homepage title, meta tags, headers, link/form counts, robots.txt, and sitemap hints.",
         detailed_help=(
             "Fetches the public homepage for a domain or URL and extracts page title, meta description, "
@@ -285,6 +296,9 @@ MODULES: list[ModuleEntry] = [
         requires_authorisation=False,
         requires_api_key=True,
         implemented=False,
+        api_key_names=("VIRUSTOTAL_API_KEY",),
+        config_notes="Requires VIRUSTOTAL_API_KEY in local .env. Planned — not available in this release.",
+        rate_limit_notes="Public API rate limits apply when implemented.",
     ),
     ModuleEntry(
         module_id="intel_abuseipdb",
@@ -297,6 +311,9 @@ MODULES: list[ModuleEntry] = [
         requires_authorisation=False,
         requires_api_key=True,
         implemented=False,
+        api_key_names=("ABUSEIPDB_API_KEY",),
+        config_notes="Requires ABUSEIPDB_API_KEY in local .env. Planned — not available in this release.",
+        rate_limit_notes="Daily query limits depend on your AbuseIPDB plan.",
     ),
     ModuleEntry(
         module_id="intel_greynoise",
@@ -309,6 +326,86 @@ MODULES: list[ModuleEntry] = [
         requires_authorisation=False,
         requires_api_key=True,
         implemented=False,
+        api_key_names=("GREYNOISE_API_KEY",),
+        config_notes="Requires GREYNOISE_API_KEY in local .env. Planned — not available in this release.",
+        rate_limit_notes="Community/enterprise tiers have different rate limits.",
+    ),
+    ModuleEntry(
+        module_id="intel_shodan",
+        display_name="Shodan",
+        category="Threat Intel",
+        description="Internet-wide device and service exposure search.",
+        status="planned",
+        mode="passive",
+        risk_level="low",
+        requires_authorisation=False,
+        requires_api_key=True,
+        implemented=False,
+        api_key_names=("SHODAN_API_KEY",),
+        config_notes="Requires SHODAN_API_KEY in local .env. Planned — not available in this release.",
+        rate_limit_notes="Query credits depend on your Shodan membership.",
+    ),
+    ModuleEntry(
+        module_id="intel_censys",
+        display_name="Censys",
+        category="Threat Intel",
+        description="Internet asset and certificate search via Censys API.",
+        status="planned",
+        mode="passive",
+        risk_level="low",
+        requires_authorisation=False,
+        requires_api_key=True,
+        implemented=False,
+        api_key_names=("CENSYS_API_ID", "CENSYS_API_SECRET"),
+        config_notes="Requires CENSYS_API_ID and CENSYS_API_SECRET in local .env. Planned — not available yet.",
+        rate_limit_notes="API quota depends on your Censys account.",
+    ),
+    ModuleEntry(
+        module_id="intel_securitytrails",
+        display_name="SecurityTrails",
+        category="Threat Intel",
+        description="DNS and domain history intelligence.",
+        status="planned",
+        mode="passive",
+        risk_level="low",
+        requires_authorisation=False,
+        requires_api_key=True,
+        implemented=False,
+        api_key_names=("SECURITYTRAILS_API_KEY",),
+        config_notes="Requires SECURITYTRAILS_API_KEY in local .env. Planned — not available in this release.",
+        rate_limit_notes="Monthly API allowance depends on your plan.",
+    ),
+    ModuleEntry(
+        module_id="ident_hunter",
+        display_name="Hunter.io",
+        category="Identity",
+        description="Email discovery and verification for a domain.",
+        status="planned",
+        mode="passive",
+        risk_level="low",
+        requires_authorisation=False,
+        requires_api_key=True,
+        implemented=False,
+        accepted_target_types=("domain", "email"),
+        api_key_names=("HUNTER_API_KEY",),
+        config_notes="Requires HUNTER_API_KEY in local .env. Planned — not available in this release.",
+        rate_limit_notes="Search credits depend on your Hunter.io plan.",
+    ),
+    ModuleEntry(
+        module_id="intel_hibp",
+        display_name="Have I Been Pwned",
+        category="Threat Intel",
+        description="Check emails and domains against known breach data.",
+        status="planned",
+        mode="passive",
+        risk_level="low",
+        requires_authorisation=False,
+        requires_api_key=True,
+        implemented=False,
+        accepted_target_types=("email", "domain"),
+        api_key_names=("HAVEIBEENPWNED_API_KEY",),
+        config_notes="Requires HAVEIBEENPWNED_API_KEY in local .env. Planned — not available in this release.",
+        rate_limit_notes="HIBP API rate limits apply per key tier.",
     ),
     # Dark Web
     ModuleEntry(

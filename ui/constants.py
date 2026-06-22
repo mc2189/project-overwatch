@@ -13,6 +13,7 @@ NAV_PAGES: tuple[str, ...] = (
     "Graph",
     "Report",
     "Backup",
+    "Settings",
     "Roadmap",
 )
 

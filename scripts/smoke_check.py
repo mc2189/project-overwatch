@@ -171,6 +171,59 @@ def _check_entity_helpers() -> None:
         raise AssertionError("email entity should not recommend modules yet")
 
 
+def _check_settings_manager() -> None:
+    settings = __import__(
+        "utils.settings_manager",
+        fromlist=[
+            "mask_api_key",
+            "has_api_key",
+            "validate_module_settings",
+            "list_api_provider_status",
+            "list_module_config_status",
+            "env_example_exists",
+            "env_ignored_by_git",
+            "rate_limit_seconds",
+        ],
+    )
+    if not settings.env_example_exists():
+        raise AssertionError(".env.example is missing")
+    if not settings.env_ignored_by_git():
+        raise AssertionError(".env is not listed in .gitignore")
+
+    masked = settings.mask_api_key("vt_test_secret_key_abcd")
+    if "secret" in masked or masked.count("*") < 4:
+        raise AssertionError("mask_api_key did not mask sufficiently")
+    if not masked.startswith("vt_"):
+        raise AssertionError("mask_api_key should preserve short prefix")
+
+    registry = __import__("modules.module_registry", fromlist=["get_module"])
+    domain = registry.get_module("infra_domain_intel")
+    if domain is None:
+        raise AssertionError("infra_domain_intel missing")
+    domain_validation = settings.validate_module_settings("infra_domain_intel")
+    if not domain_validation["ok"]:
+        raise AssertionError("domain intel should pass settings validation without API keys")
+
+    vt = registry.get_module("intel_virustotal")
+    if vt is None or not vt.requires_api_key:
+        raise AssertionError("intel_virustotal should require API key")
+    if vt.api_key_names != ("VIRUSTOTAL_API_KEY",):
+        raise AssertionError("intel_virustotal api_key_names mismatch")
+    vt_validation = settings.validate_module_settings("intel_virustotal")
+    if vt_validation["ok"]:
+        raise AssertionError("intel_virustotal should fail validation without API key")
+
+    providers = settings.list_api_provider_status()
+    if len(providers) < 8:
+        raise AssertionError("expected at least 8 API provider definitions")
+    modules = settings.list_module_config_status()
+    if not any(row["module_id"] == "infra_nmap" for row in modules):
+        raise AssertionError("list_module_config_status missing infra_nmap")
+
+    if settings.rate_limit_seconds() <= 0:
+        raise AssertionError("rate_limit_seconds should be positive")
+
+
 def _check_batch_queue_helpers() -> None:
     bq = __import__(
         "utils.batch_queue",
@@ -914,6 +967,11 @@ def main() -> int:
             errors += 1
 
     run("version", lambda: __import__("version", fromlist=["PROJECT_VERSION"]).PROJECT_VERSION)
+
+    run(
+        "settings manager",
+        lambda: _check_settings_manager(),
+    )
 
     run("database setup", lambda: __import__("database.db_setup", fromlist=["get_db_conn"]).get_db_conn().close())
 

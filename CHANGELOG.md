@@ -2,6 +2,18 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v1.10.0 — Settings, API key manager and module configuration
+
+- **Settings page** — masked API key status, module configuration readiness, general settings summary
+- `utils/settings_manager.py` — `.env` loading, masking, validation, provider/module status helpers
+- `.env.example` with placeholder values only; `.env` remains gitignored
+- `config/overwatch.defaults.json` for non-secret local defaults
+- Module registry extended with `api_key_names`, `config_notes`, `rate_limit_notes`
+- Planned API modules: VirusTotal, AbuseIPDB, GreyNoise, Shodan, Censys, SecurityTrails, Hunter.io, HIBP
+- Runtime health panel: Python/version, API provider counts, active module toggle
+- Executor preflight blocks future API-key modules and globally disabled active modules
+- Batch queue marks missing API keys / disabled active modules as incompatible before run
+
 ## v2.0.0 — Batch queue persistence and reporting
 
 - Batch queue items persisted in SQLite (`batch_queue_items`) — survives refresh and restarts

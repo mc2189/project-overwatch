@@ -1,4 +1,4 @@
-# Project Overwatch v2.0
+# Project Overwatch v1.10
 
 Project Overwatch is a **local** Python/Streamlit dashboard for defensive security intelligence. It helps analysts organise investigations into **cases**, collect data with authorised **active** scans and **passive** lookups, interpret results as advisory **findings**, and export **reports** — all stored in a local SQLite database on your machine.
 
@@ -20,6 +20,7 @@ The sidebar provides case selection and main navigation:
 | **Graph** | Entity relationship view; open neighbours in Entity Workspace |
 | **Report** | Generate and export case reports |
 | **Backup** | Case JSON export/import and legacy tables |
+| **Settings** | API key status (masked), general settings, runtime health |
 | **Roadmap** | Planned modules (not shown in the run workflow) |
 
 ## Typical workflow
@@ -115,6 +116,28 @@ Optional extras (graph PNG and native PDF):
 ```bash
 pip install -r requirements-optional.txt
 ```
+
+### Environment and API keys (v1.10)
+
+Project Overwatch loads local settings from `.env` (never committed) and optional defaults in `config/overwatch.defaults.json`.
+
+1. Copy the placeholder file: `cp .env.example .env`
+2. Edit `.env` locally with your API keys and optional general settings.
+3. Open **Settings** in the sidebar to see **masked** key status and module readiness.
+4. **Never commit `.env`** — it is listed in `.gitignore`.
+
+Supported future API keys (optional until modules are implemented): VirusTotal, AbuseIPDB, GreyNoise, Shodan, Censys (ID + secret), SecurityTrails, Hunter.io, Have I Been Pwned.
+
+General settings:
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `PROJECT_OVERWATCH_RATE_LIMIT_SECONDS` | Delay between passive batch lookups | `1.5` |
+| `PROJECT_OVERWATCH_DEFAULT_TIMEOUT` | Default HTTP timeout (seconds) | `30` |
+| `PROJECT_OVERWATCH_MAX_BATCH_ITEMS` | Max queued batch items per case | `50` |
+| `PROJECT_OVERWATCH_ENABLE_ACTIVE_MODULES` | Global active module toggle | `true` |
+
+Future API-backed modules are blocked cleanly when keys are missing. Current passive modules (Domain Intelligence, Certificate & Subdomain Intelligence, Website Metadata Review) and Nmap do **not** require API keys.
 
 ### Optional local password
 

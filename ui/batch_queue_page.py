@@ -15,7 +15,6 @@ from database.db_setup import (
 from ui.constants import MODULE_CARD_TITLES
 from ui.metrics import render_compact_metrics
 from utils.batch_queue import (
-    DEFAULT_COURTESY_DELAY_SECONDS,
     PASSIVE_BATCH_MODULE_IDS,
     SESSION_RESULTS_KEY,
     add_passive_modules_for_entity,
@@ -38,7 +37,7 @@ from utils.batch_queue_store import (
     record_batch_queue_run,
     save_batch_queue,
 )
-from utils.entity_pivot import build_pivot_recommendations
+from utils.settings_manager import rate_limit_seconds
 
 
 def _save_queue(case_id: int, items: list[dict]) -> None:
@@ -308,7 +307,7 @@ def _render_run_controls(case_id: int, items: list[dict]) -> None:
         "Courtesy delay between passive lookups (seconds)",
         min_value=0.0,
         max_value=5.0,
-        value=float(st.session_state.get("batch_queue_delay", DEFAULT_COURTESY_DELAY_SECONDS)),
+        value=float(st.session_state.get("batch_queue_delay", rate_limit_seconds())),
         step=0.5,
         key="batch_queue_delay_slider",
     )

@@ -1212,6 +1212,18 @@ def execute_module(
             errors=["authorisation_required"],
         )
 
+    from utils.settings_manager import check_module_preflight
+
+    preflight = check_module_preflight(module)
+    if not preflight["ok"]:
+        return make_result(
+            module_id,
+            success=False,
+            status="blocked",
+            summary=preflight["summary"],
+            errors=preflight["errors"],
+        )
+
     if module_id == "infra_nmap":
         if not is_runtime_ready(module_id):
             error_message = get_runtime_error(module_id) or "Nmap runtime is not ready."

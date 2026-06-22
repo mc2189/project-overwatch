@@ -13,6 +13,7 @@ from ui.archive_pages import (
     render_relationships_page,
     render_report_page,
 )
+from ui.settings_page import render_settings_page
 from ui.batch_queue_page import render_batch_queue_page
 from ui.entity_workspace import render_entity_workspace_page
 from ui.findings_page import render_findings_page
@@ -85,5 +86,7 @@ elif nav_page == "Report":
     render_report_page(st.session_state.case_id, metrics)
 elif nav_page == "Backup":
     render_backup_page(st.session_state.case_id, metrics)
+elif nav_page == "Settings":
+    render_settings_page(metrics)
 elif nav_page == "Roadmap":
     render_roadmap_page()
