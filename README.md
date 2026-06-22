@@ -256,9 +256,64 @@ Use the controls inside each finding expander to **Reopen**, **Mark reviewed**, 
 
 Re-running the same module against the same entity **refreshes** matching findings and **closes** open/reviewed items that are no longer observed (marked as superseded in the explanation).
 
-### Case export (v0.9)
+### Case reports (v0.9)
 
-**Archive → Findings** provides **Download Markdown report** and **Download JSON export** for the active case. Exports include findings (with suggested actions), observation summaries, and entity/relationship counts. Use exports for case notes or handoff — they remain advisory, not proof of risk.
+Generate a readable Markdown report for the active case under **Archive → Report**.
+
+1. Select the case in the sidebar.
+2. Open **Archive → Report**.
+3. Choose options:
+   - **Include closed findings** — off by default; only open findings are included when unchecked.
+   - **Include raw output appendix** — off by default; when enabled, observation raw output is appended in code blocks.
+4. Click **Generate / refresh report preview**.
+5. Review the preview, then **Save report to reports/** or **Download Markdown report**.
+
+Reports are saved locally to the project `reports/` directory (for example `reports/my_case_1_20260622_143000.md`). This folder is excluded from Git.
+
+#### Report sections
+
+| Section | Contents |
+|---------|----------|
+| Case Summary | Name, status, dates, description |
+| Executive Summary | Counts, open findings, highest severity, modules used |
+| Scope and Notes | Local-data disclaimer |
+| Entities | Grouped by type with value, label, source, confidence, notes |
+| Relationships | `source → type → target` with module and confidence |
+| Observations | Grouped by module; title, type, date, summary (no raw output by default) |
+| Findings | Grouped by severity; explanation and suggested actions |
+| Suggested Next Actions | Deduplicated list from open findings |
+| Appendix | Raw outputs when enabled, otherwise a short note |
+
+Findings in reports are analyst aids, not proof of risk. Review and redact sensitive content before sharing externally.
+
+#### Report templates and export formats (v1.0)
+
+| Template | Contents |
+|----------|----------|
+| **Full technical** | All sections including entities, relationships, observations, findings, and appendix |
+| **Executive summary** | Case summary, executive summary, findings (condensed), and suggested actions |
+
+Additional options:
+
+- **JSON export** — structured case data for tooling or archival
+- **HTML export** — browser-readable report; use Print → Save as PDF for a PDF copy
+- **Entity graph snapshot** — PNG in the appendix when Plotly/kaleido is available
+- **Redaction** — optional masking of IP addresses, emails, and domain names before export
+- **Batch export** — export multiple cases to `reports/` in Markdown, HTML, or JSON
+
+Optional dependency for graph PNG snapshots: `pip install kaleido`
+
+#### Advanced reporting (v1.1)
+
+| Feature | Description |
+|---------|-------------|
+| **Native PDF** | Save/download PDF via WeasyPrint (`pip install weasyprint`) |
+| **Encrypted export** | Password-protected `.enc` files in `exports/` (`cryptography` package) |
+| **Organisation branding** | Organisation name, analyst, classification label, footer — saved in `config/report_settings.json` |
+| **Advanced redaction** | Custom terms (one per line) and regex patterns (`pattern|||replacement`) |
+| **Scheduled export** | Auto-export open cases when the Report tab is opened — configure in `config/report_schedule.json` |
+
+Review and redact all exports before sharing externally. Encrypted files require the same password to decrypt.
 
 ### Entity graph severity (v0.9)
 
@@ -373,7 +428,12 @@ utils/
   domain_intel_interpreter.py  Domain intelligence findings interpreter
   findings_registry.py       Module interpreter registry for findings pipeline
   findings_sync.py           Upsert and supersede findings on module completion
-  case_report.py             Markdown and JSON case export builders
+  report_builder.py          Markdown case report builder and save helper
+  report_export.py           HTML/JSON/PDF export, batch export, graph snapshots
+  report_encryption.py       Password-protected encrypted exports
+  report_settings.py         Branding and schedule settings (local config)
+  report_scheduler.py        Scheduled export runner
+  report_redaction.py        Redaction helpers for external sharing
   graph_view.py                NetworkX + Plotly graph rendering
 requirements.txt                 Python dependencies
 ```

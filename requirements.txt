@@ -42,3 +42,9 @@ typing_extensions==4.15.0
 urllib3==2.7.0
 uvicorn==0.49.0
 websockets==16.0
+
+# Optional report export dependencies (install as needed):
+# cryptography — encrypted exports
+# weasyprint — native PDF export (may require system libraries on macOS/Linux)
+# kaleido — entity graph PNG snapshots in reports
+cryptography==44.0.2

@@ -28,4 +28,6 @@ database/*.sqlite3
 logs/
 reports/
 exports/
+config/report_settings.json
+config/report_schedule.json
 *.log
