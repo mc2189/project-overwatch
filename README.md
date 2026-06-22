@@ -1,4 +1,4 @@
-# Project Overwatch v1.13
+# Project Overwatch v1.14
 
 Project Overwatch is a **local** Python/Streamlit dashboard for defensive security intelligence. It helps analysts organise investigations into **cases**, collect data with authorised **active** scans and **passive** lookups, interpret results as advisory **findings**, and export **reports** — all stored in a local SQLite database on your machine.
 
@@ -477,6 +477,61 @@ The **Evidence Locker** preserves source artefacts from module runs:
 - **Findings page** filters by evidence type, reliability, and linked evidence presence
 - **Graph page** can highlight or hide entities based on Evidence Locker items
 - **Domain Intelligence** observations use source-aware evidence metadata (DNS vs HTTP/TLS)
+
+## Developing new modules
+
+Before adding WHOIS, VirusTotal, Sherlock, or other collectors, use the **Module SDK** (`utils/module_sdk.py`) and the template skeleton (`modules/TEMPLATE_module.py`).
+
+### Standard result contract
+
+Every module run should return a dictionary normalised by `normalise_result()`:
+
+```python
+{
+    "module_id": "infra_example",
+    "success": True,
+    "status": "completed",           # completed | completed_with_warnings | partial | blocked | error
+    "summary": "Human-readable summary",
+    "raw_output": "...",
+    "findings": [],                  # legacy string lines and/or structured items
+    "warnings": [],
+    "errors": [],
+    "data": {},                      # structured parsed payload (legacy alias: parsed_data)
+    "evidence": [],                  # optional evidence locker hints
+    "interpreter_findings": [],      # optional advisory finding dicts (interpreter pipeline)
+}
+```
+
+Use `build_module_result()` and helpers `add_warning()`, `add_error()`, `add_finding()`. Validate with `validate_module_result()` during development.
+
+### Registry metadata requirements
+
+Register each module in `modules/module_registry.py` with at least:
+
+- `module_id`, `display_name`, `category`, `status`, `mode`, `risk_level`
+- `implemented`, `requires_authorisation`, `requires_api_key`
+- `accepted_target_types` (must match `utils/target_detection.get_target_type()` values)
+- `short_help` or `description`, plus `example_inputs` for implemented modules
+
+Run `validate_module_registry()` or check **Settings → System status** for metadata warnings.
+
+### Compatibility and evidence expectations
+
+- Declare compatible target types in the registry; the executor blocks incompatible targets.
+- Active modules require analyst authorisation confirmation before running.
+- API-key modules must list `api_key_names` and pass settings preflight.
+- Persisted **observations**, **findings**, and **Evidence Locker** items are created by the executor — module backends should focus on collection and the standard result payload.
+- Copy `modules/TEMPLATE_module.py` as a starting point (it is not registered or executed).
+
+### Testing
+
+```bash
+python scripts/smoke_check.py
+```
+
+Smoke checks verify SDK helpers, registry metadata for implemented modules, executor imports, evidence locker integration, and VirusTotal mock lookups — no live network required.
+
+Unit tests live in `tests/test_module_sdk.py`. CI runs both smoke check and unit tests (see `.github/workflows/smoke_check.yml`).
 
 ## Development
 

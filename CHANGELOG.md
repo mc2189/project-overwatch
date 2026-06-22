@@ -2,6 +2,25 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v1.15.0 — Evidence hints, binary storage, VirusTotal and CI
+
+- **`capture_result_evidence_hints()`** — module `result["evidence"]` hints are stored automatically after module-specific capture
+- **Binary artefact storage** — `content_bytes` support in `create_evidence_item()` with file spill to `database/evidence_files/`
+- **`intel_virustotal`** — first API-backed module (IPv4, domain, URL) with interpreter, evidence capture, and executor wiring
+- **`utils/virustotal_interpreter.py`** — cautious advisory findings from VirusTotal detection counts
+- **CI** — GitHub Actions workflow runs `scripts/smoke_check.py` and `tests/test_module_sdk.py`
+- **`tests/test_module_sdk.py`** — unit tests for SDK helpers and registry validation
+
+## v1.14.0 — Module SDK, output contract and test harness
+
+- **`utils/module_sdk.py`** — `build_module_result()`, result normalisation/validation, registry metadata validation
+- Standard result contract: `module_id`, `success`, `status`, `summary`, `raw_output`, `findings`, `warnings`, `errors`, `data`, `evidence`
+- **`modules/TEMPLATE_module.py`** — non-executed example skeleton for future modules
+- Executor `make_result()` delegates to SDK; persistence calls `normalise_result()` / validation warnings
+- Runtime health: module registry validation, implemented-module metadata, API-key configuration gaps
+- Smoke check: SDK helpers, registry validation, implemented module metadata, evidence locker imports
+- README: **Developing new modules** section
+
 ## v1.13.0 — Evidence linking, filters and file spill
 
 - **`evidence_finding_links` table** — many-to-many evidence↔finding relationships

@@ -1751,6 +1751,13 @@ def calculate_content_hash(content_text: str | None) -> str | None:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def calculate_content_hash_bytes(content_bytes: bytes | None) -> str | None:
+    """Return a SHA-256 hash for binary content, or None when empty."""
+    if not content_bytes:
+        return None
+    return hashlib.sha256(content_bytes).hexdigest()
+
+
 def create_evidence_item(
     case_id: int,
     module_id: str,
@@ -1758,6 +1765,7 @@ def create_evidence_item(
     *,
     summary: str | None = None,
     content_text: str | None = None,
+    content_bytes: bytes | None = None,
     content_type: str = "text/plain",
     entity_id: int | None = None,
     observation_id: int | None = None,
@@ -1772,10 +1780,13 @@ def create_evidence_item(
     captured_at: str | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
-    """Create a text artefact in the evidence locker."""
+    """Create a text or binary artefact in the evidence locker."""
     from utils.evidence_storage import (
+        inline_binary_preview,
         inline_evidence_content,
+        should_spill_bytes,
         should_spill_content,
+        spill_binary_content,
         spill_evidence_content,
     )
 
@@ -1784,10 +1795,21 @@ def create_evidence_item(
         conn = get_db_conn()
     try:
         raw_content = None if content_text and _content_looks_like_secret(content_text) else content_text
-        spill = should_spill_content(raw_content) and storage_path is None
-        hash_source = raw_content if raw_content else None
-        content_hash = calculate_content_hash(hash_source)
-        stored_text = inline_evidence_content(raw_content or "", spilled=spill) if raw_content else None
+        raw_bytes = content_bytes if content_bytes else None
+        spill = storage_path is None and (
+            should_spill_bytes(raw_bytes) if raw_bytes else should_spill_content(raw_content)
+        )
+        if raw_bytes:
+            content_hash = calculate_content_hash_bytes(raw_bytes)
+            stored_text = inline_binary_preview(raw_bytes, spilled=spill)
+            if raw_content and not spill:
+                stored_text = raw_content
+            elif raw_content and spill:
+                stored_text = inline_evidence_content(raw_content, spilled=True)
+        else:
+            hash_source = raw_content if raw_content else None
+            content_hash = calculate_content_hash(hash_source)
+            stored_text = inline_evidence_content(raw_content or "", spilled=spill) if raw_content else None
         now = captured_at or datetime.now(timezone.utc).isoformat()
         cursor = conn.cursor()
         cursor.execute(
@@ -1821,17 +1843,28 @@ def create_evidence_item(
             ),
         )
         evidence_id = cursor.lastrowid
-        if spill and raw_content and evidence_id is not None:
-            spilled_path = spill_evidence_content(
-                case_id,
-                int(evidence_id),
-                raw_content,
-                content_type=content_type,
-            )
-            conn.execute(
-                "UPDATE evidence_items SET storage_path = ? WHERE id = ?",
-                (spilled_path, evidence_id),
-            )
+        if spill and evidence_id is not None:
+            if raw_bytes:
+                spilled_path = spill_binary_content(
+                    case_id,
+                    int(evidence_id),
+                    raw_bytes,
+                    content_type=content_type,
+                )
+            elif raw_content:
+                spilled_path = spill_evidence_content(
+                    case_id,
+                    int(evidence_id),
+                    raw_content,
+                    content_type=content_type,
+                )
+            else:
+                spilled_path = None
+            if spilled_path:
+                conn.execute(
+                    "UPDATE evidence_items SET storage_path = ? WHERE id = ?",
+                    (spilled_path, evidence_id),
+                )
         if finding_id is not None and evidence_id is not None:
             conn.execute(
                 """

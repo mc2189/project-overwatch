@@ -1007,6 +1007,7 @@ def _check_evidence_locker() -> None:
         "database.db_setup",
         fromlist=[
             "calculate_content_hash",
+            "calculate_content_hash_bytes",
             "create_evidence_item",
             "create_finding",
             "create_observation",
@@ -1023,11 +1024,15 @@ def _check_evidence_locker() -> None:
     )
     storage = __import__(
         "utils.evidence_storage",
-        fromlist=["should_spill_content", "EVIDENCE_INLINE_MAX_BYTES"],
+        fromlist=["should_spill_content", "should_spill_bytes", "EVIDENCE_INLINE_MAX_BYTES"],
     )
     capture = __import__(
         "utils.evidence_capture",
-        fromlist=["capture_module_evidence", "capture_nmap_evidence"],
+        fromlist=[
+            "capture_module_evidence",
+            "capture_nmap_evidence",
+            "capture_result_evidence_hints",
+        ],
     )
     backup = __import__(
         "utils.case_backup",
@@ -1154,6 +1159,46 @@ def _check_evidence_locker() -> None:
         )
         if not large_item.get("storage_path"):
             raise AssertionError("large evidence item should spill to storage_path")
+
+        binary_hash = db.calculate_content_hash_bytes(b"binary evidence smoke")
+        if not binary_hash or len(binary_hash) != 64:
+            raise AssertionError("calculate_content_hash_bytes should return SHA-256 hex digest")
+
+        if not storage.should_spill_bytes(b"x" * (storage.EVIDENCE_INLINE_MAX_BYTES + 1)):
+            raise AssertionError("should_spill_bytes threshold failed")
+
+        binary_item = db.create_evidence_item(
+            case["id"],
+            "infra_nmap",
+            "Binary smoke item",
+            content_bytes=b"binary-smoke-payload",
+            content_text="Binary preview note",
+            content_type="application/octet-stream",
+            entity_id=entity["id"],
+            conn=conn,
+        )
+        if not binary_item.get("content_hash"):
+            raise AssertionError("binary evidence item should store content_hash")
+
+        hint_items = capture.capture_result_evidence_hints(
+            conn,
+            case_id=case["id"],
+            entity_id=entity["id"],
+            observation_id=observation["id"],
+            module_id="infra_nmap",
+            result={
+                "evidence": [
+                    {
+                        "title": "SDK evidence hint",
+                        "summary": "Smoke test hint capture",
+                        "content_text": "hint body",
+                        "source_name": "smoke_check",
+                    }
+                ]
+            },
+        )
+        if len(hint_items) != 1:
+            raise AssertionError("capture_result_evidence_hints should create one item")
     finally:
         conn.close()
 
@@ -1274,6 +1319,165 @@ def _check_result_quality() -> None:
         raise AssertionError("source notices should not count as review findings in combined summary")
 
 
+def _check_module_sdk() -> None:
+    sdk = __import__(
+        "utils.module_sdk",
+        fromlist=[
+            "STATUS_COMPLETED",
+            "STATUS_ERROR",
+            "build_module_result",
+            "add_warning",
+            "add_error",
+            "add_finding",
+            "is_successful_result",
+            "normalise_result",
+            "validate_module_result",
+            "validate_module_registry",
+            "validate_module_metadata",
+            "validate_implemented_modules",
+        ],
+    )
+    result = sdk.build_module_result(
+        "smoke_test",
+        sdk.STATUS_COMPLETED,
+        "Smoke SDK result",
+        success=True,
+        data={"example": True},
+        findings=["example finding"],
+        evidence=[{"title": "Example evidence"}],
+    )
+    sdk.add_warning(result, "example warning")
+    if not sdk.is_successful_result(result):
+        raise AssertionError("build_module_result should be successful")
+    normalized = sdk.normalise_result({"module_id": "legacy", "status": "completed", "parsed_data": {"a": 1}})
+    if not normalized.get("data") or not normalized.get("parsed_data"):
+        raise AssertionError("normalise_result should sync data and parsed_data")
+    validation = sdk.validate_module_result(normalized)
+    if not validation["ok"] and validation["errors"]:
+        raise AssertionError(f"validate_module_result failed: {validation['errors']}")
+
+    registry = __import__("modules.module_registry", fromlist=["MODULES", "get_module"])
+    registry_check = sdk.validate_module_registry()
+    if registry_check["module_count"] != len(registry.MODULES):
+        raise AssertionError("validate_module_registry module_count mismatch")
+    implemented_check = sdk.validate_implemented_modules()
+    if not implemented_check["ok"]:
+        raise AssertionError(f"implemented modules failed metadata validation: {implemented_check['errors']}")
+    for module_id in (
+        "infra_nmap",
+        "infra_domain_intel",
+        "infra_cert_subdomain",
+        "infra_website_metadata",
+        "intel_virustotal",
+    ):
+        module = registry.get_module(module_id)
+        if module is None:
+            raise AssertionError(f"missing module: {module_id}")
+        meta = sdk.validate_module_metadata(module)
+        if not meta["ok"]:
+            raise AssertionError(f"{module_id} metadata errors: {meta['errors']}")
+
+    executor = __import__("modules.executor", fromlist=["make_result", "execute_module"])
+    executor_result = executor.make_result(
+        "infra_nmap",
+        success=True,
+        status="completed",
+        summary="SDK smoke via make_result",
+        parsed_data={"ports": []},
+    )
+    for field in ("findings", "warnings", "errors", "data", "evidence"):
+        if field not in executor_result:
+            raise AssertionError(f"make_result missing field: {field}")
+
+    __import__("utils.report_builder", fromlist=["build_case_report"])
+    __import__("database.db_setup", fromlist=["list_evidence_items"])
+    __import__("ui.evidence_page", fromlist=["render_evidence_page"])
+
+
+def _check_virustotal_module() -> None:
+    import importlib.util
+
+    registry = __import__("modules.module_registry", fromlist=["get_module"])
+    module = registry.get_module("intel_virustotal")
+    if module is None or not module.implemented:
+        raise AssertionError("intel_virustotal should be implemented")
+    if module.accepted_target_types != ("ipv4", "domain", "url"):
+        raise AssertionError("intel_virustotal accepted_target_types mismatch")
+
+    executor = __import__("modules.executor", fromlist=["is_runtime_ready"])
+    if not executor.is_runtime_ready("intel_virustotal"):
+        raise AssertionError("intel_virustotal runtime should be ready")
+
+    vt_path = PROJECT_ROOT / "modules" / "4_threat_intel" / "intel_virustotal.py"
+    spec = importlib.util.spec_from_file_location("intel_virustotal_smoke", vt_path)
+    if spec is None or spec.loader is None:
+        raise AssertionError("could not load intel_virustotal module")
+    vt_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(vt_mod)
+
+    mock_payload = {
+        "data": {
+            "type": "domain",
+            "id": "smoke.example",
+            "attributes": {
+                "last_analysis_stats": {
+                    "malicious": 2,
+                    "suspicious": 1,
+                    "harmless": 50,
+                    "undetected": 10,
+                },
+                "reputation": -3,
+            },
+        }
+    }
+    lookup = vt_mod.run_virustotal_lookup(
+        "smoke.example",
+        api_key="smoke-test-key",
+        options={"mock_response": mock_payload},
+    )
+    if not lookup.get("success"):
+        raise AssertionError("mock VirusTotal lookup should succeed")
+    if not lookup.get("parsed_data", {}).get("last_analysis_stats"):
+        raise AssertionError("mock VirusTotal lookup missing stats")
+    if not lookup.get("evidence"):
+        raise AssertionError("mock VirusTotal lookup should declare evidence hints")
+
+    interpreter = __import__(
+        "utils.virustotal_interpreter",
+        fromlist=["interpret_virustotal_results"],
+    )
+    findings = interpreter.interpret_virustotal_results(lookup["parsed_data"])
+    if not findings:
+        raise AssertionError("virustotal interpreter should return findings")
+    if findings[0].get("severity") != "high":
+        raise AssertionError("malicious detections should produce high severity finding")
+
+    findings_registry = __import__(
+        "utils.findings_registry",
+        fromlist=["interpret_module_findings", "module_has_findings_pipeline"],
+    )
+    if not findings_registry.module_has_findings_pipeline("intel_virustotal"):
+        raise AssertionError("intel_virustotal should have findings pipeline")
+    pipeline_findings = findings_registry.interpret_module_findings(
+        "intel_virustotal",
+        lookup["parsed_data"],
+    )
+    if not pipeline_findings:
+        raise AssertionError("findings pipeline returned no virustotal findings")
+
+
+def _check_module_sdk_unit_tests() -> None:
+    import unittest
+
+    loader = unittest.TestLoader()
+    suite = loader.loadTestsFromName("tests.test_module_sdk")
+    result = unittest.TextTestRunner(verbosity=0).run(suite)
+    if not result.wasSuccessful():
+        raise AssertionError(
+            f"module SDK unit tests failed: failures={len(result.failures)} errors={len(result.errors)}"
+        )
+
+
 def main() -> int:
     print(f"Project Overwatch smoke check (root: {PROJECT_ROOT})")
     errors = 0
@@ -1298,6 +1502,11 @@ def main() -> int:
     run(
         "module registry",
         lambda: len(__import__("modules.module_registry", fromlist=["MODULES"]).MODULES) > 0,
+    )
+
+    run(
+        "module SDK",
+        lambda: _check_module_sdk(),
     )
 
     run("executor", lambda: __import__("modules.executor", fromlist=["execute_module"]))
@@ -1373,6 +1582,16 @@ def main() -> int:
     run(
         "cert subdomain module",
         lambda: _check_cert_subdomain_module(),
+    )
+
+    run(
+        "virustotal module",
+        lambda: _check_virustotal_module(),
+    )
+
+    run(
+        "module SDK unit tests",
+        lambda: _check_module_sdk_unit_tests(),
     )
 
     run(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import sqlite3
 from typing import Any
@@ -18,6 +19,19 @@ from utils.evidence_model import (
 )
 
 # Large artefacts spill to database/evidence_files/ when content exceeds EVIDENCE_INLINE_MAX_BYTES.
+
+
+def _decode_hint_bytes(value: Any) -> bytes | None:
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, str):
+        try:
+            return base64.b64decode(value, validate=True)
+        except Exception:
+            return value.encode("utf-8")
+    return None
 
 
 def _text_summary(data: Any, *, max_len: int = 8000) -> str:
@@ -41,7 +55,8 @@ def _create_item(
     module_id: str,
     title: str,
     summary: str,
-    content_text: str,
+    content_text: str | None = None,
+    content_bytes: bytes | None = None,
     content_type: str = "text/plain",
     evidence_type: str | None = None,
     source_name: str | None = None,
@@ -57,6 +72,7 @@ def _create_item(
         title,
         summary=summary,
         content_text=content_text,
+        content_bytes=content_bytes,
         entity_id=entity_id,
         observation_id=observation_id,
         evidence_type=evidence_type or defaults.get("evidence_type"),
@@ -68,6 +84,56 @@ def _create_item(
         content_type=content_type,
         conn=conn,
     )
+
+
+def capture_result_evidence_hints(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    observation_id: int,
+    module_id: str,
+    result: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Create evidence locker items from result['evidence'] SDK hints."""
+    items: list[dict[str, Any]] = []
+    defaults = observation_evidence_for_module(module_id, result)
+
+    for hint in result.get("evidence") or []:
+        if not isinstance(hint, dict):
+            continue
+        title = str(hint.get("title") or "Module evidence artefact").strip()
+        if not title:
+            continue
+        content_text = hint.get("content_text")
+        if content_text is None and hint.get("content") is not None:
+            content = hint.get("content")
+            content_text = content if isinstance(content, str) else _text_summary(content)
+        content_bytes = _decode_hint_bytes(hint.get("content_bytes"))
+        if not content_text and not content_bytes:
+            continue
+
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title=title,
+                summary=str(hint.get("summary") or "Evidence artefact declared by module result contract."),
+                content_text=str(content_text) if content_text else None,
+                content_bytes=content_bytes,
+                content_type=str(hint.get("content_type") or "text/plain"),
+                evidence_type=hint.get("evidence_type") or defaults.get("evidence_type"),
+                source_name=hint.get("source_name") or defaults.get("source_name"),
+                source_url=hint.get("source_url") or defaults.get("source_url"),
+                collection_method=hint.get("collection_method") or defaults.get("collection_method"),
+                reliability=hint.get("reliability") or defaults.get("reliability"),
+                confidence=hint.get("confidence"),
+            )
+        )
+    return items
 
 
 def capture_nmap_evidence(
@@ -385,6 +451,94 @@ def capture_website_metadata_evidence(
     return items
 
 
+def capture_virustotal_evidence(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    observation_id: int,
+    module_id: str,
+    result: dict[str, Any],
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    parsed_data = result.get("parsed_data") or {}
+    raw_response = parsed_data.get("raw_response")
+    api_meta = parsed_data.get("api") or {}
+
+    if raw_response:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="VirusTotal API response",
+                summary="Third-party threat intelligence response from VirusTotal API v3.",
+                content_text=_text_summary(raw_response),
+                content_type="application/json",
+                evidence_type=EVIDENCE_THIRD_PARTY_SOURCE,
+                source_name="virustotal",
+                source_url="https://www.virustotal.com/",
+                collection_method="api_lookup",
+                reliability=RELIABILITY_MEDIUM,
+            )
+        )
+
+    stats = parsed_data.get("last_analysis_stats") or {}
+    if stats:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="VirusTotal analysis summary",
+                summary="Parsed detection counts and metadata from the VirusTotal lookup.",
+                content_text=_text_summary(
+                    {
+                        "target": parsed_data.get("target"),
+                        "target_type": parsed_data.get("target_type"),
+                        "resource_id": parsed_data.get("resource_id"),
+                        "last_analysis_stats": stats,
+                        "last_analysis_date": parsed_data.get("last_analysis_date"),
+                        "reputation": parsed_data.get("reputation"),
+                        "api": api_meta,
+                    }
+                ),
+                content_type="application/json",
+                evidence_type=EVIDENCE_THIRD_PARTY_SOURCE,
+                source_name="virustotal",
+                source_url="https://www.virustotal.com/",
+                collection_method="parser_inferred",
+                reliability=RELIABILITY_MEDIUM,
+            )
+        )
+
+    if api_meta.get("error"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="VirusTotal lookup limitation",
+                summary="VirusTotal source was unavailable or returned an error during this run.",
+                content_text=_text_summary(api_meta),
+                content_type="application/json",
+                evidence_type=EVIDENCE_UNAVAILABLE_SOURCE,
+                source_name="virustotal",
+                source_url="https://www.virustotal.com/",
+                collection_method="api_lookup",
+                reliability=RELIABILITY_UNKNOWN,
+            )
+        )
+
+    return items
+
+
 def capture_module_evidence(
     conn: sqlite3.Connection,
     *,
@@ -431,7 +585,29 @@ def capture_module_evidence(
             module_id=module_id,
             result=result,
         )
-    return []
+    if module_id == "intel_virustotal":
+        items = capture_virustotal_evidence(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            result=result,
+        )
+    else:
+        items = []
+
+    items.extend(
+        capture_result_evidence_hints(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            result=result,
+        )
+    )
+    return items
 
 
 def link_observation_evidence_to_findings(

@@ -8,11 +8,13 @@ from dataclasses import dataclass
 import streamlit as st
 
 from modules.executor import get_runtime_error, is_runtime_ready
+from utils.module_sdk import validate_implemented_modules, validate_module_registry
 from utils.settings_manager import (
     active_modules_enabled,
     configured_api_providers_count,
     general_settings_summary,
     missing_optional_api_providers_count,
+    validate_module_settings,
 )
 from version import PROJECT_VERSION
 
@@ -155,8 +157,53 @@ def collect_health_checks() -> list[HealthCheck]:
     checks.append(
         HealthCheck(
             "Encrypted export (cryptography)",
-            _optional_import("cryptography"),
-            "Available" if _optional_import("cryptography") else "Install cryptography",
+            (crypto_ok := _optional_import("cryptography")),
+            "Available" if crypto_ok else "Install cryptography",
+        )
+    )
+
+    registry_validation = validate_module_registry()
+    checks.append(
+        HealthCheck(
+            "Module registry metadata",
+            registry_validation["ok"],
+            "All registry entries valid"
+            if registry_validation["ok"]
+            else f"{len(registry_validation['errors'])} metadata error(s)",
+            required=False,
+        )
+    )
+
+    implemented_validation = validate_implemented_modules()
+    implemented_issues = implemented_validation["errors"] + implemented_validation["warnings"]
+    checks.append(
+        HealthCheck(
+            "Implemented module metadata",
+            implemented_validation["ok"] and not implemented_validation["warnings"],
+            "Implemented modules pass metadata checks"
+            if not implemented_issues
+            else f"{len(implemented_issues)} note(s) — see registry validation",
+            required=False,
+        )
+    )
+
+    from modules.module_registry import MODULES
+
+    api_key_gaps: list[str] = []
+    for module in MODULES:
+        if not module.implemented or not module.requires_api_key:
+            continue
+        validation = validate_module_settings(module.module_id)
+        if not validation["ok"]:
+            api_key_gaps.append(module.module_id)
+    checks.append(
+        HealthCheck(
+            "API-key module configuration",
+            len(api_key_gaps) == 0,
+            "All API-key modules configured"
+            if not api_key_gaps
+            else f"Missing keys: {', '.join(sorted(api_key_gaps))}",
+            required=False,
         )
     )
 

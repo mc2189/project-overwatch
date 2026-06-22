@@ -290,15 +290,28 @@ MODULES: list[ModuleEntry] = [
         display_name="VirusTotal",
         category="Threat Intel",
         description="Lookup files, URLs, and IPs against threat intelligence feeds.",
-        status="planned",
+        status="active",
         mode="passive",
         risk_level="low",
         requires_authorisation=False,
         requires_api_key=True,
-        implemented=False,
+        implemented=True,
+        accepted_target_types=("ipv4", "domain", "url"),
         api_key_names=("VIRUSTOTAL_API_KEY",),
-        config_notes="Requires VIRUSTOTAL_API_KEY in local .env. Planned — not available in this release.",
-        rate_limit_notes="Public API rate limits apply when implemented.",
+        config_notes="Requires VIRUSTOTAL_API_KEY in local .env.",
+        rate_limit_notes="Public API rate limits apply — batch queue courtesy delay applies.",
+        short_help="Passive VirusTotal lookup for an IPv4 address, domain, or URL.",
+        detailed_help=(
+            "Queries the VirusTotal API v3 for third-party engine detections and community metadata. "
+            "Detection counts are leads for analyst review — they do not confirm compromise or benign status."
+        ),
+        example_inputs=("203.0.113.10", "example.com", "https://example.com/path"),
+        output_summary="Engine detection counts, reputation hints, and advisory findings.",
+        caution_notes=(
+            "Third-party engine labels require manual verification.",
+            "Clean VirusTotal results do not prove a target is safe or in scope.",
+            "Respect VirusTotal API rate limits and terms of use.",
+        ),
     ),
     ModuleEntry(
         module_id="intel_abuseipdb",

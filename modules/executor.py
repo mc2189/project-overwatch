@@ -19,7 +19,7 @@ from modules.module_registry import get_module, is_executable
 from utils.findings_registry import interpret_module_findings
 from utils.findings_sync import sync_module_findings
 from utils.module_compatibility import get_incompatible_reason, module_accepts_target
-from utils.target_detection import get_target_type
+from utils.target_detection import ENTITY_TYPE_BY_TARGET, get_target_type
 from utils.nmap_options import SCRIPT_VULN, build_nmap_flags, normalize_options
 from utils.nmap_parser import build_service_entity_label, build_service_entity_value
 from utils.nmap_xml_parser import parse_nmap_results
@@ -30,12 +30,14 @@ from utils.result_status import (
 )
 from utils.evidence_model import observation_evidence_for_module
 from utils.evidence_capture import capture_module_evidence, link_observation_evidence_to_findings
+from utils.module_sdk import build_module_result, normalise_result, validate_module_result
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 NMAP_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_nmap.py"
 DOMAIN_INTEL_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_domain_intel.py"
 CERT_SUBDOMAIN_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_cert_subdomain.py"
 WEBSITE_METADATA_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_website_metadata.py"
+VIRUSTOTAL_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intel" / "intel_virustotal.py"
 
 _nmap_handlers: tuple[Any, Any] | None = None
 _nmap_load_error: str | None = None
@@ -49,6 +51,9 @@ _cert_subdomain_load_attempted = False
 _website_metadata_handler: Any | None = None
 _website_metadata_load_error: str | None = None
 _website_metadata_load_attempted = False
+_virustotal_handler: Any | None = None
+_virustotal_load_error: str | None = None
+_virustotal_load_attempted = False
 
 
 def _observation_evidence_kwargs(module_id: str, result: dict[str, Any]) -> dict[str, Any]:
@@ -69,6 +74,22 @@ def _observation_evidence_kwargs(module_id: str, result: dict[str, Any]) -> dict
     }
 
 
+def _prepare_module_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Normalise and attach non-fatal validation notes to a module result."""
+    normalized = normalise_result(result)
+    validation = validate_module_result(normalized)
+    if validation["errors"]:
+        for message in validation["errors"]:
+            note = f"Result validation error: {message}"
+            if note not in normalized["warnings"]:
+                normalized["warnings"].append(note)
+    for message in validation["warnings"]:
+        note = f"Result validation: {message}"
+        if note not in normalized["warnings"]:
+            normalized["warnings"].append(note)
+    return normalized
+
+
 def make_result(
     module_id: str,
     *,
@@ -82,25 +103,31 @@ def make_result(
     parsed_data: dict[str, Any] | None = None,
     interpreter_findings: list[dict[str, Any]] | None = None,
     selected_options: dict[str, Any] | None = None,
+    evidence: list[dict[str, Any]] | None = None,
+    data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a standard execution result payload."""
-    result: dict[str, Any] = {
-        "module_id": module_id,
-        "success": success,
-        "status": status,
-        "summary": summary,
-        "raw_output": raw_output,
-        "findings": findings or [],
-        "warnings": warnings or [],
-        "errors": errors or [],
-    }
-    if parsed_data is not None:
-        result["parsed_data"] = parsed_data
+    result = build_module_result(
+        module_id,
+        status,
+        summary,
+        success=success,
+        data=data or parsed_data,
+        findings=findings,
+        warnings=warnings,
+        errors=errors,
+        raw_output=raw_output,
+        evidence=evidence,
+    )
     if interpreter_findings is not None:
         result["interpreter_findings"] = interpreter_findings
     if selected_options is not None:
         result["selected_options"] = selected_options
-    return result
+    if parsed_data is not None:
+        result["parsed_data"] = parsed_data
+        if not result.get("data"):
+            result["data"] = parsed_data
+    return _prepare_module_result(result)
 
 
 def _load_nmap_handlers() -> None:
@@ -195,6 +222,29 @@ def _load_website_metadata_handler() -> None:
         _website_metadata_load_error = str(exc)
 
 
+def _load_virustotal_handler() -> None:
+    global _virustotal_handler, _virustotal_load_error, _virustotal_load_attempted
+
+    if _virustotal_load_attempted:
+        return
+
+    _virustotal_load_attempted = True
+
+    if not VIRUSTOTAL_MODULE_PATH.is_file():
+        _virustotal_load_error = f"Module file not found: {VIRUSTOTAL_MODULE_PATH}"
+        return
+
+    try:
+        spec = importlib.util.spec_from_file_location("intel_virustotal", VIRUSTOTAL_MODULE_PATH)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load module spec from {VIRUSTOTAL_MODULE_PATH}")
+        intel_virustotal = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(intel_virustotal)
+        _virustotal_handler = intel_virustotal.run_virustotal_lookup
+    except Exception as exc:
+        _virustotal_load_error = str(exc)
+
+
 def _nmap_binary_available() -> bool:
     return shutil.which("nmap") is not None
 
@@ -213,6 +263,9 @@ def is_runtime_ready(module_id: str) -> bool:
     if module_id == "infra_website_metadata":
         _load_website_metadata_handler()
         return _website_metadata_handler is not None
+    if module_id == "intel_virustotal":
+        _load_virustotal_handler()
+        return _virustotal_handler is not None
     return False
 
 
@@ -235,6 +288,9 @@ def get_runtime_error(module_id: str) -> str | None:
     if module_id == "infra_website_metadata":
         _load_website_metadata_handler()
         return _website_metadata_load_error
+    if module_id == "intel_virustotal":
+        _load_virustotal_handler()
+        return _virustotal_load_error
     return None
 
 
@@ -336,6 +392,7 @@ def _persist_investigation_records(
     run_mode_label: str | None = None,
 ) -> None:
     """Save operation and observation records for a completed module run."""
+    result = _prepare_module_result(result)
     create_operation_log(
         case_id,
         module_id,
@@ -429,6 +486,7 @@ def _persist_domain_intel_records(
     run_mode_label: str | None = None,
 ) -> None:
     """Save domain intelligence operations, observations, entities, and relationships."""
+    result = _prepare_module_result(result)
     create_operation_log(
         case_id,
         module_id,
@@ -570,6 +628,7 @@ def _persist_cert_subdomain_records(
     run_mode_label: str | None = None,
 ) -> None:
     """Save certificate/subdomain operations, observations, entities, and relationships."""
+    result = _prepare_module_result(result)
     create_operation_log(
         case_id,
         module_id,
@@ -674,6 +733,7 @@ def _persist_website_metadata_records(
     run_mode_label: str | None = None,
 ) -> None:
     """Save website metadata operations, observations, entities, and relationships."""
+    result = _prepare_module_result(result)
     create_operation_log(
         case_id,
         module_id,
@@ -780,6 +840,84 @@ def _persist_website_metadata_records(
             conn,
             case_id=case_id,
             entity_id=domain_entity_id,
+            observation_id=observation["id"],
+            module_id=module_id,
+            interpreter_findings=interpreter_findings,
+        )
+
+
+def _persist_virustotal_records(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    module_id: str,
+    target: str,
+    result: dict[str, Any],
+    authorisation_confirmed: bool,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> None:
+    """Save VirusTotal operations, observations, and findings."""
+    result = _prepare_module_result(result)
+    create_operation_log(
+        case_id,
+        module_id,
+        target,
+        result["status"],
+        authorisation_confirmed=authorisation_confirmed,
+        summary=result["summary"],
+        run_mode_id=run_mode_id,
+        run_mode_label=run_mode_label,
+        conn=conn,
+    )
+
+    if not should_persist_observation(result["status"]):
+        return
+
+    parsed_data = result.get("parsed_data") or {}
+    observation = create_observation(
+        case_id,
+        entity_id,
+        module_id,
+        "threat_intel_lookup",
+        "VirusTotal lookup result",
+        summary=result["summary"],
+        data_json=json.dumps(
+            {
+                "module_id": module_id,
+                "success": result["success"],
+                "status": result["status"],
+                "findings": result.get("findings", []),
+                "interpreter_findings": result.get("interpreter_findings", []),
+                "warnings": result.get("warnings", []),
+                "target": parsed_data.get("target"),
+                "target_type": parsed_data.get("target_type"),
+                "last_analysis_stats": parsed_data.get("last_analysis_stats", {}),
+                "reputation": parsed_data.get("reputation"),
+                "api": parsed_data.get("api", {}),
+            }
+        ),
+        raw_output=result["raw_output"],
+        **_observation_evidence_kwargs(module_id, result),
+        conn=conn,
+    )
+
+    _persist_observation_evidence(
+        conn,
+        case_id=case_id,
+        entity_id=entity_id,
+        observation_id=observation["id"],
+        module_id=module_id,
+        result=result,
+    )
+
+    interpreter_findings = result.get("interpreter_findings") or []
+    if interpreter_findings:
+        _persist_module_findings(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
             observation_id=observation["id"],
             module_id=module_id,
             interpreter_findings=interpreter_findings,
@@ -1206,6 +1344,96 @@ def _execute_website_metadata(
     return result
 
 
+def _execute_virustotal(
+    module_id: str,
+    target: str,
+    options: dict[str, Any],
+    db_context: sqlite3.Connection | None,
+    authorisation_confirmed: bool,
+    case_id: int | None,
+    entity_id: int | None,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> dict[str, Any]:
+    _load_virustotal_handler()
+    if _virustotal_handler is None:
+        error_message = _virustotal_load_error or "VirusTotal module is not available."
+        return make_result(
+            module_id,
+            success=False,
+            status="error",
+            summary="VirusTotal module is not available.",
+            errors=[error_message],
+        )
+
+    from utils.settings_manager import get_env
+
+    api_key = get_env("VIRUSTOTAL_API_KEY") or ""
+    target_type = get_target_type(target)
+    intel_data = _virustotal_handler(
+        target,
+        api_key=api_key,
+        target_type=target_type,
+        options=options,
+    )
+    if not intel_data.get("success") and intel_data.get("errors"):
+        errors = intel_data.get("errors") or ["VirusTotal lookup failed."]
+        return make_result(
+            module_id,
+            success=False,
+            status="error",
+            summary=errors[0],
+            raw_output=intel_data.get("raw_output", ""),
+            errors=errors,
+            parsed_data=intel_data.get("parsed_data"),
+            warnings=intel_data.get("warnings", []),
+            evidence=intel_data.get("evidence", []),
+        )
+
+    parsed_data = intel_data.get("parsed_data") or {}
+    lookup_target = parsed_data.get("target") or target
+    interpreter_findings = interpret_module_findings(module_id, parsed_data)
+    summary = f"VirusTotal lookup completed for {lookup_target}."
+    warnings = list(intel_data.get("warnings") or [])
+    status = intel_data.get("status") or STATUS_COMPLETED
+    result = make_result(
+        module_id,
+        success=True,
+        status=status,
+        summary=summary,
+        raw_output=intel_data.get("raw_output", ""),
+        findings=intel_data.get("findings", []),
+        warnings=warnings,
+        parsed_data=parsed_data,
+        interpreter_findings=interpreter_findings,
+        evidence=intel_data.get("evidence", []),
+    )
+
+    if db_context is not None and case_id is not None:
+        entity_type = ENTITY_TYPE_BY_TARGET.get(parsed_data.get("target_type") or target_type, "unknown")
+        target_entity = create_or_get_entity(
+            case_id,
+            entity_type,
+            lookup_target,
+            label=lookup_target,
+            source=module_id,
+            conn=db_context,
+        )
+        _persist_virustotal_records(
+            db_context,
+            case_id=case_id,
+            entity_id=target_entity["id"],
+            module_id=module_id,
+            target=lookup_target,
+            result=result,
+            authorisation_confirmed=authorisation_confirmed,
+            run_mode_id=run_mode_id,
+            run_mode_label=run_mode_label,
+        )
+
+    return result
+
+
 def execute_module(
     module_id: str,
     target: str,
@@ -1384,6 +1612,28 @@ def execute_module(
         return _execute_website_metadata(
             module_id,
             target,
+            db_context,
+            authorisation_confirmed,
+            case_id,
+            entity_id,
+            run_mode_id,
+            run_mode_label,
+        )
+
+    if module_id == "intel_virustotal":
+        if not is_runtime_ready(module_id):
+            error_message = get_runtime_error(module_id) or "VirusTotal runtime is not ready."
+            return make_result(
+                module_id,
+                success=False,
+                status="error",
+                summary="VirusTotal module is not available.",
+                errors=[error_message],
+            )
+        return _execute_virustotal(
+            module_id,
+            target,
+            options,
             db_context,
             authorisation_confirmed,
             case_id,

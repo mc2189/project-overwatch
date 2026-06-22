@@ -103,6 +103,13 @@ MODULE_EVIDENCE_DEFAULTS: dict[str, dict[str, Any]] = {
         "reliability": RELIABILITY_HIGH,
         "collection_method": "http_request",
     },
+    "intel_virustotal": {
+        "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
+        "source_name": "virustotal",
+        "source_url": "https://www.virustotal.com/",
+        "reliability": RELIABILITY_MEDIUM,
+        "collection_method": "api_lookup",
+    },
 }
 
 RELATIONSHIP_EVIDENCE_DEFAULTS: dict[tuple[str, str], dict[str, Any]] = {
@@ -237,6 +244,11 @@ def observation_evidence_for_module(
     if module_id == "infra_cert_subdomain":
         meta["source_name"] = "crt.sh"
         meta["source_url"] = "https://crt.sh/"
+    if module_id == "intel_virustotal" and result is not None:
+        parsed = result.get("parsed_data") or {}
+        if parsed.get("api", {}).get("error"):
+            meta["reliability"] = RELIABILITY_UNKNOWN
+            meta["evidence_type"] = EVIDENCE_UNAVAILABLE_SOURCE
     return meta
 
 
