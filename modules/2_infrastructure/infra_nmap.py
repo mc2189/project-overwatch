@@ -1,5 +1,4 @@
 import subprocess
-import os
 
 def parse_nmap_problems(scan_text):
     """Identifies 'Critical' findings in raw text output."""
