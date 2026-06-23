@@ -808,6 +808,135 @@ def capture_greynoise_evidence(
     return items
 
 
+def capture_shodan_evidence(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    observation_id: int,
+    module_id: str,
+    result: dict[str, Any],
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    parsed_data = result.get("parsed_data") or {}
+    raw_response = parsed_data.get("raw_response")
+    api_meta = parsed_data.get("api") or {}
+
+    if parsed_data.get("private_local_ip"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Private/local IP — no Shodan lookup",
+                summary="Public internet-exposure lookup is not applicable for private/local addresses.",
+                content_text=(
+                    "Private/local IP address — public Shodan internet-exposure lookup is not applicable."
+                ),
+                content_type="text/plain",
+                evidence_type=EVIDENCE_SYSTEM_GENERATED,
+                source_name="Shodan",
+                collection_method="policy_skip",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+        return items
+
+    if api_meta.get("error") == "Shodan API key is not configured." or api_meta.get("status_code") in {401, 403}:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Shodan API key not configured",
+                summary="Shodan lookup was blocked because the API key is missing or rejected.",
+                content_text=_text_summary(api_meta),
+                content_type="application/json",
+                evidence_type=EVIDENCE_SYSTEM_GENERATED,
+                source_name="Shodan",
+                collection_method="policy_skip",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+        return items
+
+    if raw_response:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Shodan API response",
+                summary="Third-party host exposure response from Shodan (redacted summary, no exploit detail).",
+                content_text=_text_summary(raw_response),
+                content_type="application/json",
+                evidence_type=EVIDENCE_THIRD_PARTY_SOURCE,
+                source_name="Shodan",
+                source_url="https://www.shodan.io/",
+                collection_method="api_exposure_lookup",
+                reliability=RELIABILITY_MEDIUM,
+            )
+        )
+
+    if parsed_data.get("services") or parsed_data.get("service_count"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Shodan service exposure summary",
+                summary="Parsed service/port exposure summary reported by Shodan.",
+                content_text=_text_summary(
+                    {
+                        "target": parsed_data.get("target"),
+                        "ip_address": parsed_data.get("ip_address"),
+                        "service_count": parsed_data.get("service_count"),
+                        "ports": parsed_data.get("ports"),
+                        "services": (parsed_data.get("services") or [])[:25],
+                        "last_update": parsed_data.get("last_update"),
+                        "vulnerability_count": parsed_data.get("vulnerability_count"),
+                    }
+                ),
+                content_type="application/json",
+                evidence_type=EVIDENCE_THIRD_PARTY_SOURCE,
+                source_name="Shodan",
+                source_url="https://www.shodan.io/",
+                collection_method="api_exposure_lookup",
+                reliability=RELIABILITY_MEDIUM,
+            )
+        )
+
+    if api_meta.get("error") or api_meta.get("status_code") == 429:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Shodan lookup limitation",
+                summary="Shodan source was unavailable, rate limited, or returned an error.",
+                content_text=_text_summary(api_meta),
+                content_type="application/json",
+                evidence_type=EVIDENCE_UNAVAILABLE_SOURCE,
+                source_name="Shodan",
+                source_url="https://www.shodan.io/",
+                collection_method="api_exposure_lookup",
+                reliability=RELIABILITY_UNKNOWN,
+            )
+        )
+
+    return items
+
+
 def capture_whois_rdap_evidence(
     conn: sqlite3.Connection,
     *,
@@ -979,6 +1108,15 @@ def capture_module_evidence(
         )
     elif module_id == "intel_greynoise":
         items = capture_greynoise_evidence(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            result=result,
+        )
+    elif module_id == "intel_shodan":
+        items = capture_shodan_evidence(
             conn,
             case_id=case_id,
             entity_id=entity_id,

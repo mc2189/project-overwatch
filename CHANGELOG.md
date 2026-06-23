@@ -2,6 +2,22 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.5.0 — Shodan Internet Exposure Intelligence
+
+- **`intel_shodan`** — passive Shodan host lookup for public IPv4 via `GET /shodan/host/{ip}`
+- Module path: `modules/4_threat_intelligence/intel_shodan.py`
+- Requires `SHODAN_API_KEY` in local `.env` — blocked cleanly when missing (not a target risk finding)
+- Public IPv4 only — domains/URLs incompatible; private/local IPs complete with informational result (no API query)
+- Host lookup only — no Shodan scan, search, alert, streaming, or exploit APIs
+- HTTP handling for 200/400/401/403/404/429/5xx, timeouts, and connection errors
+- Shodan `key=` query parameters redacted from logs, evidence, reports, and persisted output
+- Cautious findings interpreter — “reported by Shodan”, not “confirmed open”
+- Service, organisation, ASN, and hostname entities with `reported_exposes_service`, `associated_with`, and `has_hostname` relationships
+- Evidence capture with `api_exposure_lookup` collection method; vulnerability references stored as count only
+- Run mode recommendations for public IPv4 in Quick Check and Local Device / IP Check when key configured
+- Settings, Batch Queue, Entity Workspace, Evidence Locker, and reports integration
+- UI summary tab for org/ISP/ASN, ports, services, and stale-data caution; raw JSON and service details collapsed
+
 ## v2.4.0 — GreyNoise Internet Noise Intelligence
 
 - **`intel_greynoise`** — passive internet-noise and RIOT lookup for public IPv4 via GreyNoise v3 Community API

@@ -241,6 +241,20 @@ def _check_settings_manager() -> None:
     if not gn_validation["ok"]:
         raise AssertionError("intel_greynoise should pass validation without API key")
 
+    shodan = registry.get_module("intel_shodan")
+    if shodan is None or not shodan.implemented:
+        raise AssertionError("intel_shodan should be implemented")
+    if not shodan.requires_api_key:
+        raise AssertionError("intel_shodan should require API key")
+    if shodan.api_key_names != ("SHODAN_API_KEY",):
+        raise AssertionError("intel_shodan api_key_names mismatch")
+    if shodan.accepted_target_types != ("ipv4",):
+        raise AssertionError("intel_shodan accepted_target_types mismatch")
+    if not settings.has_api_key("SHODAN_API_KEY"):
+        shodan_validation = settings.validate_module_settings("intel_shodan")
+        if shodan_validation["ok"]:
+            raise AssertionError("intel_shodan should fail validation without API key")
+
     providers = settings.list_api_provider_status()
     if len(providers) < 8:
         raise AssertionError("expected at least 8 API provider definitions")
@@ -1629,6 +1643,7 @@ def _check_module_sdk() -> None:
         "intel_virustotal",
         "intel_abuseipdb",
         "intel_greynoise",
+        "intel_shodan",
     ):
         module = registry.get_module(module_id)
         if module is None:
@@ -1939,6 +1954,126 @@ def _check_greynoise_module() -> None:
         raise AssertionError("findings pipeline returned no greynoise findings")
 
 
+def _check_shodan_module() -> None:
+    import importlib.util
+    import json
+
+    registry = __import__("modules.module_registry", fromlist=["get_module"])
+    module = registry.get_module("intel_shodan")
+    if module is None or not module.implemented:
+        raise AssertionError("intel_shodan should be implemented")
+    if module.display_name != "Shodan Internet Exposure Intelligence":
+        raise AssertionError("intel_shodan display_name mismatch")
+    if module.accepted_target_types != ("ipv4",):
+        raise AssertionError("intel_shodan accepted_target_types mismatch")
+    if module.api_key_names != ("SHODAN_API_KEY",):
+        raise AssertionError("intel_shodan api_key_names mismatch")
+
+    executor = __import__("modules.executor", fromlist=["is_runtime_ready"])
+    if not executor.is_runtime_ready("intel_shodan"):
+        raise AssertionError("intel_shodan runtime should be ready")
+
+    shodan_path = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_shodan.py"
+    spec = importlib.util.spec_from_file_location("intel_shodan_smoke", shodan_path)
+    if spec is None or spec.loader is None:
+        raise AssertionError("could not load intel_shodan module")
+    shodan_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(shodan_mod)
+
+    missing = shodan_mod.run_shodan_lookup("8.8.8.8", api_key="")
+    if missing.get("status") != "blocked":
+        raise AssertionError("missing API key should return blocked status")
+    if "Shodan API key is not configured" not in str(missing.get("errors")):
+        raise AssertionError("missing API key message mismatch")
+
+    private = shodan_mod.run_shodan_lookup("192.168.1.1", api_key="smoke-test-key", target_type="ipv4")
+    if not private.get("success") or not private.get("parsed_data", {}).get("private_local_ip"):
+        raise AssertionError("private IP should complete without API query")
+
+    domain_blocked = shodan_mod.run_shodan_lookup("example.com", api_key="smoke-test-key")
+    if domain_blocked.get("status") != "blocked":
+        raise AssertionError("domain target should be blocked for shodan")
+
+    mock_payload = {
+        "ip_str": "8.8.8.8",
+        "org": "Google",
+        "isp": "Google LLC",
+        "asn": "AS15169",
+        "country_name": "United States",
+        "city": "Mountain View",
+        "hostnames": ["dns.google"],
+        "domains": ["dns.google"],
+        "ports": [53, 443],
+        "tags": ["dns"],
+        "last_update": "2024-06-01T00:00:00",
+        "vulns": ["CVE-EXAMPLE-1"],
+        "data": [
+            {
+                "port": 53,
+                "transport": "udp",
+                "product": "Unbound",
+                "timestamp": "2024-06-01T00:00:00",
+                "_shodan": {"module": "dns-udp"},
+            },
+            {
+                "port": 443,
+                "transport": "tcp",
+                "product": "nginx",
+                "ssl": {"cert": {}},
+                "http": {"title": "Google Public DNS"},
+                "_shodan": {"module": "https"},
+            },
+        ],
+    }
+    lookup = shodan_mod.run_shodan_lookup(
+        "8.8.8.8",
+        api_key="smoke-test-key",
+        options={"mock_response": mock_payload},
+    )
+    if not lookup.get("success"):
+        raise AssertionError("mock Shodan lookup should succeed")
+    parsed = lookup.get("parsed_data") or {}
+    if parsed.get("service_count", 0) < 1:
+        raise AssertionError("mock Shodan lookup missing service count")
+    if not lookup.get("evidence"):
+        raise AssertionError("mock Shodan lookup should declare evidence hints")
+    raw = lookup.get("raw_output") or ""
+    if "smoke-test-key" in raw:
+        raise AssertionError("raw_output must not contain API key")
+    if "CVE-EXAMPLE-1" in json.dumps(parsed):
+        raise AssertionError("parsed_data should not persist vulnerability identifiers")
+
+    interpreter = __import__(
+        "utils.shodan_interpreter",
+        fromlist=["interpret_shodan_results"],
+    )
+    findings = interpreter.interpret_shodan_results(parsed)
+    if not findings:
+        raise AssertionError("shodan interpreter should return findings")
+
+    findings_registry = __import__(
+        "utils.findings_registry",
+        fromlist=["interpret_module_findings", "module_has_findings_pipeline"],
+    )
+    if not findings_registry.module_has_findings_pipeline("intel_shodan"):
+        raise AssertionError("intel_shodan should have findings pipeline")
+    pipeline_findings = findings_registry.interpret_module_findings("intel_shodan", parsed)
+    if not pipeline_findings:
+        raise AssertionError("findings pipeline returned no shodan findings")
+
+    security = __import__("utils.security", fromlist=["redact_secrets_from_text"])
+    probe_url = "".join(
+        (
+            "https://api.shodan.io/shodan/host/8.8.8.8?",
+            "key=",
+            "supersecretshodankey123",
+        )
+    )
+    redacted = security.redact_secrets_from_text(probe_url)
+    if "supersecretshodankey123" in redacted:
+        raise AssertionError("shodan URL key redaction failed in smoke path")
+
+
 def _check_api_module_helpers() -> None:
     import time
 
@@ -2181,6 +2316,11 @@ def main() -> int:
     run(
         "greynoise module",
         lambda: _check_greynoise_module(),
+    )
+
+    run(
+        "shodan module",
+        lambda: _check_shodan_module(),
     )
 
     run(

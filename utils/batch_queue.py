@@ -23,6 +23,7 @@ PASSIVE_BATCH_MODULE_IDS: tuple[str, ...] = (
     "intel_virustotal",
     "intel_abuseipdb",
     "intel_greynoise",
+    "intel_shodan",
 )
 
 ACTIVE_BATCH_MODULE_IDS: tuple[str, ...] = ("infra_nmap",)

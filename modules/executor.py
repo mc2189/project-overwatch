@@ -43,6 +43,7 @@ WHOIS_RDAP_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_
 VIRUSTOTAL_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_virustotal.py"
 ABUSEIPDB_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_abuseipdb.py"
 GREYNOISE_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_greynoise.py"
+SHODAN_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_shodan.py"
 
 _nmap_handlers: tuple[Any, Any] | None = None
 _nmap_load_error: str | None = None
@@ -68,6 +69,9 @@ _abuseipdb_load_attempted = False
 _greynoise_handler: Any | None = None
 _greynoise_load_error: str | None = None
 _greynoise_load_attempted = False
+_shodan_handler: Any | None = None
+_shodan_load_error: str | None = None
+_shodan_load_attempted = False
 
 
 def _observation_evidence_kwargs(module_id: str, result: dict[str, Any]) -> dict[str, Any]:
@@ -328,6 +332,29 @@ def _load_greynoise_handler() -> None:
         _greynoise_load_error = str(exc)
 
 
+def _load_shodan_handler() -> None:
+    global _shodan_handler, _shodan_load_error, _shodan_load_attempted
+
+    if _shodan_load_attempted:
+        return
+
+    _shodan_load_attempted = True
+
+    if not SHODAN_MODULE_PATH.is_file():
+        _shodan_load_error = f"Module file not found: {SHODAN_MODULE_PATH}"
+        return
+
+    try:
+        spec = importlib.util.spec_from_file_location("intel_shodan", SHODAN_MODULE_PATH)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load module spec from {SHODAN_MODULE_PATH}")
+        intel_shodan = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(intel_shodan)
+        _shodan_handler = intel_shodan.run_shodan_lookup
+    except Exception as exc:
+        _shodan_load_error = str(exc)
+
+
 def _nmap_binary_available() -> bool:
     return shutil.which("nmap") is not None
 
@@ -358,6 +385,9 @@ def is_runtime_ready(module_id: str) -> bool:
     if module_id == "intel_greynoise":
         _load_greynoise_handler()
         return _greynoise_handler is not None
+    if module_id == "intel_shodan":
+        _load_shodan_handler()
+        return _shodan_handler is not None
     return False
 
 
@@ -392,6 +422,9 @@ def get_runtime_error(module_id: str) -> str | None:
     if module_id == "intel_greynoise":
         _load_greynoise_handler()
         return _greynoise_load_error
+    if module_id == "intel_shodan":
+        _load_shodan_handler()
+        return _shodan_load_error
     return None
 
 
@@ -1537,6 +1570,205 @@ def _persist_greynoise_entities(
     )
 
 
+def _persist_shodan_records(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    module_id: str,
+    target: str,
+    result: dict[str, Any],
+    authorisation_confirmed: bool,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> None:
+    """Save Shodan operations, observations, and findings."""
+    result = _prepare_module_result(result)
+    create_operation_log(
+        case_id,
+        module_id,
+        target,
+        result["status"],
+        authorisation_confirmed=authorisation_confirmed,
+        summary=result["summary"],
+        run_mode_id=run_mode_id,
+        run_mode_label=run_mode_label,
+        conn=conn,
+    )
+
+    if not should_persist_observation(result["status"]):
+        return
+
+    parsed_data = result.get("parsed_data") or {}
+    observation = create_observation(
+        case_id,
+        entity_id,
+        module_id,
+        "threat_intel_lookup",
+        "Shodan lookup result",
+        summary=result["summary"],
+        data_json=json.dumps(
+            {
+                "module_id": module_id,
+                "success": result["success"],
+                "status": result["status"],
+                "findings": result.get("findings", []),
+                "interpreter_findings": result.get("interpreter_findings", []),
+                "warnings": result.get("warnings", []),
+                "target": parsed_data.get("target"),
+                "ip_address": parsed_data.get("ip_address"),
+                "service_count": parsed_data.get("service_count"),
+                "ports": parsed_data.get("ports"),
+                "organisation": parsed_data.get("organisation"),
+                "api": parsed_data.get("api", {}),
+            }
+        ),
+        raw_output=result["raw_output"],
+        **_observation_evidence_kwargs(module_id, result),
+        conn=conn,
+    )
+
+    _persist_observation_evidence(
+        conn,
+        case_id=case_id,
+        entity_id=entity_id,
+        observation_id=observation["id"],
+        module_id=module_id,
+        result=result,
+    )
+
+    interpreter_findings = result.get("interpreter_findings") or []
+    if interpreter_findings:
+        _persist_module_findings(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation["id"],
+            module_id=module_id,
+            interpreter_findings=interpreter_findings,
+        )
+
+    _persist_shodan_entities(
+        conn,
+        case_id=case_id,
+        source_entity_id=entity_id,
+        module_id=module_id,
+        target=target,
+        parsed_data=parsed_data,
+    )
+
+
+def _persist_shodan_entities(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    source_entity_id: int,
+    module_id: str,
+    target: str,
+    parsed_data: dict[str, Any],
+) -> None:
+    """Create service, organisation, ASN, and hostname entities from Shodan metadata."""
+    if parsed_data.get("private_local_ip"):
+        return
+
+    org_value = parsed_data.get("organisation") or parsed_data.get("isp")
+    if org_value:
+        org_entity = create_or_get_entity(
+            case_id,
+            "organization",
+            str(org_value),
+            label=str(org_value),
+            source=module_id,
+            confidence=70,
+            conn=conn,
+        )
+        create_relationship(
+            case_id,
+            source_entity_id,
+            "associated_with",
+            org_entity["id"],
+            source_module=module_id,
+            confidence=70,
+            conn=conn,
+        )
+
+    asn = parsed_data.get("asn")
+    if asn not in (None, ""):
+        asn_label = str(asn) if str(asn).upper().startswith("AS") else f"AS{asn}"
+        asn_entity = create_or_get_entity(
+            case_id,
+            "asn",
+            asn_label,
+            label=asn_label,
+            source=module_id,
+            confidence=70,
+            conn=conn,
+        )
+        create_relationship(
+            case_id,
+            source_entity_id,
+            "associated_with",
+            asn_entity["id"],
+            source_module=module_id,
+            confidence=70,
+            conn=conn,
+        )
+
+    for hostname in (parsed_data.get("hostnames") or [])[:10]:
+        hostname_text = str(hostname).strip()
+        if not hostname_text:
+            continue
+        host_entity = create_or_get_entity(
+            case_id,
+            "domain",
+            hostname_text,
+            label=hostname_text,
+            source=module_id,
+            confidence=70,
+            conn=conn,
+        )
+        create_relationship(
+            case_id,
+            source_entity_id,
+            "has_hostname",
+            host_entity["id"],
+            source_module=module_id,
+            confidence=70,
+            conn=conn,
+        )
+
+    services = parsed_data.get("services") or []
+    for service in services[:25]:
+        port = service.get("port")
+        if port is None:
+            continue
+        protocol = str(service.get("transport") or "tcp").lower()
+        port_info = {
+            "port": port,
+            "protocol": protocol,
+            "service": service.get("module") or service.get("product") or "",
+            "version": service.get("version") or "",
+        }
+        service_entity = create_or_get_entity(
+            case_id,
+            "service",
+            build_service_entity_value(target, port_info),
+            label=build_service_entity_label(port_info),
+            source=module_id,
+            confidence=65,
+            conn=conn,
+        )
+        create_relationship(
+            case_id,
+            source_entity_id,
+            "reported_exposes_service",
+            service_entity["id"],
+            source_module=module_id,
+            confidence=65,
+            conn=conn,
+        )
+
+
 def _scan_output_text(scan_data: dict[str, Any]) -> str:
     parts = [
         scan_data.get("raw_output", ""),
@@ -2374,6 +2606,115 @@ def _execute_greynoise(
     return result
 
 
+def _execute_shodan(
+    module_id: str,
+    target: str,
+    options: dict[str, Any],
+    db_context: sqlite3.Connection | None,
+    authorisation_confirmed: bool,
+    case_id: int | None,
+    entity_id: int | None,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> dict[str, Any]:
+    _load_shodan_handler()
+    if _shodan_handler is None:
+        error_message = _shodan_load_error or "Shodan module is not available."
+        return make_result(
+            module_id,
+            success=False,
+            status="error",
+            summary="Shodan module is not available.",
+            errors=[error_message],
+        )
+
+    from utils.settings_manager import get_env
+
+    api_key = get_env("SHODAN_API_KEY") or ""
+    target_type = get_target_type(target)
+    intel_data = _shodan_handler(
+        target,
+        api_key=api_key,
+        target_type=target_type,
+        options=options,
+    )
+    status = intel_data.get("status") or STATUS_ERROR
+    parsed_data = intel_data.get("parsed_data") or {}
+    lookup_target = parsed_data.get("ip_address") or parsed_data.get("target") or target
+    interpreter_findings = interpret_module_findings(module_id, parsed_data)
+    warnings = list(intel_data.get("warnings") or [])
+    errors = list(intel_data.get("errors") or [])
+
+    if not intel_data.get("success"):
+        summary = errors[0] if errors else "Shodan lookup failed."
+        result = make_result(
+            module_id,
+            success=False,
+            status=status,
+            summary=summary,
+            raw_output=intel_data.get("raw_output", ""),
+            errors=errors,
+            parsed_data=parsed_data,
+            warnings=warnings,
+            evidence=intel_data.get("evidence", []),
+            interpreter_findings=interpreter_findings,
+        )
+        if db_context is not None and case_id is not None:
+            create_operation_log(
+                case_id,
+                module_id,
+                lookup_target,
+                result["status"],
+                authorisation_confirmed=authorisation_confirmed,
+                summary=summary,
+                run_mode_id=run_mode_id,
+                run_mode_label=run_mode_label,
+                conn=db_context,
+            )
+        return result
+
+    if parsed_data.get("private_local_ip"):
+        summary = "Private/local IP address — public Shodan internet-exposure lookup is not applicable."
+    else:
+        summary = f"Shodan internet-exposure lookup completed for {lookup_target}."
+    status = intel_data.get("status") or STATUS_COMPLETED
+    result = make_result(
+        module_id,
+        success=True,
+        status=status,
+        summary=summary,
+        raw_output=intel_data.get("raw_output", ""),
+        findings=intel_data.get("findings", []),
+        warnings=warnings,
+        parsed_data=parsed_data,
+        interpreter_findings=interpreter_findings,
+        evidence=intel_data.get("evidence", []),
+    )
+
+    if db_context is not None and case_id is not None:
+        target_entity = create_or_get_entity(
+            case_id,
+            "ipv4",
+            lookup_target,
+            label=lookup_target,
+            source=module_id,
+            conn=db_context,
+        )
+        _persist_shodan_records(
+            db_context,
+            case_id=case_id,
+            entity_id=target_entity["id"],
+            module_id=module_id,
+            target=lookup_target,
+            result=result,
+            authorisation_confirmed=authorisation_confirmed,
+            run_mode_id=run_mode_id,
+            run_mode_label=run_mode_label,
+        )
+
+    return result
+
+
 def execute_module(
     module_id: str,
     target: str,
@@ -2662,6 +3003,28 @@ def execute_module(
                 errors=[error_message],
             )
         return _execute_greynoise(
+            module_id,
+            target,
+            options,
+            db_context,
+            authorisation_confirmed,
+            case_id,
+            entity_id,
+            run_mode_id,
+            run_mode_label,
+        )
+
+    if module_id == "intel_shodan":
+        if not is_runtime_ready(module_id):
+            error_message = get_runtime_error(module_id) or "Shodan runtime is not ready."
+            return make_result(
+                module_id,
+                success=False,
+                status="error",
+                summary="Shodan module is not available.",
+                errors=[error_message],
+            )
+        return _execute_shodan(
             module_id,
             target,
             options,

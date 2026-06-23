@@ -19,6 +19,7 @@ API_REPUTATION_MODULE_IDS: frozenset[str] = frozenset({
     "intel_virustotal",
     "intel_abuseipdb",
     "intel_greynoise",
+    "intel_shodan",
 })
 
 _LAST_API_REQUEST_MONOTONIC: float | None = None
@@ -43,7 +44,7 @@ def respect_api_courtesy_delay() -> None:
     """Pause before a live API request if the previous lookup was too recent.
 
     Uses PROJECT_OVERWATCH_RATE_LIMIT_SECONDS (default 1.5s). Applies across
-    VirusTotal, AbuseIPDB, GreyNoise and future API reputation modules so
+    VirusTotal, AbuseIPDB, GreyNoise, Shodan and future API reputation modules so
     Run Operation, Entity Workspace, and Batch Queue do not hammer providers.
     """
     global _LAST_API_REQUEST_MONOTONIC

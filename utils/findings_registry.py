@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from utils.greynoise_interpreter import interpret_greynoise_results
+from utils.shodan_interpreter import interpret_shodan_results
 from utils.abuseipdb_interpreter import interpret_abuseipdb_results
 from utils.cert_subdomain_interpreter import interpret_cert_subdomain_results
 from utils.domain_intel_interpreter import interpret_domain_intel_results
@@ -22,6 +23,10 @@ def _interpret_cert_subdomain(parsed_data: dict[str, Any], _options: dict[str, A
 
 def _interpret_domain_intel(parsed_data: dict[str, Any], _options: dict[str, Any]) -> list[dict[str, Any]]:
     return interpret_domain_intel_results(parsed_data)
+
+
+def _interpret_shodan(parsed_data: dict[str, Any], _options: dict[str, Any]) -> list[dict[str, Any]]:
+    return interpret_shodan_results(parsed_data)
 
 
 def _interpret_greynoise(parsed_data: dict[str, Any], _options: dict[str, Any]) -> list[dict[str, Any]]:
@@ -57,6 +62,7 @@ MODULE_FINDING_INTERPRETERS: dict[str, InterpreterFn] = {
     "intel_virustotal": _interpret_virustotal,
     "intel_abuseipdb": _interpret_abuseipdb,
     "intel_greynoise": _interpret_greynoise,
+    "intel_shodan": _interpret_shodan,
 }
 
 

@@ -12,6 +12,7 @@ from utils.whois_rdap_helpers import is_public_ipv4
 VIRUSTOTAL_MODULE_ID = "intel_virustotal"
 ABUSEIPDB_MODULE_ID = "intel_abuseipdb"
 GREYNOISE_MODULE_ID = "intel_greynoise"
+SHODAN_MODULE_ID = "intel_shodan"
 
 QUICK_CHECK = "quick_check"
 WEBSITE_FOOTPRINT = "website_footprint"
@@ -117,6 +118,10 @@ def _greynoise_available() -> bool:
     return True
 
 
+def _shodan_configured() -> bool:
+    return has_api_key("SHODAN_API_KEY")
+
+
 def _append_reputation_modules(
     modules: list[str],
     *,
@@ -132,6 +137,8 @@ def _append_reputation_modules(
         updated.append(ABUSEIPDB_MODULE_ID)
     if target and _greynoise_recommended(mode_id, target_type, target) and GREYNOISE_MODULE_ID not in updated:
         updated.append(GREYNOISE_MODULE_ID)
+    if target and _shodan_recommended(mode_id, target_type, target) and SHODAN_MODULE_ID not in updated:
+        updated.append(SHODAN_MODULE_ID)
     return updated
 
 
@@ -163,6 +170,18 @@ def _abuseipdb_recommended(mode_id: str, target_type: str, target: str | None) -
 
 def _greynoise_recommended(mode_id: str, target_type: str, target: str | None) -> bool:
     if not _greynoise_available():
+        return False
+    if target_type != "ipv4" or not target:
+        return False
+    if is_private_or_local_ip(target):
+        return False
+    if not is_public_ipv4(target):
+        return False
+    return mode_id in {QUICK_CHECK, LOCAL_IP_CHECK, CUSTOM}
+
+
+def _shodan_recommended(mode_id: str, target_type: str, target: str | None) -> bool:
+    if not _shodan_configured():
         return False
     if target_type != "ipv4" or not target:
         return False

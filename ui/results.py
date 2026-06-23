@@ -263,6 +263,68 @@ def render_result_summary_tab(result: dict) -> None:
         if api.get("error") and not parsed_data.get("private_local_ip"):
             st.caption(f"GreyNoise note: {api['error']}")
 
+    if result["module_id"] == "intel_shodan" and parsed_data:
+        st.caption(
+            "Results reported by Shodan — third-party exposure observations only. "
+            "Data may be stale and is not proof services are currently open."
+        )
+        st.markdown(f"**Target:** {parsed_data.get('ip_address') or parsed_data.get('target') or '—'}")
+        if parsed_data.get("private_local_ip"):
+            st.info("Private/local IP — public Shodan internet-exposure lookup is not applicable.")
+        else:
+            if parsed_data.get("organisation"):
+                st.markdown(f"**Organisation:** {parsed_data['organisation']}")
+            if parsed_data.get("isp"):
+                st.markdown(f"**ISP:** {parsed_data['isp']}")
+            if parsed_data.get("asn"):
+                st.markdown(f"**ASN:** {parsed_data['asn']}")
+            location_bits = [
+                part
+                for part in (parsed_data.get("city"), parsed_data.get("country_name"))
+                if part
+            ]
+            if location_bits:
+                st.markdown(f"**Location:** {', '.join(location_bits)}")
+            if parsed_data.get("hostnames"):
+                st.markdown(f"**Hostnames:** {', '.join(str(item) for item in parsed_data['hostnames'][:10])}")
+            if parsed_data.get("domains"):
+                st.markdown(f"**Domains:** {', '.join(str(item) for item in parsed_data['domains'][:10])}")
+            if parsed_data.get("service_count") is not None:
+                st.markdown(f"**Service count:** {parsed_data['service_count']}")
+            if parsed_data.get("ports"):
+                port_text = ", ".join(str(port) for port in parsed_data["ports"][:30])
+                st.markdown(f"**Ports (summary):** {port_text}")
+            if parsed_data.get("last_update"):
+                st.markdown(f"**Last Shodan update:** {parsed_data['last_update']}")
+                st.caption("Shodan timestamps reflect when data was last observed by Shodan — not a live scan.")
+            services = parsed_data.get("services") or []
+            if services:
+                notable = services[:12]
+                rows = [
+                    {
+                        "port": item.get("port"),
+                        "transport": item.get("transport"),
+                        "product": item.get("product"),
+                        "version": item.get("version"),
+                        "ssl": item.get("ssl_present"),
+                        "title": item.get("title"),
+                        "module": item.get("module"),
+                    }
+                    for item in notable
+                ]
+                with st.expander("Notable reported services (collapsed)", expanded=False):
+                    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+            if parsed_data.get("vulnerability_count"):
+                st.caption(
+                    f"Shodan metadata references {parsed_data['vulnerability_count']} vulnerability "
+                    "identifier(s) — references only, not validated here."
+                )
+        api = parsed_data.get("api") or {}
+        if api.get("status_code") == 429:
+            st.warning("Shodan rate limit reached — retry later.")
+        if api.get("error") and not parsed_data.get("private_local_ip"):
+            st.caption(f"Shodan note: {api['error']}")
+
     if result["module_id"] == "infra_website_metadata" and parsed_data:
         homepage = parsed_data.get("homepage") or {}
         if homepage.get("page_title"):
@@ -351,6 +413,18 @@ def render_result_module_output_tab(result: dict) -> None:
 
             with st.expander("Raw GreyNoise API response", expanded=False):
                 st.json(redact_secrets_from_dict(raw_response))
+
+    if result["module_id"] == "intel_shodan" and parsed_data:
+        raw_response = parsed_data.get("raw_response")
+        if raw_response:
+            from utils.security import redact_secrets_from_dict
+
+            with st.expander("Raw Shodan API response", expanded=False):
+                st.json(redact_secrets_from_dict(raw_response))
+        services = parsed_data.get("services") or []
+        if services:
+            with st.expander("Full reported service summaries (collapsed)", expanded=False):
+                st.dataframe(pd.DataFrame(services), width="stretch", hide_index=True)
 
     if result["module_id"] == "infra_cert_subdomain":
         subdomains = parsed_data.get("subdomains") or []
@@ -470,6 +544,8 @@ def render_result_structured_tab(result: dict) -> None:
     if result["module_id"] == "intel_abuseipdb" and isinstance(parsed_data, dict):
         parsed_data = {key: value for key, value in parsed_data.items() if key != "raw_response"}
     if result["module_id"] == "intel_greynoise" and isinstance(parsed_data, dict):
+        parsed_data = {key: value for key, value in parsed_data.items() if key != "raw_response"}
+    if result["module_id"] == "intel_shodan" and isinstance(parsed_data, dict):
         parsed_data = {key: value for key, value in parsed_data.items() if key != "raw_response"}
     payload = {
         "selected_options": result.get("selected_options"),

@@ -133,6 +133,11 @@ def get_module_disable_reason(
                     "AbuseIPDB API key is not configured. "
                     "Add ABUSEIPDB_API_KEY to your local .env file."
                 )
+            if module.module_id == "intel_shodan":
+                return (
+                    "Shodan API key is not configured. "
+                    "Add SHODAN_API_KEY to your local .env file."
+                )
             missing = ", ".join(key_status["missing_keys"])
             return f"Missing required API key(s): {missing}. Add them to your local .env file."
     return None

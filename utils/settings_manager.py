@@ -56,6 +56,7 @@ API_PROVIDERS: tuple[ApiProviderSpec, ...] = (
         "Shodan",
         ("SHODAN_API_KEY",),
         ("intel_shodan",),
+        notes="Used by Shodan Internet Exposure Intelligence — key is masked here and never stored in the database.",
     ),
     ApiProviderSpec(
         "censys",
@@ -297,6 +298,15 @@ def validate_module_settings(module_id: str) -> dict[str, Any]:
                 "reason": (
                     "AbuseIPDB API key is not configured. "
                     "Add ABUSEIPDB_API_KEY to your local .env file."
+                ),
+                "missing_keys": key_status["missing_keys"],
+            }
+        if module.module_id == "intel_shodan":
+            return {
+                "ok": False,
+                "reason": (
+                    "Shodan API key is not configured. "
+                    "Add SHODAN_API_KEY to your local .env file."
                 ),
                 "missing_keys": key_status["missing_keys"],
             }

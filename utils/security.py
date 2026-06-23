@@ -39,6 +39,9 @@ _HIGH_ENTROPY_TOKEN = re.compile(
     r"[A-Za-z0-9+/=_\-]{32,}\b"
 )
 
+# Shodan commonly passes API keys as query parameters — never persist full request URLs.
+_SHODAN_KEY_QUERY = re.compile(r"([?&]key=)[^&\s\"'<>]+", re.IGNORECASE)
+
 _PLACEHOLDER_MARKERS = (
     "your_",
     "example",
@@ -155,6 +158,7 @@ def redact_secrets_from_text(text: str | None) -> str:
         return token
 
     redacted = _HIGH_ENTROPY_TOKEN.sub(_replace_entropy, redacted)
+    redacted = _SHODAN_KEY_QUERY.sub(lambda match: f"{match.group(1)}{REDACTED_SECRET}", redacted)
     return redacted
 
 

@@ -428,6 +428,22 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
                             "No GreyNoise API key configured — limited unauthenticated Community lookups may "
                             "still run. Add GREYNOISE_API_KEY to .env for authenticated lookups."
                         )
+                elif module_id == "intel_shodan":
+                    st.caption("Passive module — no authorisation required.")
+                    st.write(
+                        "Requires SHODAN_API_KEY in .env. The key is masked in Settings and must never "
+                        "be stored in observations, findings, evidence, reports or logs."
+                    )
+                    st.write(
+                        "Queries Shodan host API for passive internet-exposure context on public IPv4 addresses only. "
+                        "Host lookup only — does not trigger Shodan scans. Results are third-party observations and "
+                        "should be treated as reported intelligence, not confirmed current exposure."
+                    )
+                    if not has_api_key("SHODAN_API_KEY"):
+                        st.warning(
+                            "Shodan is unavailable — SHODAN_API_KEY is not configured in your local "
+                            ".env file. This module will be blocked until a key is set."
+                        )
         st.session_state.nmap_options = nmap_options
 
     st.divider()

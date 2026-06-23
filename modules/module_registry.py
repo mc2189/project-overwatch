@@ -439,18 +439,45 @@ MODULES: list[ModuleEntry] = [
     ),
     ModuleEntry(
         module_id="intel_shodan",
-        display_name="Shodan",
+        display_name="Shodan Internet Exposure Intelligence",
         category="Threat Intel",
-        description="Internet-wide device and service exposure search.",
-        status="planned",
+        description=(
+            "Passive Shodan host lookup for public IPv4 addresses to identify internet-exposed "
+            "services previously observed by Shodan."
+        ),
+        status="active",
         mode="passive",
         risk_level="low",
         requires_authorisation=False,
         requires_api_key=True,
-        implemented=False,
+        implemented=True,
+        accepted_target_types=("ipv4",),
         api_key_names=("SHODAN_API_KEY",),
-        config_notes="Requires SHODAN_API_KEY in local .env. Planned — not available in this release.",
-        rate_limit_notes="Query credits depend on your Shodan membership.",
+        config_notes=(
+            "Passive module — requires SHODAN_API_KEY in local .env. "
+            "Key is masked in Settings and must never be stored in observations, findings, evidence, "
+            "reports or logs. Host lookup only — does not trigger Shodan scans."
+        ),
+        rate_limit_notes="Shodan query credits depend on your plan — batch queue courtesy delay applies.",
+        short_help="Passive Shodan host exposure lookup for a public IPv4 address.",
+        detailed_help=(
+            "Queries the Shodan host API for third-party internet-exposure observations previously "
+            "collected by Shodan. Results are reported by Shodan — they may be stale or incomplete and "
+            "are not proof that services are currently open. Private/local IPv4 addresses are not queried. "
+            "Domains and URLs are not supported in v2.5."
+        ),
+        example_inputs=("8.8.8.8", "1.1.1.1"),
+        output_summary=(
+            "Organisation/ISP/ASN, hostnames, ports, service summaries, last update, "
+            "and cautious advisory findings."
+        ),
+        caution_notes=(
+            "Shodan results are third-party observations and may be stale or incomplete.",
+            "Reported services are not proof of current exposure — use authorised Nmap for local verification.",
+            "This module does not trigger Shodan on-demand scans, search, alerts, or streaming.",
+            "Respect Shodan API rate limits and terms of use.",
+            "API key must remain in .env only — never commit or paste into case notes.",
+        ),
     ),
     ModuleEntry(
         module_id="intel_censys",

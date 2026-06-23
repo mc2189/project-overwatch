@@ -233,6 +233,22 @@ RULES: list[tuple[str, str, re.Pattern[str], str, str, bool]] = [
         True,
     ),
     (
+        MEDIUM_SEVERITY,
+        "shodan api url with key",
+        re.compile(r"api\.shodan\.io[^\s\"']*[?&]key=[^&\s\"']+", re.IGNORECASE),
+        "Shodan API URL may expose a query-parameter API key.",
+        "Never log or persist full Shodan request URLs; redact key= values before storage.",
+        True,
+    ),
+    (
+        MEDIUM_SEVERITY,
+        "shodan request url logging",
+        re.compile(r"(?i)(?:log|print|debug|info|warning|error).{0,40}(?:response\.url|request\.url).{0,80}shodan"),
+        "Code may log Shodan HTTP request/response URLs that can contain API keys.",
+        "Log endpoint names and status codes only; never persist URLs with key= query parameters.",
+        True,
+    ),
+    (
         LOW_SEVERITY,
         "suspicious subprocess shell string",
         re.compile(r"""subprocess\.(?:run|Popen|call)\(\s*['"][^'"]*[;&|`$][^'"]*['"]"""),
