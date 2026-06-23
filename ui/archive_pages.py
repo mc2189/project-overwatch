@@ -544,6 +544,16 @@ def render_report_page(case_id: int, metrics: dict[str, int]) -> None:
             help="Adds client engagement, scope summary, ROE limitations, and authorised testing statement.",
             key="include_engagement_context",
         )
+        from utils.operating_context import PASSIVE_RESEARCH, list_operating_contexts, operating_context_label
+
+        st.selectbox(
+            "Operating context for report wording",
+            options=[mode_id for mode_id, _ in list_operating_contexts()],
+            format_func=operating_context_label,
+            index=0,
+            key="report_operating_context",
+            help="How this report should describe the testing context (Passive Research, Personal Lab, or Client Engagement).",
+        )
         redact_ips = st.checkbox("Redact IP addresses", key="redact_ips")
         redact_emails = st.checkbox("Redact email addresses", key="redact_emails")
         redact_domains = st.checkbox("Redact domain names", key="redact_domains")

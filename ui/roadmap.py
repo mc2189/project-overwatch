@@ -13,8 +13,9 @@ ROADMAP_SECTIONS: tuple[dict[str, object], ...] = (
         "title": "Active now",
         "description": (
             "Implemented modules available on Run Operation when compatible with the target. "
-            "Passive modules may run without a client engagement; active modules require authorisation "
-            "and engagement/scope controls where practical."
+            "Choose an operating context on Run Operation: **Passive Research** for passive OSINT, "
+            "**Personal Lab** for self-owned / authorised lab testing with confirmation, or "
+            "**Client Engagement** for formal client work with full scope and ROE controls."
         ),
         "module_ids": (
             "infra_whois_rdap",
@@ -110,7 +111,7 @@ def _render_module_card(module_id: str, extra_label: str | None = None) -> None:
     if module.accepted_target_types:
         st.caption("Target types: " + ", ".join(module.accepted_target_types))
     if module.requires_authorisation:
-        st.caption("Requires explicit authorisation and engagement/scope controls when enabled.")
+        st.caption("Requires explicit authorisation and the correct operating context (Personal Lab or Client Engagement).")
 
 
 def render_roadmap_page() -> None:
@@ -118,7 +119,8 @@ def render_roadmap_page() -> None:
     st.caption(
         "Project Overwatch supports passive OSINT today and is being extended for authorised client assessments. "
         "Intrusive tools are planned authorised assessment modules — not permanently excluded — but require "
-        "engagement records, scope, rules of engagement, and explicit approval before they can run."
+        "engagement records, scope, rules of engagement, and explicit approval before they can run. "
+        "Personal Lab Mode is for learning and owner-controlled testing without pretending to be a client engagement."
     )
 
     for section in ROADMAP_SECTIONS:

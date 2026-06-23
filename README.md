@@ -1,10 +1,10 @@
-# Project Overwatch v2.10
+# Project Overwatch v2.11
 
 Project Overwatch is a **local** Python/Streamlit intelligence, OSINT, security testing and resilience advisory dashboard for **private internal use** supporting future client assessments.
 
-**v2.10** adds **HTTP Security Header Review** — a controlled active HTTP response and security header module for authorised websites.
+**v2.11** adds **operating contexts** on Run Operation — Passive Research, Personal Lab, and Client Engagement — with clearer preflight guardrails for active modules.
 
-**v2.9** added SSL / TLS Configuration Review. **v2.8** added client engagements, scoped assets, rules of engagement, and executor guardrails. Earlier releases added passive OSINT modules and the secure-by-design baseline.
+**v2.10** adds **HTTP Security Header Review**. **v2.9** added SSL / TLS Configuration Review. **v2.8** added client engagements, scoped assets, rules of engagement, and executor guardrails.
 
 Use only on systems you own, lab environments, or targets with **written permission**.
 
@@ -94,6 +94,18 @@ Results appear automatically in Operations, Observations, Findings, Relationship
 - **Domain Email Security Posture** — passive SPF, DMARC, MX, CAA, MTA-STS, TLS-RPT and BIMI DNS review for domain or URL (no email sent).
 - **Certificate & Subdomain Intelligence** — passive certificate transparency names for domain or URL.
 - **Website Metadata Review** — passive homepage title, meta tags, headers, robots.txt, and sitemap hints for domain or URL.
+
+### Operating contexts (v2.11)
+
+Before running modules, choose **Operating context** on Run Operation:
+
+| Context | Use for | Active modules |
+|---------|---------|----------------|
+| **Passive Research** | OSINT and passive enrichment | Blocked — switch context for active checks |
+| **Personal Lab** | Your own systems, home network, lab devices | Allowed after Personal Lab confirmation and scope |
+| **Client Engagement** | Formal client assessments | Full engagement, scope, ROE, and authorisation checks |
+
+Personal Lab uses a separate scope table (not a fake client engagement). A preflight panel shows Ready / Needs action / Blocked with fix hints. Private/local IPs can be quick-added to Personal Lab scope.
 
 ### Guided run modes (v1.5)
 
@@ -509,7 +521,7 @@ Project Overwatch is intended to support a future **security testing / OSINT / r
 **Run Operation guardrails:**
 
 - Passive OSINT modules continue to work as today (scope warnings shown when an engagement is linked)
-- **Nmap**, **SSL / TLS Configuration Review**, and **HTTP Security Header Review** (and future active modules) require authorisation confirmation **and** engagement/scope checks (or explicit standalone authorised testing when no engagement is linked)
+- **Nmap**, **SSL / TLS Configuration Review**, and **HTTP Security Header Review** (and future active modules) require the correct **operating context** (Personal Lab or Client Engagement), authorisation confirmation, and scope/ROE checks as applicable
 - Out-of-scope and unknown targets block active/intrusive runs
 
 **Module testing levels:** passive lookup · safe active check · intrusive active check · high-risk manual only · prohibited
@@ -621,7 +633,7 @@ Saved reports go to `reports/` (gitignored). Encrypted exports go to `exports/`.
 ```
 main.py                    Streamlit entry point and navigation router
 ui/                        Run Operation, archive pages, findings, metrics
-version.py                 PROJECT_VERSION = "1.5.0"
+version.py                 PROJECT_VERSION = "2.11.0"
 scripts/smoke_check.py     Local sanity checks
 requirements-optional.txt  kaleido, weasyprint (optional)
 database/db_setup.py       SQLite schema and helpers

@@ -327,6 +327,8 @@ def execute_queue_items(
     *,
     db_conn: Any,
     authorisation_confirmed: bool = False,
+    operating_context: str | None = None,
+    personal_lab_confirmed: bool = False,
     nmap_options: dict[str, Any] | None = None,
     delay_seconds: float = DEFAULT_COURTESY_DELAY_SECONDS,
     stop_after_first: bool = False,
@@ -345,6 +347,13 @@ def execute_queue_items(
     nmap_options = nmap_options or default_options_for_profile(PROFILE_STANDARD)
     ran_passive = False
     executed_count = 0
+
+    from utils.operating_context import CLIENT_ENGAGEMENT, PERSONAL_LAB, PASSIVE_RESEARCH
+
+    context = operating_context or PASSIVE_RESEARCH
+    effective_auth = authorisation_confirmed or (
+        context == PERSONAL_LAB and personal_lab_confirmed
+    )
 
     for index, item in enumerate(updated):
         if item.get("queue_id") not in id_set:
@@ -366,7 +375,7 @@ def execute_queue_items(
             results.append({"queue_item": item, "result": None})
             continue
 
-        if module.requires_authorisation and not authorisation_confirmed:
+        if module.requires_authorisation and not effective_auth:
             item = {
                 **item,
                 "status": "blocked",
@@ -394,13 +403,15 @@ def execute_queue_items(
         options: dict[str, Any] = {}
         if item["module_id"] == "infra_nmap":
             options = {"nmap_options": nmap_options}
+        options["operating_context"] = context
+        options["personal_lab_confirmed"] = personal_lab_confirmed
 
         result = execute_module(
             item["module_id"],
             target_value,
             options=options,
             db_context=db_conn,
-            authorisation_confirmed=authorisation_confirmed,
+            authorisation_confirmed=effective_auth,
             case_id=case_id,
             entity_id=entity_row["id"],
             run_mode_id="batch_queue",

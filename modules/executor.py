@@ -3958,20 +3958,34 @@ def execute_module(
             )
         return result
 
-    from utils.engagement_guardrails import check_engagement_execution
+    from utils.operating_context import (
+        PERSONAL_LAB,
+        PERSONAL_LAB_CONFIRMATION_TEXT,
+        PERSONAL_LAB_CONFIRMATION_VERSION,
+        PASSIVE_RESEARCH,
+        check_module_execution_guardrails,
+    )
 
-    standalone_authorised = bool(options.get("standalone_authorised_testing"))
-    guardrail = check_engagement_execution(
+    operating_context = str(options.get("operating_context") or PASSIVE_RESEARCH)
+    personal_lab_confirmed = bool(options.get("personal_lab_confirmed"))
+    if "operating_context" not in options and authorisation_confirmed:
+        operating_context = PERSONAL_LAB
+        personal_lab_confirmed = True
+    elif options.get("standalone_authorised_testing"):
+        operating_context = PERSONAL_LAB
+        personal_lab_confirmed = personal_lab_confirmed or authorisation_confirmed
+    guardrail = check_module_execution_guardrails(
         module_id,
         target,
         case_id=case_id,
         authorisation_confirmed=authorisation_confirmed,
-        standalone_authorised_testing=standalone_authorised,
+        operating_context=operating_context,
+        personal_lab_confirmed=personal_lab_confirmed,
         options=options,
         conn=db_context,
     )
     if not guardrail["allowed"]:
-        reason = guardrail.get("blocked_reason") or "Engagement guardrail blocked this module run."
+        reason = guardrail.get("blocked_reason") or "Execution guardrail blocked this module run."
         result = make_result(
             module_id,
             success=False,
@@ -3994,7 +4008,28 @@ def execute_module(
             )
         return result
 
-    if module.requires_authorisation and not authorisation_confirmed:
+    if (
+        operating_context == PERSONAL_LAB
+        and personal_lab_confirmed
+        and db_context is not None
+        and case_id is not None
+    ):
+        from database.personal_lab import log_lab_testing_confirmation
+
+        log_lab_testing_confirmation(
+            case_id=case_id,
+            target=target,
+            module_id=module_id,
+            operating_context=operating_context,
+            confirmation_text=PERSONAL_LAB_CONFIRMATION_TEXT,
+            confirmation_version=PERSONAL_LAB_CONFIRMATION_VERSION,
+            conn=db_context,
+        )
+
+    effective_auth = authorisation_confirmed or (
+        operating_context == PERSONAL_LAB and personal_lab_confirmed
+    )
+    if module.requires_authorisation and not effective_auth:
         return make_result(
             module_id,
             success=False,

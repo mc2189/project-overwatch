@@ -38,6 +38,13 @@ from utils.batch_queue_store import (
     save_batch_queue,
 )
 from utils.settings_manager import rate_limit_seconds
+from utils.operating_context import (
+    CLIENT_ENGAGEMENT,
+    PASSIVE_RESEARCH,
+    PERSONAL_LAB,
+    PERSONAL_LAB_CONFIRMATION_TEXT,
+    operating_context_label,
+)
 
 
 def _save_queue(case_id: int, items: list[dict]) -> None:
@@ -364,16 +371,39 @@ def _render_run_controls(case_id: int, items: list[dict]) -> None:
         item for item in queued_selectable if item.get("mode") == "active"
     ]
     if active_in_selection:
-        st.markdown("**Active modules in queue (not included in passive batch run)**")
+        st.markdown("**Active modules in queue (not included in passive batch run — manual confirmation required)**")
         for item in active_in_selection:
             st.caption(f"⚡ {item['entity_value']} · {item['module_display_name']}")
 
     authorisation_confirmed = False
+    personal_lab_confirmed = False
+    batch_operating_context = st.session_state.get("batch_operating_context", PASSIVE_RESEARCH)
     if active_in_selection:
-        authorisation_confirmed = st.checkbox(
-            "I confirm I am authorised to run active checks for queued active modules.",
-            key="batch_queue_auth",
+        context_choices = [PASSIVE_RESEARCH, PERSONAL_LAB, CLIENT_ENGAGEMENT]
+        batch_operating_context = st.radio(
+            "Operating context for active queue items",
+            options=context_choices,
+            index=context_choices.index(batch_operating_context)
+            if batch_operating_context in context_choices
+            else 0,
+            format_func=operating_context_label,
+            key="batch_operating_context_radio",
+            horizontal=True,
         )
+        st.session_state.batch_operating_context = batch_operating_context
+        if batch_operating_context == PERSONAL_LAB:
+            personal_lab_confirmed = st.checkbox(
+                PERSONAL_LAB_CONFIRMATION_TEXT,
+                key="batch_queue_personal_lab_confirmed",
+            )
+            authorisation_confirmed = personal_lab_confirmed
+        elif batch_operating_context == CLIENT_ENGAGEMENT:
+            authorisation_confirmed = st.checkbox(
+                "I confirm I am authorised to run active checks for queued active modules under client engagement.",
+                key="batch_queue_auth",
+            )
+        else:
+            st.warning("Passive Research cannot run active queue items — select Personal Lab or Client Engagement.")
 
     ids_to_run: list[str] = []
     if run_passive:
@@ -387,6 +417,9 @@ def _render_run_controls(case_id: int, items: list[dict]) -> None:
             for item in items
             if item.get("queue_id") in ids_to_run
         )
+        if needs_auth and batch_operating_context == PASSIVE_RESEARCH:
+            st.warning("Select Personal Lab or Client Engagement before running active queue items.")
+            return
         if needs_auth and not authorisation_confirmed:
             st.warning("Confirm authorisation before running active queue items.")
             return
@@ -406,6 +439,8 @@ def _render_run_controls(case_id: int, items: list[dict]) -> None:
                     ids_to_run,
                     db_conn=conn,
                     authorisation_confirmed=authorisation_confirmed,
+                    operating_context=batch_operating_context,
+                    personal_lab_confirmed=personal_lab_confirmed,
                     nmap_options=nmap_options,
                     delay_seconds=delay_seconds,
                     stop_after_first=stop_after,

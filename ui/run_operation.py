@@ -6,11 +6,13 @@ import streamlit as st
 
 from database.db_setup import create_or_get_entity, get_db_conn, infer_entity_type
 from database.engagements import get_engagement_for_case
+from database.personal_lab import add_personal_lab_scope_item
 from modules.executor import execute_module
 from modules.module_registry import get_module, is_executable
 from ui.constants import IMPLEMENTED_MODULE_IDS, MODULE_CARD_TITLES
 from ui.metrics import render_compact_metrics
 from ui.module_runtime import module_disable_reason, module_enabled_for_ui, module_runtime_error
+from ui.preflight_panel import render_operating_preflight_panel
 from ui.results import render_latest_results
 from utils.module_compatibility import (
     build_operation_plan,
@@ -18,7 +20,18 @@ from utils.module_compatibility import (
     module_detailed_help,
     module_short_help,
 )
-from utils.engagement_guardrails import assess_target_scope, enrich_operation_plan
+from utils.engagement_guardrails import assess_target_scope
+from utils.operating_context import (
+    CLIENT_ENGAGEMENT,
+    OPERATING_CONTEXT_DESCRIPTIONS,
+    PASSIVE_RESEARCH,
+    PERSONAL_LAB,
+    PERSONAL_LAB_CONFIRMATION_TEXT,
+    check_module_execution_guardrails,
+    enrich_operation_plan_with_preflight,
+    list_operating_contexts,
+    operating_context_label,
+)
 from utils.nmap_options import PROFILE_QUICK_CHECK, SCRIPT_VULN
 from utils.nmap_ui import render_nmap_options
 from utils.run_modes import (
@@ -38,7 +51,8 @@ from utils.run_modes import (
     should_auto_apply_selection,
     sync_run_mode_from_case,
 )
-from utils.module_testing_levels import get_module_testing_level, testing_level_label
+from utils.module_testing_levels import get_module_testing_level, is_active_testing_level, testing_level_label
+from utils.security import is_private_or_local_ip
 from utils.settings_manager import has_api_key
 from utils.target_detection import get_target_type, normalize_target_value, target_type_label
 
@@ -68,7 +82,13 @@ def _selection_requires_authorisation(module_ids: list[str]) -> bool:
     )
 
 
-def _render_module_card(module, target: str, *, selectable: bool) -> None:
+def _render_module_card(
+    module,
+    target: str,
+    *,
+    selectable: bool,
+    preflight_hint: str | None = None,
+) -> None:
     module_id = module.module_id
     card_title = MODULE_CARD_TITLES.get(module_id, module.display_name)
     enabled = module_enabled_for_ui(module, target)
@@ -83,6 +103,8 @@ def _render_module_card(module, target: str, *, selectable: bool) -> None:
             f"Accepts: {accepted}"
         )
         st.write(module_short_help(module))
+        if preflight_hint:
+            st.caption(preflight_hint)
         if module.output_summary:
             st.markdown(f"**Expected outputs:** {module.output_summary}")
 
@@ -131,6 +153,39 @@ def _render_module_lab() -> None:
             if module.caution_notes:
                 st.markdown(f"**Caution:** {module.caution_notes}")
             st.divider()
+
+
+def _module_preflight_hint(
+    module_id: str,
+    target: str,
+    *,
+    case_id: int,
+    operating_context: str,
+    personal_lab_confirmed: bool,
+    authorisation_confirmed: bool,
+    conn,
+) -> str | None:
+    if not is_active_testing_level(get_module_testing_level(module_id)):
+        return None
+    preflight = check_module_execution_guardrails(
+        module_id,
+        target,
+        case_id=case_id,
+        authorisation_confirmed=authorisation_confirmed,
+        operating_context=operating_context,
+        personal_lab_confirmed=personal_lab_confirmed,
+        conn=conn,
+    )
+    if preflight.get("allowed"):
+        return "Active module — ready to run"
+    result = preflight.get("result")
+    if result == "needs_action":
+        if preflight.get("needs_lab_scope_add"):
+            return "Active module — needs scope"
+        if not preflight.get("personal_lab_confirmed") and operating_context == PERSONAL_LAB:
+            return "Active module — needs authorisation"
+        return "Active module — needs action"
+    return "Active module — blocked by preflight"
 
 
 def _sync_run_mode_selection(
@@ -210,6 +265,37 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
         elif normalized:
             st.markdown(f"**Normalised host:** `{normalized}`")
 
+    linked_engagement = get_engagement_for_case(current_case["id"])
+    st.session_state.setdefault("operating_context", PASSIVE_RESEARCH)
+    context_choices = [mode_id for mode_id, _ in list_operating_contexts()]
+    if not linked_engagement and CLIENT_ENGAGEMENT in context_choices:
+        context_choices = [mode for mode in context_choices if mode != CLIENT_ENGAGEMENT]
+    current_context = st.session_state.get("operating_context", PASSIVE_RESEARCH)
+    if current_context not in context_choices:
+        current_context = PASSIVE_RESEARCH
+        st.session_state.operating_context = PASSIVE_RESEARCH
+
+    st.markdown("**Operating context**")
+    operating_context = st.radio(
+        "How are you running this operation?",
+        options=context_choices,
+        index=context_choices.index(current_context),
+        format_func=operating_context_label,
+        key="operating_context_radio",
+        horizontal=True,
+    )
+    st.session_state.operating_context = operating_context
+    st.caption(OPERATING_CONTEXT_DESCRIPTIONS.get(operating_context, ""))
+    if operating_context == PERSONAL_LAB:
+        st.info(
+            "Personal Lab is for self-owned systems and authorised lab targets — not a client engagement."
+        )
+    elif operating_context == CLIENT_ENGAGEMENT and linked_engagement:
+        st.caption(
+            f"Linked engagement: **{linked_engagement.get('name')}** "
+            f"({linked_engagement.get('status')})"
+        )
+
     st.divider()
 
     # Run mode selector
@@ -268,57 +354,78 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
 
     # Step 2 — Module Selection
     st.markdown("### Step 2 — Module Selection")
+    preflight_conn = None
+    if target.strip():
+        preflight_conn = get_db_conn()
     compatible_modules: list = []
     incompatible_modules: list = []
-    for module_id in IMPLEMENTED_MODULE_IDS:
-        module = get_module(module_id)
-        if module is None:
-            continue
-        if module_enabled_for_ui(module, target):
-            compatible_modules.append(module)
-        else:
-            incompatible_modules.append(module)
+    try:
+        for module_id in IMPLEMENTED_MODULE_IDS:
+            module = get_module(module_id)
+            if module is None:
+                continue
+            if module_enabled_for_ui(module, target):
+                compatible_modules.append(module)
+            else:
+                incompatible_modules.append(module)
 
-    recommended_ids = set(
-        resolve_recommended_modules_for_mode(
-            run_mode,
-            target_type,
-            quick_check_include_port_scan=include_port_scan,
-            target=target,
+        recommended_ids = set(
+            resolve_recommended_modules_for_mode(
+                run_mode,
+                target_type,
+                quick_check_include_port_scan=include_port_scan,
+                target=target,
+            )
         )
-    )
-    recommended_compatible = [
-        module for module in compatible_modules if module.module_id in recommended_ids
-    ]
-    available_not_recommended = [
-        module for module in compatible_modules if module.module_id not in recommended_ids
-    ]
+        recommended_compatible = [
+            module for module in compatible_modules if module.module_id in recommended_ids
+        ]
+        available_not_recommended = [
+            module for module in compatible_modules if module.module_id not in recommended_ids
+        ]
 
-    if run_mode == CUSTOM:
-        if compatible_modules:
-            st.markdown("**Compatible modules**")
-            for module in compatible_modules:
-                _render_module_card(module, target, selectable=True)
-    else:
-        if recommended_compatible:
-            st.markdown("**Recommended for this target**")
-            for module in recommended_compatible:
-                _render_module_card(module, target, selectable=True)
-        elif target.strip() and run_mode in {QUICK_CHECK} and not recommended_ids:
-            st.warning(recommendation_reason)
+        def _card(module, selectable: bool) -> None:
+            hint = None
+            if preflight_conn is not None and target.strip():
+                hint = _module_preflight_hint(
+                    module.module_id,
+                    target.strip(),
+                    case_id=current_case["id"],
+                    operating_context=operating_context,
+                    personal_lab_confirmed=st.session_state.get("personal_lab_confirmed", False),
+                    authorisation_confirmed=st.session_state.get("authorisation_confirmed", False),
+                    conn=preflight_conn,
+                )
+            _render_module_card(module, target, selectable=selectable, preflight_hint=hint)
 
-        if available_not_recommended:
-            with st.expander(
-                "Available but not recommended by this mode",
-                expanded=False,
-            ):
-                for module in available_not_recommended:
-                    _render_module_card(module, target, selectable=True)
+        if run_mode == CUSTOM:
+            if compatible_modules:
+                st.markdown("**Compatible modules**")
+                for module in compatible_modules:
+                    _card(module, True)
+        else:
+            if recommended_compatible:
+                st.markdown("**Recommended for this target**")
+                for module in recommended_compatible:
+                    _card(module, True)
+            elif target.strip() and run_mode in {QUICK_CHECK} and not recommended_ids:
+                st.warning(recommendation_reason)
 
-    if incompatible_modules:
-        st.markdown("**Not available for this target**")
-        for module in incompatible_modules:
-            _render_module_card(module, target, selectable=False)
+            if available_not_recommended:
+                with st.expander(
+                    "Available but not recommended by this mode",
+                    expanded=False,
+                ):
+                    for module in available_not_recommended:
+                        _card(module, True)
+
+        if incompatible_modules:
+            st.markdown("**Not available for this target**")
+            for module in incompatible_modules:
+                _render_module_card(module, target, selectable=False)
+    finally:
+        if preflight_conn is not None:
+            preflight_conn.close()
 
     st.caption("Planned modules are on the **Roadmap** page — not shown in the run workflow.")
     _render_module_lab()
@@ -572,9 +679,8 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
 
     st.divider()
 
-    # Engagement context
-    linked_engagement = get_engagement_for_case(current_case["id"])
-    if linked_engagement:
+    # Engagement / scope context
+    if linked_engagement and operating_context == CLIENT_ENGAGEMENT:
         st.markdown("### Client engagement")
         st.info(
             f"**{linked_engagement.get('name')}** · Client: {linked_engagement.get('client_name') or '—'} · "
@@ -583,16 +689,23 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
         )
         if linked_engagement.get("emergency_stop_active"):
             st.error("Emergency stop is active for this engagement — active/intrusive modules will be blocked.")
+    elif operating_context == CLIENT_ENGAGEMENT:
+        st.warning("Client Engagement mode requires a linked engagement on this case.")
+    elif operating_context == PERSONAL_LAB:
+        st.caption(
+            "Personal Lab scope is separate from client engagements. "
+            "Add targets to Personal Lab scope when preflight requires it."
+        )
     else:
         st.caption(
-            "No client engagement linked to this case. Passive modules can run as usual. "
-            "Active modules require standalone authorised testing confirmation or a linked engagement."
+            "Passive Research — passive modules run with minimal friction. "
+            "Select Personal Lab or Client Engagement to run active modules."
         )
-    if target.strip():
+    if target.strip() and operating_context == CLIENT_ENGAGEMENT:
         scope_preview = assess_target_scope(target.strip(), case_id=current_case["id"])
         scope_label = scope_preview.get("scope_status") or "unknown"
         st.caption(
-            f"Target scope status: **{scope_label.replace('_', ' ')}**"
+            f"Engagement target scope: **{scope_label.replace('_', ' ')}**"
             + (
                 f" · Permitted level: {scope_preview.get('permitted_testing_level')}"
                 if scope_preview.get("permitted_testing_level")
@@ -608,27 +721,38 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
     st.markdown("### Step 4 — Operation Plan")
     auth_required = _selection_requires_authorisation(selected_ids)
     authorisation_confirmed = st.session_state.get("authorisation_confirmed", False)
+    personal_lab_confirmed = st.session_state.get("personal_lab_confirmed", False)
 
-    plan = build_operation_plan(
-        case_name=current_case["name"],
-        case_id=current_case["id"],
-        target=target,
-        selected_module_ids=selected_ids,
-        authorisation_confirmed=authorisation_confirmed if auth_required else True,
-        run_mode_id=run_mode,
-        run_mode_label=get_run_mode_label(run_mode),
-        recommendation_reason=recommendation_reason,
-    )
-    standalone_authorised = st.session_state.get("standalone_authorised_testing", False)
-    nmap_options_preview = st.session_state.get("nmap_options", {})
-    plan = enrich_operation_plan(
-        plan,
-        target=target,
-        case_id=current_case["id"],
-        selected_module_ids=selected_ids,
-        standalone_authorised_testing=standalone_authorised,
-        nmap_options=nmap_options_preview,
-    )
+    plan_conn = get_db_conn()
+    try:
+        plan = build_operation_plan(
+            case_name=current_case["name"],
+            case_id=current_case["id"],
+            target=target,
+            selected_module_ids=selected_ids,
+            authorisation_confirmed=(
+                (personal_lab_confirmed if operating_context == PERSONAL_LAB else authorisation_confirmed)
+                if auth_required
+                else True
+            ),
+            run_mode_id=run_mode,
+            run_mode_label=get_run_mode_label(run_mode),
+            recommendation_reason=recommendation_reason,
+        )
+        nmap_options_preview = st.session_state.get("nmap_options", {})
+        plan = enrich_operation_plan_with_preflight(
+            plan,
+            target=target,
+            case_id=current_case["id"],
+            selected_module_ids=selected_ids,
+            operating_context=operating_context,
+            personal_lab_confirmed=personal_lab_confirmed,
+            authorisation_confirmed=authorisation_confirmed,
+            nmap_options=nmap_options_preview,
+            conn=plan_conn,
+        )
+    finally:
+        plan_conn.close()
 
     with st.container(border=True):
         if not plan["target"]:
@@ -637,6 +761,9 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
             st.info("Select compatible modules to build an operation plan.")
         else:
             st.markdown(f"**Case:** {plan['case_name']} (#{plan['case_id']})")
+            st.markdown(
+                f"**Operating context:** {plan.get('operating_context_label') or operating_context_label(operating_context)}"
+            )
             st.markdown(f"**Run mode:** {plan.get('run_mode_label') or get_run_mode_label(run_mode)}")
             if plan.get("recommendation_reason"):
                 st.markdown(f"**Why these modules:** {plan['recommendation_reason']}")
@@ -662,56 +789,123 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
                 for line in plan["incompatible_modules"]:
                     st.markdown(f"- {line}")
             if plan.get("engagement_blocked_modules"):
-                st.warning("Engagement / scope guardrails block some selected modules:")
+                st.warning("Preflight blocked some selected modules:")
                 for line in plan["engagement_blocked_modules"]:
                     st.markdown(f"- {line}")
 
+    if target.strip() and selected_ids:
+        render_operating_preflight_panel(
+            operating_context=operating_context,
+            operating_context_label=operating_context_label(operating_context),
+            target=target.strip(),
+            target_type_label=target_type_label(target_type),
+            module_preflights=plan.get("module_preflights") or [],
+            selected_module_ids=selected_ids,
+        )
+
     st.divider()
 
-    # Authorisation and launch
-    if auth_required:
-        if not linked_engagement:
-            standalone_authorised = st.checkbox(
-                "Standalone authorised testing (no linked engagement)",
-                value=st.session_state.get("standalone_authorised_testing", False),
-                key="standalone_authorised_testing_checkbox",
-                help=(
-                    "Use only for lab assets or targets with documented written permission when no "
-                    "client engagement record is linked to this case."
-                ),
-            )
-            st.session_state.standalone_authorised_testing = standalone_authorised
+    # Authorisation, lab scope shortcuts, and launch
+    if auth_required and operating_context == PERSONAL_LAB:
+        personal_lab_confirmed = st.checkbox(
+            PERSONAL_LAB_CONFIRMATION_TEXT,
+            value=st.session_state.get("personal_lab_confirmed", False),
+            key="personal_lab_confirmed_checkbox",
+        )
+        st.session_state.personal_lab_confirmed = personal_lab_confirmed
+        authorisation_confirmed = personal_lab_confirmed
+        st.session_state.authorisation_confirmed = False
+    elif auth_required and operating_context == CLIENT_ENGAGEMENT:
         authorisation_confirmed = st.checkbox(
-            "I confirm I am authorised to run active checks against this target.",
+            "I confirm I am authorised to run active checks against this target under the linked engagement.",
             value=st.session_state.get("authorisation_confirmed", False),
             key="authorisation_confirmed_checkbox",
         )
         st.session_state.authorisation_confirmed = authorisation_confirmed
-        st.caption(
-            "Required for active modules such as Nmap. "
-            "Use only on systems you own, lab environments, or targets with written permission."
+        st.session_state.personal_lab_confirmed = False
+    elif auth_required:
+        st.warning(
+            "Active modules are selected but operating context is Passive Research. "
+            "Switch to Personal Lab or Client Engagement to continue."
         )
+        authorisation_confirmed = False
+        personal_lab_confirmed = False
     elif selected_ids:
         st.caption("No authorisation checkbox is required — all selected modules are passive.")
         authorisation_confirmed = False
+        personal_lab_confirmed = False
 
-    plan = enrich_operation_plan(
-        build_operation_plan(
-            case_name=current_case["name"],
-            case_id=current_case["id"],
+    if (
+        operating_context == PERSONAL_LAB
+        and target.strip()
+        and selected_ids
+        and plan.get("module_preflights")
+    ):
+        needs_scope = any(
+            row.get("needs_lab_scope_add") for row in plan["module_preflights"] if row.get("module_id") in selected_ids
+        )
+        if needs_scope:
+            is_private = target_type == "ipv4" and is_private_or_local_ip(target.strip())
+            if is_private:
+                if st.button(
+                    "Add to Personal Lab scope and continue",
+                    key="personal_lab_quick_scope_private",
+                ):
+                    conn = get_db_conn()
+                    try:
+                        add_personal_lab_scope_item(
+                            current_case["id"],
+                            target.strip(),
+                            conn=conn,
+                        )
+                    finally:
+                        conn.close()
+                    st.rerun()
+            elif personal_lab_confirmed and st.button(
+                "Add as authorised lab target",
+                key="personal_lab_quick_scope_public",
+            ):
+                conn = get_db_conn()
+                try:
+                    add_personal_lab_scope_item(
+                        current_case["id"],
+                        target.strip(),
+                        conn=conn,
+                    )
+                finally:
+                    conn.close()
+                st.rerun()
+            elif not is_private:
+                st.caption("Tick Personal Lab confirmation, then add the target as an authorised lab target.")
+
+    plan_conn = get_db_conn()
+    try:
+        plan = enrich_operation_plan_with_preflight(
+            build_operation_plan(
+                case_name=current_case["name"],
+                case_id=current_case["id"],
+                target=target,
+                selected_module_ids=selected_ids,
+                authorisation_confirmed=(
+                    (personal_lab_confirmed if operating_context == PERSONAL_LAB else authorisation_confirmed)
+                    if auth_required
+                    else True
+                ),
+                run_mode_id=run_mode,
+                run_mode_label=get_run_mode_label(run_mode),
+                recommendation_reason=recommendation_reason,
+            ),
             target=target,
+            case_id=current_case["id"],
             selected_module_ids=selected_ids,
-            authorisation_confirmed=authorisation_confirmed if auth_required else True,
-            run_mode_id=run_mode,
-            run_mode_label=get_run_mode_label(run_mode),
-            recommendation_reason=recommendation_reason,
-        ),
-        target=target,
-        case_id=current_case["id"],
-        selected_module_ids=selected_ids,
-        standalone_authorised_testing=st.session_state.get("standalone_authorised_testing", False),
-        nmap_options=st.session_state.get("nmap_options", {}),
-    )
+            operating_context=operating_context,
+            personal_lab_confirmed=personal_lab_confirmed,
+            authorisation_confirmed=authorisation_confirmed,
+            nmap_options=st.session_state.get("nmap_options", {}),
+            conn=plan_conn,
+        )
+    finally:
+        plan_conn.close()
 
     launch_blocked_reason = None
     if not target.strip():
@@ -720,10 +914,14 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
         launch_blocked_reason = "Select at least one compatible module."
     elif plan["incompatible_modules"]:
         launch_blocked_reason = "Remove incompatible modules from the selection."
-    elif auth_required and not authorisation_confirmed:
-        launch_blocked_reason = "Confirm authorisation for active modules before running."
+    elif auth_required and operating_context == PASSIVE_RESEARCH:
+        launch_blocked_reason = "Select Personal Lab or Client Engagement for active modules."
+    elif auth_required and operating_context == PERSONAL_LAB and not personal_lab_confirmed:
+        launch_blocked_reason = "Confirm Personal Lab authorisation before running active modules."
+    elif auth_required and operating_context == CLIENT_ENGAGEMENT and not authorisation_confirmed:
+        launch_blocked_reason = "Confirm client engagement authorisation before running."
     elif plan.get("engagement_blocked_modules"):
-        launch_blocked_reason = "Resolve engagement/scope guardrail blocks before running."
+        launch_blocked_reason = "Resolve preflight items before running."
 
     execute_btn = st.button(
         "Run selected modules",
@@ -769,15 +967,18 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
                         options = {
                             "request_method": http_opts.get("request_method", "GET"),
                         }
-                    options["standalone_authorised_testing"] = st.session_state.get(
-                        "standalone_authorised_testing", False
-                    )
+                    options["operating_context"] = operating_context
+                    options["personal_lab_confirmed"] = personal_lab_confirmed
                     result = execute_module(
                         module_id,
                         target_value,
                         options=options,
                         db_context=conn,
-                        authorisation_confirmed=authorisation_confirmed,
+                        authorisation_confirmed=(
+                            personal_lab_confirmed
+                            if operating_context == PERSONAL_LAB
+                            else authorisation_confirmed
+                        ),
                         case_id=current_case["id"],
                         entity_id=entity["id"],
                         run_mode_id=run_mode,

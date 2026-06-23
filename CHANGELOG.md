@@ -2,6 +2,18 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.11.0 — Lab Mode and Guardrail UX Refactor
+
+- **Operating contexts** on Run Operation: Passive Research, Personal Lab, and Client Engagement
+- **Personal Lab Mode** — self-owned / lab testing without a formal client engagement; separate `personal_lab_scope` table and confirmation logging
+- **Preflight panel** — clear Ready / Needs action / Blocked status with direct fix hints for active modules
+- **Quick-scope** — private/local targets can be added to Personal Lab scope in one click; public targets require confirmation first
+- **Client Engagement Mode** — unchanged strict checks (draft engagement, out-of-scope, emergency stop, ROE)
+- **Batch Queue** — active items require Personal Lab or Client Engagement context and individual confirmation
+- **Reports** — operating context section (Passive Research / Personal Lab / Client Engagement)
+- Settings: `PROJECT_OVERWATCH_PERSONAL_LAB_ENABLED`, `PROJECT_OVERWATCH_PERSONAL_LAB_PRIVATE_QUICK_SCOPE`
+- Module path: `utils/operating_context.py`, `database/personal_lab.py`, `ui/preflight_panel.py`
+
 ## v2.10.0 — HTTP Security Header Review
 
 - **`infra_http_security`** — controlled active HTTP response and security header review for domain, URL, or IPv4 targets

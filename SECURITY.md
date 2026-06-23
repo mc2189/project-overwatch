@@ -78,7 +78,7 @@ The **Domain Email Security Posture** module (`infra_email_security`) is **passi
 - **Module ID:** `infra_tls_review` — controlled active assessment (`safe_active_check`)
 - Allowed: single host:port TLS handshake (default 443), certificate metadata inspection, negotiated protocol/cipher, optional one-handshake-per-version protocol probes using Python `ssl`/`socket`
 - **Not allowed:** vulnerability exploitation, fuzzing, denial-of-service testing, repeated aggressive handshakes, mass scanning, port ranges, STARTTLS, credential testing, bypass/evasion, intrusive payloads, SSL stripping, or MITM behaviour
-- Requires authorisation and engagement/scope/ROE guardrails (or explicit standalone authorised testing) before connecting
+- Requires authorisation and the correct operating context (Personal Lab or Client Engagement) with scope/ROE guardrails before connecting
 - Uses standard-library networking only — no subprocess, no `shell=True`
 - Results are point-in-time observations — not proof of ongoing posture
 - No API keys or secrets are used by this module
@@ -88,20 +88,36 @@ The **Domain Email Security Posture** module (`infra_email_security`) is **passi
 - **Module ID:** `infra_http_security` — controlled active assessment (`safe_active_check`)
 - Allowed: single-target GET/HEAD HTTP(S) request, security header review, cookie flag metadata (no values), optional `security.txt` and `robots.txt` at standard paths
 - **Not allowed:** form submission, login interaction, crawling beyond supplied URL and exact well-known paths, full body storage, cookie value persistence
-- Requires authorisation and engagement/scope/ROE guardrails before connecting
+- Requires authorisation and the correct operating context (Personal Lab or Client Engagement) with scope/ROE guardrails before connecting
 - Uses `requests` with short timeout and redirect limit — no subprocess, no `shell=True`
 - Cookie and token values are redacted and not stored in observations, evidence, or reports
 
-## Authorised assessment model (v2.8)
+## Authorised assessment model (v2.8+)
 
 Project Overwatch is designed for **authorised client assessments**, not unconstrained scanning.
+
+### Operating contexts (v2.11)
+
+Run Operation uses three operating contexts:
+
+| Context | Purpose | Active modules |
+|---------|---------|----------------|
+| **Passive Research** | OSINT and passive enrichment | Blocked — use Personal Lab or Client Engagement |
+| **Personal Lab** | Self-owned systems, home network, lab devices, learning | Allowed after Personal Lab confirmation and Personal Lab scope |
+| **Client Engagement** | Formal client work | Full engagement, scope, ROE, and authorisation checks |
+
+- **Personal Lab** is not a client engagement — it uses a separate scope table and logs confirmation text/version
+- **Client Engagement** remains strict: draft engagements, out-of-scope targets, emergency stop, and ROE limits still block active checks
+- **Passive modules** run in Passive Research without engagement, ROE, or lab confirmation
+
+### Engagement framework (v2.8)
 
 - **Engagements** document client authorisation, contacts, and assessment type
 - **Scope assets** define what may be tested and at what level (passive / safe active / intrusive / manual only)
 - **Rules of engagement** define prohibited actions and whether active or intrusive testing is permitted
 - **Emergency stop** halts active/intrusive testing immediately while preserving audit records
 - **Passive OSINT** modules may run without an engagement but should still respect written permission for real targets
-- **Active/intrusive modules** require: authorisation confirmation, in-scope target (or standalone authorised testing), active engagement status, ROE permission, and no emergency stop
+- **Active/intrusive modules** require: correct operating context, authorisation or Personal Lab confirmation, in-scope target, active engagement status (Client Engagement mode), ROE permission, and no emergency stop
 - **Prohibited by default:** unauthorised testing, DoS, credential attacks, social engineering automation, malware deployment, evasion/persistence, destructive testing, exfiltration
 
 v2.9 enables **SSL / TLS Configuration Review** and v2.10 enables **HTTP Security Header Review** as controlled active assessment modules under this framework. Intrusive modules (e.g. Nuclei, ffuf) remain planned and disabled.

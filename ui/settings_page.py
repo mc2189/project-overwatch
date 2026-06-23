@@ -55,6 +55,14 @@ def render_settings_page(metrics: dict) -> None:
             "Active modules enabled",
             "Yes" if summary["active_modules_enabled"] else "No",
         )
+        st.metric(
+            "Personal Lab Mode",
+            "Enabled" if summary["personal_lab_enabled"] else "Disabled",
+        )
+        st.metric(
+            "Private network quick-scope",
+            "Enabled" if summary["personal_lab_private_quick_scope"] else "Disabled",
+        )
     st.caption(
         "Set via environment variables or `config/overwatch.defaults.json`. "
         "See `.env.example` for variable names."

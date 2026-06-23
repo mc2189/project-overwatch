@@ -336,6 +336,9 @@ def get_db_conn() -> sqlite3.Connection:
     from database.engagements import ensure_engagement_tables
 
     ensure_engagement_tables(conn)
+    from database.personal_lab import ensure_personal_lab_tables
+
+    ensure_personal_lab_tables(conn)
     return conn
 
 

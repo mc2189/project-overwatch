@@ -2779,6 +2779,133 @@ def _check_engagement_framework() -> None:
         conn.close()
 
 
+def _check_operating_context_framework() -> None:
+    from database.db_setup import create_case, get_db_conn
+    from database.engagements import (
+        create_engagement,
+        ensure_engagement_tables,
+        link_case_to_engagement,
+    )
+    from database.personal_lab import (
+        add_personal_lab_scope_item,
+        ensure_personal_lab_tables,
+        list_personal_lab_scope,
+    )
+    from utils.operating_context import (
+        CLIENT_ENGAGEMENT,
+        PASSIVE_RESEARCH,
+        PERSONAL_LAB,
+        PERSONAL_LAB_PROFILE,
+        check_module_execution_guardrails,
+        enrich_operation_plan_with_preflight,
+        operating_context_label,
+    )
+    from utils.module_compatibility import build_operation_plan
+
+    if PERSONAL_LAB_PROFILE.get("name") != "Personal Lab":
+        raise AssertionError("Personal Lab profile name mismatch")
+    if not PERSONAL_LAB_PROFILE.get("safe_active_allowed"):
+        raise AssertionError("Personal Lab profile should allow safe active checks")
+
+    label = operating_context_label(PERSONAL_LAB)
+    if "Personal Lab" not in label:
+        raise AssertionError("operating_context_label failed")
+
+    conn = get_db_conn()
+    try:
+        ensure_personal_lab_tables(conn)
+        ensure_engagement_tables(conn)
+        case = create_case("Operating Context Smoke", conn=conn)
+        case_id = int(case["id"])
+
+        passive = check_module_execution_guardrails(
+            "infra_domain_intel",
+            "example.com",
+            case_id=case_id,
+            authorisation_confirmed=False,
+            operating_context=PASSIVE_RESEARCH,
+            conn=conn,
+        )
+        if not passive.get("allowed"):
+            raise AssertionError("passive module should run in Passive Research")
+
+        active_passive_ctx = check_module_execution_guardrails(
+            "infra_tls_review",
+            "192.168.1.10",
+            case_id=case_id,
+            authorisation_confirmed=False,
+            operating_context=PASSIVE_RESEARCH,
+            conn=conn,
+        )
+        if active_passive_ctx.get("allowed"):
+            raise AssertionError("active module should block in Passive Research")
+
+        lab_blocked = check_module_execution_guardrails(
+            "infra_tls_review",
+            "192.168.1.10",
+            case_id=case_id,
+            authorisation_confirmed=False,
+            operating_context=PERSONAL_LAB,
+            personal_lab_confirmed=False,
+            conn=conn,
+        )
+        if lab_blocked.get("allowed"):
+            raise AssertionError("Personal Lab active module should block without confirmation")
+
+        add_personal_lab_scope_item(case_id, "192.168.1.10", conn=conn)
+        if not list_personal_lab_scope(case_id, conn=conn):
+            raise AssertionError("personal lab scope item not stored")
+
+        lab_ready = check_module_execution_guardrails(
+            "infra_tls_review",
+            "192.168.1.10",
+            case_id=case_id,
+            authorisation_confirmed=False,
+            operating_context=PERSONAL_LAB,
+            personal_lab_confirmed=True,
+            conn=conn,
+        )
+        if not lab_ready.get("allowed"):
+            raise AssertionError("Personal Lab active module should be ready after scope + confirmation")
+        if lab_ready.get("result") != "ready":
+            raise AssertionError("Personal Lab preflight should report ready")
+
+        draft = create_engagement(name="Draft Smoke Engagement", status="draft", conn=conn)
+        link_case_to_engagement(case_id, int(draft["id"]), conn=conn)
+        client_blocked = check_module_execution_guardrails(
+            "infra_tls_review",
+            "example.com",
+            case_id=case_id,
+            authorisation_confirmed=True,
+            operating_context=CLIENT_ENGAGEMENT,
+            conn=conn,
+        )
+        if client_blocked.get("allowed"):
+            raise AssertionError("draft client engagement should block active checks")
+
+        plan = build_operation_plan(
+            case_name=case["name"],
+            case_id=case_id,
+            target="192.168.1.10",
+            selected_module_ids=["infra_tls_review"],
+            authorisation_confirmed=True,
+        )
+        enriched = enrich_operation_plan_with_preflight(
+            plan,
+            target="192.168.1.10",
+            case_id=case_id,
+            selected_module_ids=["infra_tls_review"],
+            operating_context=PERSONAL_LAB,
+            personal_lab_confirmed=True,
+            authorisation_confirmed=False,
+            conn=conn,
+        )
+        if not enriched.get("module_preflights"):
+            raise AssertionError("enrich_operation_plan_with_preflight should attach module preflights")
+    finally:
+        conn.close()
+
+
 def main() -> int:
     print(f"Project Overwatch smoke check (root: {PROJECT_ROOT})")
     errors = 0
@@ -2958,6 +3085,11 @@ def main() -> int:
     run(
         "engagement framework",
         lambda: _check_engagement_framework(),
+    )
+
+    run(
+        "operating context framework",
+        lambda: _check_operating_context_framework(),
     )
 
     run(

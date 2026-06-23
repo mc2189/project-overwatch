@@ -62,6 +62,7 @@ class ReportOptions:
     custom_redaction_terms: list[str] = field(default_factory=list)
     custom_redaction_regex: str = ""
     include_engagement_context: bool = False
+    operating_context: str | None = None
 
 
 def _lookup_notices_from_observations(observations: list[dict[str, Any]]) -> list[str]:
@@ -396,6 +397,38 @@ def build_case_report(
         "",
     ]
 
+    from utils.operating_context import (
+        CLIENT_ENGAGEMENT,
+        PASSIVE_RESEARCH,
+        PERSONAL_LAB,
+        operating_context_label,
+    )
+
+    context_key = options.operating_context or PASSIVE_RESEARCH
+    lines.extend(
+        [
+            "## Operating Context",
+            "",
+            f"- **Mode:** {operating_context_label(context_key)}",
+        ]
+    )
+    if context_key == PERSONAL_LAB:
+        lines.append(
+            "- **Note:** Output includes results from self-authorised Personal Lab / self-owned testing. "
+            "This is not a formal client engagement and must not be presented as client-authorised work."
+        )
+    elif context_key == CLIENT_ENGAGEMENT:
+        lines.append(
+            "- **Note:** Active testing results, where present, were produced under client engagement "
+            "controls when applicable."
+        )
+    else:
+        lines.append(
+            "- **Note:** Passive research context — active testing artefacts should not be included unless "
+            "explicitly generated under Personal Lab or Client Engagement mode."
+        )
+    lines.append("")
+
     if options.include_engagement_context:
         from database.engagements import engagement_summary_for_report, get_engagement_for_case
 
@@ -407,7 +440,7 @@ def build_case_report(
         if not engagement:
             lines.append(
                 "_No client engagement linked to this case. Passive collection may still be present; "
-                "active testing should only occur under documented authorisation._"
+                "active testing should only occur under documented authorisation or Personal Lab self-owned testing._"
             )
             lines.append("")
         else:

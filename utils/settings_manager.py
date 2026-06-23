@@ -197,6 +197,14 @@ def active_modules_enabled() -> bool:
     return get_bool_env("PROJECT_OVERWATCH_ENABLE_ACTIVE_MODULES", True)
 
 
+def personal_lab_enabled() -> bool:
+    return get_bool_env("PROJECT_OVERWATCH_PERSONAL_LAB_ENABLED", True)
+
+
+def personal_lab_private_quick_scope_enabled() -> bool:
+    return get_bool_env("PROJECT_OVERWATCH_PERSONAL_LAB_PRIVATE_QUICK_SCOPE", True)
+
+
 def has_api_key(env_key: str) -> bool:
     """Return True when an environment key is set to a non-empty value."""
     return bool(get_env(env_key))
@@ -426,6 +434,8 @@ def general_settings_summary() -> dict[str, Any]:
         "default_timeout_seconds": default_timeout_seconds(),
         "max_batch_items": max_batch_items(),
         "active_modules_enabled": active_modules_enabled(),
+        "personal_lab_enabled": personal_lab_enabled(),
+        "personal_lab_private_quick_scope": personal_lab_private_quick_scope_enabled(),
         "python_version": sys.version.split()[0],
     }
 
