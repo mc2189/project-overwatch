@@ -156,6 +156,25 @@ def collect_health_checks() -> list[HealthCheck]:
             )
         )
 
+    tls_ready = is_runtime_ready("infra_tls_review")
+    tls_error = get_runtime_error("infra_tls_review")
+    if tls_ready:
+        checks.append(
+            HealthCheck(
+                "SSL / TLS Configuration Review",
+                True,
+                "No API key required — controlled TLS handshake module",
+            )
+        )
+    else:
+        checks.append(
+            HealthCheck(
+                "SSL / TLS Configuration Review",
+                False,
+                tls_error or "Backend failed to load — run pip install -r requirements.txt",
+            )
+        )
+
     whois_ready = is_runtime_ready("infra_whois_rdap")
     whois_error = get_runtime_error("infra_whois_rdap")
     if whois_ready:

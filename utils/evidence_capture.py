@@ -452,6 +452,151 @@ def capture_website_metadata_evidence(
     return items
 
 
+def capture_tls_review_evidence(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    observation_id: int,
+    module_id: str,
+    result: dict[str, Any],
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    parsed_data = result.get("parsed_data") or {}
+    host = parsed_data.get("host") or "target"
+    port = parsed_data.get("port") or 443
+    conn_info = parsed_data.get("connection") or {}
+    tls_info = parsed_data.get("tls") or {}
+    cert = parsed_data.get("certificate") or {}
+
+    if parsed_data.get("scope_blocked"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="TLS review scope block",
+                summary=parsed_data.get("scope_blocked_reason") or "TLS review blocked by scope/ROE.",
+                content_text=_text_summary(
+                    {
+                        "scope_blocked": True,
+                        "reason": parsed_data.get("scope_blocked_reason"),
+                        "target": parsed_data.get("target"),
+                    }
+                ),
+                content_type="application/json",
+                evidence_type=EVIDENCE_SYSTEM_GENERATED,
+                source_name="project_overwatch",
+                collection_method="controlled_tls_review",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+        return items
+
+    handshake_payload = {
+        "host": host,
+        "port": port,
+        "sni": parsed_data.get("sni"),
+        "connection_success": conn_info.get("success"),
+        "connection_error": conn_info.get("error"),
+        "tls_version": tls_info.get("version"),
+        "cipher": tls_info.get("cipher"),
+    }
+    items.append(
+        _create_item(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            title="TLS handshake summary",
+            summary=f"Controlled TLS review handshake summary for {host}:{port}.",
+            content_text=_text_summary(handshake_payload),
+            content_type="application/json",
+            evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+            source_name="TLS handshake",
+            collection_method="controlled_tls_review",
+            reliability=RELIABILITY_HIGH if conn_info.get("success") else RELIABILITY_MEDIUM,
+        )
+    )
+
+    if cert.get("subject") or cert.get("issuer"):
+        cert_summary = {
+            "subject": cert.get("subject"),
+            "issuer": cert.get("issuer"),
+            "not_before": cert.get("not_before"),
+            "not_after": cert.get("not_after"),
+            "days_until_expiry": cert.get("days_until_expiry"),
+            "san_dns_count": len(cert.get("san_dns_names") or []),
+            "san_dns_sample": (cert.get("san_dns_names") or [])[:5],
+            "hostname_valid": cert.get("hostname_valid"),
+            "chain_valid": cert.get("chain_valid"),
+            "fingerprint_sha256": cert.get("fingerprint_sha256"),
+        }
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Certificate summary",
+                summary=f"Certificate observed during TLS review for {host}:{port}.",
+                content_text=_text_summary(cert_summary),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="TLS handshake",
+                collection_method="controlled_tls_review",
+                reliability=RELIABILITY_HIGH if conn_info.get("success") else RELIABILITY_MEDIUM,
+            )
+        )
+
+    probes = tls_info.get("protocol_probe") or {}
+    if probes:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="TLS protocol probe summary",
+                summary=f"Controlled per-version TLS probes for {host}:{port}.",
+                content_text=_text_summary(probes),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="TLS handshake",
+                collection_method="controlled_tls_review",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    if conn_info.get("error") and not conn_info.get("success"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="TLS connection failure summary",
+                summary=f"TLS connection to {host}:{port} did not complete.",
+                content_text=_text_summary(
+                    {"error": conn_info.get("error"), "host": host, "port": port}
+                ),
+                content_type="application/json",
+                evidence_type=EVIDENCE_UNAVAILABLE_SOURCE,
+                source_name="TLS handshake",
+                collection_method="controlled_tls_review",
+                reliability=RELIABILITY_MEDIUM,
+            )
+        )
+
+    return items
+
+
 def capture_email_security_evidence(
     conn: sqlite3.Connection,
     *,
@@ -1443,6 +1588,15 @@ def capture_module_evidence(
         )
     if module_id == "infra_website_metadata":
         return capture_website_metadata_evidence(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            result=result,
+        )
+    if module_id == "infra_tls_review":
+        return capture_tls_review_evidence(
             conn,
             case_id=case_id,
             entity_id=entity_id,

@@ -908,6 +908,7 @@ def _check_target_compatibility() -> None:
     module_ids = {module.module_id for module in compatible}
     if (
         "infra_nmap" not in module_ids
+        or "infra_tls_review" not in module_ids
         or "infra_domain_intel" not in module_ids
         or "infra_cert_subdomain" not in module_ids
         or "infra_website_metadata" not in module_ids
@@ -1220,6 +1221,125 @@ def _check_email_security_module() -> None:
     source = module_path.read_text(encoding="utf-8")
     if "smtplib" in source:
         raise AssertionError("infra_email_security must not import smtplib")
+
+
+def _check_tls_review_module() -> None:
+    import importlib.util
+
+    registry = __import__("modules.module_registry", fromlist=["get_module"])
+    module = registry.get_module("infra_tls_review")
+    if module is None or not module.implemented:
+        raise AssertionError("infra_tls_review registry entry missing or not implemented")
+    if not module.requires_authorisation:
+        raise AssertionError("infra_tls_review must require authorisation")
+    if module.requires_api_key:
+        raise AssertionError("infra_tls_review should not require API key")
+    if module.accepted_target_types != ("domain", "url", "ipv4"):
+        raise AssertionError("infra_tls_review accepted_target_types mismatch")
+    for field in ("short_help", "detailed_help", "caution_notes", "config_notes"):
+        if not getattr(module, field, None):
+            raise AssertionError(f"infra_tls_review missing registry metadata: {field}")
+
+    module_path = Path(PROJECT_ROOT) / "modules" / "2_infrastructure" / "infra_tls_review.py"
+    spec = importlib.util.spec_from_file_location("infra_tls_review", module_path)
+    if spec is None or spec.loader is None:
+        raise AssertionError("could not load infra_tls_review module spec")
+    tls_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tls_mod)
+
+    parsed = tls_mod.parse_tls_target("https://example.com:8443/path")
+    if parsed.get("host") != "example.com" or parsed.get("port") != 8443:
+        raise AssertionError("TLS target URL parser failed")
+    ipv4_parsed = tls_mod.parse_tls_target("8.8.8.8")
+    if ipv4_parsed.get("host") != "8.8.8.8" or ipv4_parsed.get("port") != 443:
+        raise AssertionError("TLS target IPv4 parser failed")
+
+    mock_data = {
+        "target": "example.com",
+        "host": "example.com",
+        "port": 443,
+        "sni": "example.com",
+        "target_type": "domain",
+        "connection": {"success": True, "error": None},
+        "tls": {
+            "version": "TLSv1.3",
+            "cipher": "TLS_AES_256_GCM_SHA384",
+            "protocol_probe": {
+                "TLS 1.3": {"label": "TLS 1.3", "tested": True, "accepted": True},
+            },
+        },
+        "certificate": {
+            "subject": "example.com",
+            "issuer": "Example CA",
+            "not_before": "2025-01-01T00:00:00+00:00",
+            "not_after": "2026-01-01T00:00:00+00:00",
+            "days_until_expiry": 120,
+            "san_dns_names": ["example.com", "www.example.com"],
+            "hostname_valid": True,
+            "chain_valid": True,
+            "fingerprint_sha256": "abc123",
+        },
+    }
+    result = tls_mod.run_tls_review("example.com", options={"mock_data": mock_data})
+    if not result.get("success") or result.get("module_id") != "infra_tls_review":
+        raise AssertionError("mock TLS review should succeed")
+    for field in ("findings", "warnings", "errors", "data"):
+        if field not in result:
+            raise AssertionError(f"TLS review result missing field: {field}")
+
+    blocked_target = tls_mod.run_tls_review("not a valid domain !!!")
+    if blocked_target.get("success"):
+        raise AssertionError("invalid TLS target should be blocked")
+
+    interpreter = __import__(
+        "utils.tls_review_interpreter",
+        fromlist=["interpret_tls_review_results"],
+    )
+    findings = interpreter.interpret_tls_review_results(mock_data)
+    if not findings:
+        raise AssertionError("TLS review interpreter should return findings")
+
+    registry_pipeline = __import__(
+        "utils.findings_registry",
+        fromlist=["module_has_findings_pipeline", "interpret_module_findings"],
+    )
+    if not registry_pipeline.module_has_findings_pipeline("infra_tls_review"):
+        raise AssertionError("findings pipeline not registered for infra_tls_review")
+
+    executor = __import__("modules.executor", fromlist=["is_runtime_ready", "execute_module"])
+    if not executor.is_runtime_ready("infra_tls_review"):
+        raise AssertionError("executor cannot load infra_tls_review backend")
+
+    guardrail_blocked = executor.execute_module(
+        "infra_tls_review",
+        "example.com",
+        authorisation_confirmed=False,
+        options={"mock_data": mock_data},
+    )
+    if guardrail_blocked.get("status") != "blocked":
+        raise AssertionError("TLS review should be blocked without engagement/authorisation")
+
+    evidence = __import__(
+        "utils.evidence_model",
+        fromlist=["default_evidence_for_module", "default_relationship_evidence"],
+    )
+    defaults = evidence.default_evidence_for_module("infra_tls_review")
+    if defaults.get("collection_method") != "controlled_tls_review":
+        raise AssertionError("TLS review evidence defaults unexpected")
+    rel = evidence.default_relationship_evidence("infra_tls_review", "exposes_tls_service")
+    if rel.get("reliability") != "high":
+        raise AssertionError("TLS exposes_tls_service relationship evidence unexpected")
+
+    testing_levels = __import__(
+        "utils.module_testing_levels",
+        fromlist=["get_module_testing_level"],
+    )
+    if testing_levels.get_module_testing_level("infra_tls_review") != "safe_active_check":
+        raise AssertionError("infra_tls_review testing level should be safe_active_check")
+
+    source = module_path.read_text(encoding="utf-8")
+    if "subprocess" in source or "shell=True" in source:
+        raise AssertionError("infra_tls_review must not use subprocess/shell=True")
 
 
 def _check_evidence_model() -> None:
@@ -1739,6 +1859,7 @@ def _check_module_sdk() -> None:
         raise AssertionError(f"implemented modules failed metadata validation: {implemented_check['errors']}")
     for module_id in (
         "infra_nmap",
+        "infra_tls_review",
         "infra_domain_intel",
         "infra_cert_subdomain",
         "infra_website_metadata",
@@ -2616,6 +2737,11 @@ def main() -> int:
     run(
         "email security module",
         lambda: _check_email_security_module(),
+    )
+
+    run(
+        "tls review module",
+        lambda: _check_tls_review_module(),
     )
 
     run(

@@ -127,6 +127,42 @@ MODULES: list[ModuleEntry] = [
         ),
     ),
     ModuleEntry(
+        module_id="infra_tls_review",
+        display_name="SSL / TLS Configuration Review",
+        category="Infrastructure",
+        description="Controlled active TLS certificate and configuration review for a single authorised host.",
+        status="active",
+        mode="active",
+        risk_level="medium",
+        requires_authorisation=True,
+        requires_api_key=False,
+        implemented=True,
+        accepted_target_types=("domain", "url", "ipv4"),
+        config_notes=(
+            "No API key required. Opens a single TLS connection to the target host:port (default 443). "
+            "Requires authorisation and engagement/scope alignment for active testing."
+        ),
+        rate_limit_notes=(
+            "Active TLS handshake — single host/port per run; not subject to passive lookup rate limits."
+        ),
+        short_help="Controlled TLS certificate and protocol review for a domain, URL, or public IPv4 target.",
+        detailed_help=(
+            "Performs a normal TLS handshake to a single authorised host and port (default 443), inspects "
+            "certificate metadata, negotiated protocol/cipher, and optional safe per-version protocol probes. "
+            "Does not exploit vulnerabilities, fuzz endpoints, perform denial-of-service testing, or scan port ranges."
+        ),
+        example_inputs=("example.com", "https://example.com:8443/path", "8.8.8.8"),
+        output_summary=(
+            "TLS handshake summary, certificate metadata, protocol probe notes, entities, and cautious findings."
+        ),
+        caution_notes=(
+            "This module opens a normal TLS connection to the target — use only on owned or authorised assets.",
+            "Authorisation and engagement/scope controls apply before execution.",
+            "Does not exploit vulnerabilities, fuzz, or perform denial-of-service testing.",
+            "Results reflect the point in time tested and require client validation before remediation.",
+        ),
+    ),
+    ModuleEntry(
         module_id="infra_domain_intel",
         display_name="Domain Intelligence",
         category="Infrastructure",

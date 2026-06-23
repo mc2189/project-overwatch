@@ -434,6 +434,51 @@ def render_result_summary_tab(result: dict) -> None:
         if parsed_data.get("warning"):
             st.warning(parsed_data["warning"])
 
+    if result["module_id"] == "infra_tls_review" and parsed_data:
+        host = parsed_data.get("host")
+        port = parsed_data.get("port")
+        conn = parsed_data.get("connection") or {}
+        tls = parsed_data.get("tls") or {}
+        cert = parsed_data.get("certificate") or {}
+        st.markdown(f"**Target:** {parsed_data.get('target')}")
+        st.markdown(f"**Host / port:** {host}:{port}")
+        st.markdown(
+            f"**Connection:** {'success' if conn.get('success') else 'failed'}"
+            + (f" — {conn['error']}" if conn.get("error") else "")
+        )
+        if tls.get("version"):
+            st.markdown(f"**TLS version:** {tls['version']}")
+        if tls.get("cipher"):
+            st.markdown(f"**Cipher:** {tls['cipher']}")
+        if cert.get("subject"):
+            st.markdown(f"**Certificate subject:** {cert['subject']}")
+        if cert.get("issuer"):
+            st.markdown(f"**Issuer:** {cert['issuer']}")
+        if cert.get("not_after"):
+            st.markdown(
+                f"**Expiry:** {cert['not_after']} ({cert.get('days_until_expiry')} days remaining)"
+            )
+        san_names = cert.get("san_dns_names") or []
+        if san_names:
+            sample = ", ".join(san_names[:5])
+            suffix = f" (+{len(san_names) - 5} more)" if len(san_names) > 5 else ""
+            st.markdown(f"**SAN DNS names ({len(san_names)}):** {sample}{suffix}")
+        if cert.get("hostname_valid") is not None:
+            st.markdown(f"**Hostname validation:** {cert['hostname_valid']}")
+        if cert.get("chain_valid") is not None:
+            st.markdown(f"**Chain validation:** {cert['chain_valid']}")
+        probes = tls.get("protocol_probe") or {}
+        if probes:
+            probe_bits = []
+            for label, probe in probes.items():
+                if not probe.get("tested"):
+                    probe_bits.append(f"{label}: not tested")
+                else:
+                    probe_bits.append(
+                        f"{label}: {'accepted' if probe.get('accepted') else 'rejected'}"
+                    )
+            st.markdown(f"**Protocol probes:** {'; '.join(probe_bits)}")
+
 
 def render_result_interpretation_tab(result: dict) -> None:
     interpreter_findings = result.get("interpreter_findings") or []
@@ -650,6 +695,24 @@ def render_result_module_output_tab(result: dict) -> None:
                     "mta_sts": parsed_data.get("mta_sts"),
                     "tls_rpt": parsed_data.get("tls_rpt"),
                     "bimi": parsed_data.get("bimi"),
+                }
+            )
+
+    if result["module_id"] == "infra_tls_review" and parsed_data:
+        cert = parsed_data.get("certificate") or {}
+        san_names = cert.get("san_dns_names") or []
+        if san_names:
+            st.markdown("**SAN DNS names (sample)**")
+            st.dataframe(
+                pd.DataFrame({"dns_name": san_names[:20]}),
+                width="stretch",
+                hide_index=True,
+            )
+        with st.expander("Raw certificate details", expanded=False):
+            st.json(
+                {
+                    "certificate": cert,
+                    "raw_certificate": parsed_data.get("raw_certificate"),
                 }
             )
 

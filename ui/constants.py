@@ -21,6 +21,7 @@ NAV_PAGES: tuple[str, ...] = (
 
 IMPLEMENTED_MODULE_IDS: tuple[str, ...] = (
     "infra_nmap",
+    "infra_tls_review",
     "infra_domain_intel",
     "infra_cert_subdomain",
     "infra_website_metadata",
@@ -35,6 +36,7 @@ IMPLEMENTED_MODULE_IDS: tuple[str, ...] = (
 
 MODULE_CARD_TITLES: dict[str, str] = {
     "infra_nmap": "Network Service Check, powered by Nmap",
+    "infra_tls_review": "SSL / TLS Configuration Review",
     "infra_domain_intel": "Domain Intelligence",
     "infra_cert_subdomain": "Certificate & Subdomain Intelligence",
     "infra_website_metadata": "Website Metadata Review",

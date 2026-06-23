@@ -38,6 +38,7 @@ from utils.run_modes import (
     should_auto_apply_selection,
     sync_run_mode_from_case,
 )
+from utils.module_testing_levels import get_module_testing_level, testing_level_label
 from utils.settings_manager import has_api_key
 from utils.target_detection import get_target_type, normalize_target_value, target_type_label
 
@@ -331,6 +332,7 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
         st.info("Select one or more compatible modules above to configure them.")
     else:
         nmap_options: dict = {}
+        tls_review_options: dict = {}
         conservative_nmap = mode_uses_conservative_nmap(run_mode) or (
             run_mode == QUICK_CHECK and "infra_nmap" in selected_ids
         )
@@ -358,6 +360,57 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
                             "**High-risk option:** `--script=vuln` runs intrusive checks. "
                             "Use only with explicit written permission."
                         )
+                elif module_id == "infra_tls_review":
+                    st.caption("Active module — authorisation required.")
+                    st.warning(
+                        "This performs a live TLS connection to the target. "
+                        "No exploit, fuzzing, or denial-of-service testing."
+                    )
+                    target_type = get_target_type(target)
+                    derived_host = target.strip()
+                    derived_port = 443
+                    if target_type == "url":
+                        from urllib.parse import urlparse
+
+                        parsed = urlparse(target if "://" in target else f"https://{target}")
+                        derived_host = (parsed.hostname or derived_host).lower()
+                        if parsed.port:
+                            derived_port = parsed.port
+                    elif target_type == "domain":
+                        derived_host = normalize_target_value(target, "domain")
+                    elif target_type == "ipv4":
+                        derived_host = normalize_target_value(target, "ipv4")
+
+                    port_override = st.number_input(
+                        "Port",
+                        min_value=1,
+                        max_value=65535,
+                        value=int(derived_port),
+                        step=1,
+                        key="tls_review_port_override",
+                        help="Single port only — default 443. Comma-separated ports and ranges are not supported.",
+                    )
+                    tls_review_options = {
+                        "port_override": int(port_override),
+                        "protocol_probes": True,
+                    }
+                    st.markdown(f"**Derived host:** `{derived_host}`")
+                    st.markdown(f"**Derived port:** `{port_override}`")
+                    st.markdown(f"**Default port:** 443 (unless URL or override specifies otherwise)")
+                    testing_level = get_module_testing_level(module_id)
+                    st.markdown(f"**Testing level:** {testing_level_label(testing_level)}")
+                    if current_case:
+                        scope = assess_target_scope(target, case_id=current_case["id"])
+                        st.markdown(
+                            f"**Engagement scope status:** {scope.get('scope_status', 'unknown')}"
+                        )
+                        if scope.get("permitted_testing_level"):
+                            st.markdown(
+                                f"**Permitted testing level (asset):** "
+                                f"{scope['permitted_testing_level'].replace('_', ' ')}"
+                            )
+                        for warning in scope.get("warnings") or []:
+                            st.caption(warning)
                 elif module_id == "infra_domain_intel":
                     st.caption("Passive module — no authorisation required.")
                     st.write(
@@ -471,6 +524,7 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
                             ".env file. This module will be blocked until a key is set."
                         )
         st.session_state.nmap_options = nmap_options
+        st.session_state.tls_review_options = tls_review_options
 
     st.divider()
 
@@ -660,6 +714,12 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
                     options = {}
                     if module_id == "infra_nmap":
                         options = {"nmap_options": nmap_options}
+                    elif module_id == "infra_tls_review":
+                        tls_opts = st.session_state.get("tls_review_options", {})
+                        options = {
+                            "port_override": tls_opts.get("port_override"),
+                            "protocol_probes": tls_opts.get("protocol_probes", True),
+                        }
                     options["standalone_authorised_testing"] = st.session_state.get(
                         "standalone_authorised_testing", False
                     )

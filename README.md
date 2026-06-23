@@ -1,10 +1,10 @@
-# Project Overwatch v2.8
+# Project Overwatch v2.9
 
 Project Overwatch is a **local** Python/Streamlit intelligence, OSINT, security testing and resilience advisory dashboard for **private internal use** supporting future client assessments.
 
-**v2.8** adds client engagements, scoped assets, rules of engagement, and executor guardrails to prepare for authorised active/intrusive testing modules.
+**v2.9** adds **SSL / TLS Configuration Review** — a controlled active TLS certificate and configuration module that respects the v2.8 engagement/scope framework.
 
-**v2.7** added Domain Email Security Posture. **v2.6** added URLhaus. **v2.5** added Shodan. Earlier releases added GreyNoise, AbuseIPDB, VirusTotal, and the secure-by-design baseline.
+**v2.8** added client engagements, scoped assets, rules of engagement, and executor guardrails. **v2.7** added Domain Email Security Posture. **v2.6** added URLhaus. **v2.5** added Shodan. Earlier releases added GreyNoise, AbuseIPDB, VirusTotal, and the secure-by-design baseline.
 
 Use only on systems you own, lab environments, or targets with **written permission**.
 
@@ -82,6 +82,7 @@ Results appear automatically in Operations, Observations, Findings, Relationship
 ### Module cards on Run Operation
 
 - **Network Service Check, powered by Nmap** — active; IPv4 or domain only (not URL — enter hostname separately for port scans).
+- **SSL / TLS Configuration Review** — active; domain, URL, or IPv4; single host:port TLS handshake (default 443); authorisation and engagement/scope required.
 - **WHOIS / RDAP Intelligence** — passive registration/allocation metadata for domain, URL (host extracted), or public IPv4 via public RDAP.
 - **VirusTotal Reputation Intelligence** — passive API reputation enrichment for domain, URL, or public IPv4 (`VIRUSTOTAL_API_KEY` required; private IPs skipped).
 - **AbuseIPDB Reputation Intelligence** — passive abuse-confidence lookup for public IPv4 only (`ABUSEIPDB_API_KEY` required; lookup-only, no report submission).
@@ -100,7 +101,7 @@ After entering a target, choose **What do you want to do?** on Run Operation:
 | Run mode | Purpose | Typical recommendations |
 |----------|---------|-------------------------|
 | **Quick Check** | Simple default | IPv4 → Network Service Check (+ WHOIS/RDAP; optional AbuseIPDB/VirusTotal/Shodan/URLhaus when keyed; GreyNoise for public IPv4); domain/URL → passive domain modules (+ optional VirusTotal/URLhaus); email/username/unknown → none |
-| **Website / Domain Footprint** | Passive domain footprint | WHOIS/RDAP + Domain Intelligence + Email Security Posture + Certificate & Subdomain + Website Metadata (+ VirusTotal/URLhaus if key configured; no Nmap, AbuseIPDB, GreyNoise or Shodan by default) |
+| **Website / Domain Footprint** | Passive domain footprint | WHOIS/RDAP + Domain Intelligence + Email Security Posture + Certificate & Subdomain + Website Metadata (+ VirusTotal/URLhaus if key configured; TLS Review available but not selected by default) |
 | **Local Device / IP Check** | Conservative active IP scan | Network Service Check; public IPv4 may recommend WHOIS/RDAP, GreyNoise, and optional AbuseIPDB/VirusTotal/Shodan/URLhaus; private/local IPs skip API reputation modules; authorisation required |
 | **Custom Module Selection** | Power-user manual pick | All compatible modules shown; no automatic preselection when you change target |
 
@@ -457,6 +458,24 @@ Included in **Quick Check** and **Website / Domain Footprint** for domain/URL ta
 4. Review SPF/DMARC/MX summary in **Latest Results**; expand record details in the Structured tab.
 5. Check **Findings**, **Evidence Locker**, and **Report** for advisory email security observations.
 
+### SSL / TLS Configuration Review (v2.9)
+
+Controlled **active** TLS review for a single authorised host:port (default 443).
+
+- **Module ID:** `infra_tls_review`
+- **Targets:** domain, URL (host/port extracted), or IPv4
+- **Checks:** TLS handshake, certificate subject/issuer/expiry/SANs, hostname and chain validation, optional safe TLS 1.0–1.3 probes (one handshake per version)
+- **Not included:** exploitation, fuzzing, DoS, port ranges, STARTTLS, credential testing, MITM
+- **Guardrails:** authorisation required; engagement scope and ROE enforced before connection; emergency stop blocks execution
+- **Point-in-time:** results reflect the moment tested — validate with the client before remediation
+
+**How to test (with engagement):**
+
+1. Create an active engagement with `example.com` in scope at **safe active** level; enable active scanning in ROE.
+2. Link a case to the engagement → **Run Operation** → select **SSL / TLS Configuration Review** → confirm authorisation → run against `example.com` or `https://example.com`.
+3. Confirm emergency stop blocks the module; confirm passive modules still run without engagement.
+4. Review TLS summary, findings, evidence, entities (`exposes_tls_service`, `presents_certificate`), and report sections.
+
 ### Client engagements and authorised testing (v2.8)
 
 Project Overwatch is intended to support a future **security testing / OSINT / resilience advisory** business. Intrusive modules are on the roadmap but must only run inside a documented **client engagement** with scope and rules of engagement (ROE).
@@ -472,7 +491,7 @@ Project Overwatch is intended to support a future **security testing / OSINT / r
 **Run Operation guardrails:**
 
 - Passive OSINT modules continue to work as today (scope warnings shown when an engagement is linked)
-- **Nmap** and future active modules require authorisation confirmation **and** engagement/scope checks (or explicit standalone authorised testing when no engagement is linked)
+- **Nmap** and **SSL / TLS Configuration Review** (and future active modules) require authorisation confirmation **and** engagement/scope checks (or explicit standalone authorised testing when no engagement is linked)
 - Out-of-scope and unknown targets block active/intrusive runs
 
 **Module testing levels:** passive lookup · safe active check · intrusive active check · high-risk manual only · prohibited

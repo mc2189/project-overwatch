@@ -328,11 +328,13 @@ def get_recommendation_reason(
         if _virustotal_configured():
             return (
                 "Website / Domain Footprint recommends passive registration metadata (RDAP), DNS, email security posture, "
-                "HTTP/TLS, certificate transparency, and optional VirusTotal reputation enrichment. Nmap is not included by default."
+                "HTTP/TLS, certificate transparency, and optional VirusTotal reputation enrichment. "
+                "SSL / TLS Configuration Review is available (active, authorisation required) but not selected by default."
             )
         return (
             "Website / Domain Footprint recommends passive registration metadata (RDAP), DNS, email security posture, "
-            "HTTP/TLS, and certificate transparency lookups. Nmap is not included by default."
+            "HTTP/TLS, and certificate transparency lookups. SSL / TLS Configuration Review is available "
+            "(active, authorisation required) but not selected by default."
         )
 
     if mode_id == LOCAL_IP_CHECK:

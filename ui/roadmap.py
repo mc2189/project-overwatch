@@ -28,6 +28,7 @@ ROADMAP_SECTIONS: tuple[dict[str, object], ...] = (
             "intel_shodan",
             "intel_urlhaus",
             "infra_nmap",
+            "infra_tls_review",
         ),
     },
     {
@@ -39,7 +40,6 @@ ROADMAP_SECTIONS: tuple[dict[str, object], ...] = (
         "module_ids": (
             "vuln_nuclei",
             "vuln_ffuf",
-            "infra_ssl_tls",
             "infra_http_headers",
             "infra_web_fingerprint",
             "vuln_web_misconfig",

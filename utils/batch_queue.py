@@ -28,7 +28,7 @@ PASSIVE_BATCH_MODULE_IDS: tuple[str, ...] = (
     "intel_urlhaus",
 )
 
-ACTIVE_BATCH_MODULE_IDS: tuple[str, ...] = ("infra_nmap",)
+ACTIVE_BATCH_MODULE_IDS: tuple[str, ...] = ("infra_nmap", "infra_tls_review")
 
 QUEUE_STATUSES: tuple[str, ...] = (
     "queued",

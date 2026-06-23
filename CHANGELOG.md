@@ -2,6 +2,20 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.9.0 — SSL / TLS Configuration Review
+
+- **`infra_tls_review`** — controlled active TLS certificate and configuration review for domain, URL, or IPv4 targets
+- Module path: `modules/2_infrastructure/infra_tls_review.py`
+- First controlled **active** client-assessment module after the v2.8 engagement framework
+- Opens a single TLS connection to host:port (default 443) — no API key required
+- Inspects certificate metadata, negotiated protocol/cipher, and optional safe per-version protocol probes
+- Requires authorisation; respects engagement scope, ROE, and emergency stop before connecting
+- Does not exploit vulnerabilities, fuzz, perform denial-of-service testing, or scan port ranges
+- Service, certificate, and issuer entities with `exposes_tls_service`, `presents_certificate`, and `issued_by` relationships
+- Evidence capture with `controlled_tls_review` collection method
+- Available in Custom Module Selection and Website / Domain Footprint (not selected by default); not in Quick Check by default
+- Batch Queue treats TLS Review as an active module (not queued by default)
+
 ## v2.8.0 — Client Engagement, Scope and Authorised Testing Framework
 
 - **Client Engagements page** — create/edit engagements with client details, status, contacts, and authorisation references

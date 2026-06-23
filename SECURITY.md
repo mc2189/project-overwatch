@@ -22,7 +22,7 @@ Project Overwatch is a **local-only** defensive intelligence dashboard. This doc
 ## Active module authorisation
 
 - **Passive** modules perform read-only public lookups and do not require authorisation.
-- **Active** modules (e.g. Nmap) require:
+- **Active** modules (e.g. Nmap, SSL / TLS Configuration Review) require:
   - global enablement (`PROJECT_OVERWATCH_ENABLE_ACTIVE_MODULES=true`), and
   - per-run authorisation confirmation in the UI.
 - Disabled/quarantined modules are not importable for execution through the registry and executor.
@@ -73,6 +73,16 @@ The **Domain Email Security Posture** module (`infra_email_security`) is **passi
 - Findings are advisory — absence of a record in this lookup does not prove misconfiguration
 - No API keys or secrets are used by this module
 
+## SSL / TLS Configuration Review (v2.9)
+
+- **Module ID:** `infra_tls_review` — controlled active assessment (`safe_active_check`)
+- Allowed: single host:port TLS handshake (default 443), certificate metadata inspection, negotiated protocol/cipher, optional one-handshake-per-version protocol probes using Python `ssl`/`socket`
+- **Not allowed:** vulnerability exploitation, fuzzing, denial-of-service testing, repeated aggressive handshakes, mass scanning, port ranges, STARTTLS, credential testing, bypass/evasion, intrusive payloads, SSL stripping, or MITM behaviour
+- Requires authorisation and engagement/scope/ROE guardrails (or explicit standalone authorised testing) before connecting
+- Uses standard-library networking only — no subprocess, no `shell=True`
+- Results are point-in-time observations — not proof of ongoing posture
+- No API keys or secrets are used by this module
+
 ## Authorised assessment model (v2.8)
 
 Project Overwatch is designed for **authorised client assessments**, not unconstrained scanning.
@@ -85,7 +95,7 @@ Project Overwatch is designed for **authorised client assessments**, not unconst
 - **Active/intrusive modules** require: authorisation confirmation, in-scope target (or standalone authorised testing), active engagement status, ROE permission, and no emergency stop
 - **Prohibited by default:** unauthorised testing, DoS, credential attacks, social engineering automation, malware deployment, evasion/persistence, destructive testing, exfiltration
 
-No new intrusive modules are enabled in v2.8 — this release adds the governance framework only.
+v2.9 enables **SSL / TLS Configuration Review** as the first controlled active assessment module under this framework. Intrusive modules (e.g. Nuclei, ffuf) remain planned and disabled.
 
 ## Security audit
 

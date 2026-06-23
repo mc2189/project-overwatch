@@ -110,6 +110,13 @@ MODULE_EVIDENCE_DEFAULTS: dict[str, dict[str, Any]] = {
         "reliability": RELIABILITY_HIGH,
         "collection_method": "passive_dns_email_security_lookup",
     },
+    "infra_tls_review": {
+        "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
+        "source_name": "TLS handshake",
+        "source_url": None,
+        "reliability": RELIABILITY_HIGH,
+        "collection_method": "controlled_tls_review",
+    },
     "infra_whois_rdap": {
         "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
         "source_name": "rdap.org",
@@ -158,6 +165,18 @@ RELATIONSHIP_EVIDENCE_DEFAULTS: dict[tuple[str, str], dict[str, Any]] = {
     ("infra_nmap", "exposes_service"): {
         "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
         "reliability": RELIABILITY_HIGH,
+    },
+    ("infra_tls_review", "exposes_tls_service"): {
+        "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
+        "reliability": RELIABILITY_HIGH,
+    },
+    ("infra_tls_review", "presents_certificate"): {
+        "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
+        "reliability": RELIABILITY_HIGH,
+    },
+    ("infra_tls_review", "issued_by"): {
+        "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
+        "reliability": RELIABILITY_MEDIUM,
     },
     ("infra_domain_intel", "resolves_to"): {
         "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
@@ -330,6 +349,13 @@ def observation_evidence_for_module(
         status = result.get("status", "")
         if status in {"partial", "error"}:
             meta["reliability"] = RELIABILITY_MEDIUM
+    if module_id == "infra_tls_review" and result is not None:
+        parsed = result.get("parsed_data") or {}
+        conn = parsed.get("connection") or {}
+        if not conn.get("success"):
+            meta["reliability"] = RELIABILITY_MEDIUM
+            if conn.get("error"):
+                meta["evidence_type"] = EVIDENCE_UNAVAILABLE_SOURCE
     if module_id == "infra_domain_intel" and result is not None:
         parsed = result.get("parsed_data") or {}
         http = parsed.get("http") or {}
