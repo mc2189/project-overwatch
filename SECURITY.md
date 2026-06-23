@@ -73,6 +73,20 @@ The **Domain Email Security Posture** module (`infra_email_security`) is **passi
 - Findings are advisory — absence of a record in this lookup does not prove misconfiguration
 - No API keys or secrets are used by this module
 
+## Authorised assessment model (v2.8)
+
+Project Overwatch is designed for **authorised client assessments**, not unconstrained scanning.
+
+- **Engagements** document client authorisation, contacts, and assessment type
+- **Scope assets** define what may be tested and at what level (passive / safe active / intrusive / manual only)
+- **Rules of engagement** define prohibited actions and whether active or intrusive testing is permitted
+- **Emergency stop** halts active/intrusive testing immediately while preserving audit records
+- **Passive OSINT** modules may run without an engagement but should still respect written permission for real targets
+- **Active/intrusive modules** require: authorisation confirmation, in-scope target (or standalone authorised testing), active engagement status, ROE permission, and no emergency stop
+- **Prohibited by default:** unauthorised testing, DoS, credential attacks, social engineering automation, malware deployment, evasion/persistence, destructive testing, exfiltration
+
+No new intrusive modules are enabled in v2.8 — this release adds the governance framework only.
+
 ## Security audit
 
 Run the local audit before releases or after changing configuration handling:

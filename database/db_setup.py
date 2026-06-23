@@ -333,6 +333,9 @@ def get_db_conn() -> sqlite3.Connection:
     _migrate_cases_table(conn)
     _migrate_operations_table(conn)
     ensure_evidence_columns(conn)
+    from database.engagements import ensure_engagement_tables
+
+    ensure_engagement_tables(conn)
     return conn
 
 

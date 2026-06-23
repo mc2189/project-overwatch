@@ -180,6 +180,7 @@ def build_report_options_from_state(
         include_closed_findings=st.session_state.get("include_closed_findings", False),
         include_raw_appendix=st.session_state.get("include_raw_appendix", False),
         include_graph_appendix=st.session_state.get("include_graph_appendix", False),
+        include_engagement_context=st.session_state.get("include_engagement_context", False),
         template=st.session_state.get("report_template", "full"),
         redactions=redactions,
         branding=branding,

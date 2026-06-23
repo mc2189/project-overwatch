@@ -1,12 +1,10 @@
-# Project Overwatch v2.7
+# Project Overwatch v2.8
 
-Project Overwatch is a **local** Python/Streamlit dashboard for defensive security intelligence.
+Project Overwatch is a **local** Python/Streamlit intelligence, OSINT, security testing and resilience advisory dashboard for **private internal use** supporting future client assessments.
 
-**v2.7** adds Domain Email Security Posture for passive SPF, DMARC, MX, CAA, MTA-STS, TLS-RPT and BIMI review.
+**v2.8** adds client engagements, scoped assets, rules of engagement, and executor guardrails to prepare for authorised active/intrusive testing modules.
 
-**v2.6** added URLhaus Malware URL Intelligence. **v2.5** added Shodan. **v2.4** added GreyNoise. **v2.3** added AbuseIPDB. **v2.2** added VirusTotal and platform scaffold polish.
-
-**v2.1** established the secure-by-design baseline.
+**v2.7** added Domain Email Security Posture. **v2.6** added URLhaus. **v2.5** added Shodan. Earlier releases added GreyNoise, AbuseIPDB, VirusTotal, and the secure-by-design baseline.
 
 Use only on systems you own, lab environments, or targets with **written permission**.
 
@@ -19,6 +17,7 @@ The sidebar provides case selection and main navigation:
 | Page | Purpose |
 |------|---------|
 | **Run Operation** | Target entry, module cards, configuration, operation plan, launch |
+| **Client Engagements** | Client engagement records, scope assets, rules of engagement, emergency stop |
 | **Findings** | Triage advisory findings |
 | **Entity Workspace** | Inspect entities, pivot to compatible modules, edit analyst notes |
 | **Batch Queue** | Queue passive follow-up modules for multiple entities; controlled batch runner |
@@ -457,6 +456,28 @@ Included in **Quick Check** and **Website / Domain Footprint** for domain/URL ta
 3. Ensure **Domain Email Security Posture** is selected → run (passive only).
 4. Review SPF/DMARC/MX summary in **Latest Results**; expand record details in the Structured tab.
 5. Check **Findings**, **Evidence Locker**, and **Report** for advisory email security observations.
+
+### Client engagements and authorised testing (v2.8)
+
+Project Overwatch is intended to support a future **security testing / OSINT / resilience advisory** business. Intrusive modules are on the roadmap but must only run inside a documented **client engagement** with scope and rules of engagement (ROE).
+
+**Client Engagements page:**
+
+- Create engagements (client, type, dates, status, contacts, authorisation/SOW references)
+- Record **scope assets** with status: in-scope, out-of-scope, restricted, pending approval
+- Set **permitted testing level** per asset: passive only, safe active, intrusive active, manual only
+- Configure **ROE** with conservative defaults (no DoS, credentials, social engineering, or malware handling by default)
+- **Emergency stop** — blocks active/intrusive modules for that engagement; passive modules may still run
+
+**Run Operation guardrails:**
+
+- Passive OSINT modules continue to work as today (scope warnings shown when an engagement is linked)
+- **Nmap** and future active modules require authorisation confirmation **and** engagement/scope checks (or explicit standalone authorised testing when no engagement is linked)
+- Out-of-scope and unknown targets block active/intrusive runs
+
+**Module testing levels:** passive lookup · safe active check · intrusive active check · high-risk manual only · prohibited
+
+See **Roadmap** for planned authorised assessment modules (Nuclei, ffuf, etc.) — listed as future capabilities requiring engagement controls, not permanently excluded.
 
 ## Investigation model
 

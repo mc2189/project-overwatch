@@ -2,6 +2,20 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.8.0 — Client Engagement, Scope and Authorised Testing Framework
+
+- **Client Engagements page** — create/edit engagements with client details, status, contacts, and authorisation references
+- **Scope model** — scoped assets with status (in/out/restricted/pending) and permitted testing levels
+- **Rules of engagement (ROE)** — conservative defaults; active/intrusive/DoS/credential/social/malware flags
+- **Emergency stop** — per-engagement flag blocks active/intrusive modules; passive modules may continue
+- **Module testing levels** — `passive_lookup`, `safe_active_check`, `intrusive_active_check`, `high_risk_manual_only`, `prohibited`
+- **Executor guardrails** — scope/engagement/ROE checks before active modules; passive workflow preserved
+- **Run Operation** — engagement context, scope warnings, standalone authorised testing option
+- **Case ↔ engagement linking** — optional `cases.engagement_id` column
+- **Reports** — optional engagement/authorisation context section (off by default)
+- **Roadmap restructure** — intrusive tools listed as planned authorised assessment modules, not permanently excluded
+- Database tables: `engagements`, `engagement_scope`, `engagement_roe`
+
 ## v2.7.0 — Domain Email Security Posture
 
 - **`infra_email_security`** — passive DNS-based review of SPF, DMARC, MX, CAA, MTA-STS, TLS-RPT and BIMI for domain/URL targets

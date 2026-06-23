@@ -3407,6 +3407,42 @@ def execute_module(
             )
         return result
 
+    from utils.engagement_guardrails import check_engagement_execution
+
+    standalone_authorised = bool(options.get("standalone_authorised_testing"))
+    guardrail = check_engagement_execution(
+        module_id,
+        target,
+        case_id=case_id,
+        authorisation_confirmed=authorisation_confirmed,
+        standalone_authorised_testing=standalone_authorised,
+        options=options,
+        conn=db_context,
+    )
+    if not guardrail["allowed"]:
+        reason = guardrail.get("blocked_reason") or "Engagement guardrail blocked this module run."
+        result = make_result(
+            module_id,
+            success=False,
+            status="blocked",
+            summary=reason,
+            errors=[reason],
+            warnings=guardrail.get("warnings") or [],
+        )
+        if db_context is not None and case_id is not None:
+            create_operation_log(
+                case_id,
+                module_id,
+                target,
+                "blocked",
+                authorisation_confirmed=authorisation_confirmed,
+                summary=reason,
+                run_mode_id=run_mode_id,
+                run_mode_label=run_mode_label,
+                conn=db_context,
+            )
+        return result
+
     if module.requires_authorisation and not authorisation_confirmed:
         return make_result(
             module_id,

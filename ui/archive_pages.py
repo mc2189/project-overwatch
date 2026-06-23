@@ -539,6 +539,11 @@ def render_report_page(case_id: int, metrics: dict[str, int]) -> None:
             help="Embeds a PNG graph in the appendix when kaleido is available.",
             key="include_graph_appendix",
         )
+        include_engagement_context = st.checkbox(
+            "Include engagement / authorisation context",
+            help="Adds client engagement, scope summary, ROE limitations, and authorised testing statement.",
+            key="include_engagement_context",
+        )
         redact_ips = st.checkbox("Redact IP addresses", key="redact_ips")
         redact_emails = st.checkbox("Redact email addresses", key="redact_emails")
         redact_domains = st.checkbox("Redact domain names", key="redact_domains")

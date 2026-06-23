@@ -61,6 +61,7 @@ class ReportOptions:
     branding: ReportBranding | None = None
     custom_redaction_terms: list[str] = field(default_factory=list)
     custom_redaction_regex: str = ""
+    include_engagement_context: bool = False
 
 
 def _lookup_notices_from_observations(observations: list[dict[str, Any]]) -> list[str]:
@@ -394,6 +395,46 @@ def build_case_report(
         "Findings are analyst aids, not final proof of risk. Review all content before sharing externally.",
         "",
     ]
+
+    if options.include_engagement_context:
+        from database.engagements import engagement_summary_for_report, get_engagement_for_case
+
+        engagement_id = (case or {}).get("engagement_id")
+        summary = engagement_summary_for_report(int(engagement_id), conn=conn) if engagement_id else {}
+        engagement = summary.get("engagement") or get_engagement_for_case(case_id, conn=conn)
+        roe = summary.get("roe") or {}
+        lines.extend(["## Engagement and Authorisation Context", ""])
+        if not engagement:
+            lines.append(
+                "_No client engagement linked to this case. Passive collection may still be present; "
+                "active testing should only occur under documented authorisation._"
+            )
+            lines.append("")
+        else:
+            lines.append(f"- **Engagement:** {engagement.get('name')}")
+            if options.include_engagement_context:
+                lines.append(f"- **Client:** {engagement.get('client_name') or '—'}")
+            lines.append(f"- **Assessment type:** {engagement.get('engagement_type') or '—'}")
+            lines.append(f"- **Status:** {engagement.get('status')}")
+            lines.append(f"- **Authorisation reference:** {engagement.get('authorisation_reference') or '—'}")
+            lines.append(f"- **In-scope assets recorded:** {summary.get('in_scope_count', 0)}")
+            if summary.get("scope_summary"):
+                lines.append(f"- **Scope summary:** {summary['scope_summary']}")
+            lines.append(
+                "- **Testing limitations:** "
+                f"Active scanning {'permitted' if roe.get('active_scanning_allowed') else 'not permitted'}; "
+                f"intrusive testing {'permitted' if roe.get('intrusive_testing_allowed') else 'not permitted'}; "
+                f"DoS {'permitted' if roe.get('denial_of_service_allowed') else 'not permitted (default)'}."
+            )
+            if roe.get("prohibited_actions"):
+                lines.append(f"- **Prohibited actions (ROE):** {roe['prohibited_actions']}")
+            if roe.get("evidence_handling_notes"):
+                lines.append(f"- **Evidence handling:** {roe['evidence_handling_notes']}")
+            lines.append(
+                "- **Authorised testing statement:** Testing was performed using Project Overwatch under the "
+                "linked engagement rules where applicable. Findings are advisory and require human review."
+            )
+            lines.append("")
 
     if options.template == "full":
         lines.extend(["## Entities", ""])

@@ -2437,6 +2437,76 @@ def _check_module_sdk_unit_tests() -> None:
         )
 
 
+def _check_engagement_framework() -> None:
+    from database.engagements import (
+        SCOPE_STATUSES,
+        add_scope_item,
+        create_engagement,
+        default_roe_payload,
+        ensure_engagement_tables,
+        get_engagement_for_case,
+        get_roe,
+        link_case_to_engagement,
+        list_scope_items,
+    )
+    from database.db_setup import get_db_conn, get_or_create_default_case
+    from utils.engagement_guardrails import assess_target_scope, check_engagement_execution
+    from utils.module_testing_levels import get_module_testing_level, is_active_testing_level
+
+    conn = get_db_conn()
+    try:
+        ensure_engagement_tables(conn)
+        created = create_engagement(name="Smoke Engagement", client_name="Smoke Client", conn=conn)
+        engagement_id = int(created["id"])
+        roe = get_roe(engagement_id, conn=conn)
+        if roe.get("denial_of_service_allowed"):
+            raise AssertionError("default ROE should not allow DoS")
+        add_scope_item(
+            engagement_id,
+            asset_value="example.com",
+            asset_type="domain",
+            scope_status="in_scope",
+            permitted_testing_level="safe_active",
+            conn=conn,
+        )
+        items = list_scope_items(engagement_id, conn=conn)
+        if len(items) != 1:
+            raise AssertionError("scope item not created")
+        case = get_or_create_default_case(conn=conn)
+        link_case_to_engagement(case["id"], engagement_id, conn=conn)
+        linked = get_engagement_for_case(case["id"], conn=conn)
+        if linked is None or linked["id"] != engagement_id:
+            raise AssertionError("case engagement link failed")
+        assessment = assess_target_scope("example.com", case_id=case["id"], conn=conn)
+        if assessment.get("scope_status") != "in_scope":
+            raise AssertionError("scope assessment should match in-scope domain")
+        passive = check_engagement_execution(
+            "infra_domain_intel",
+            "example.com",
+            case_id=case["id"],
+            authorisation_confirmed=False,
+            conn=conn,
+        )
+        if not passive.get("allowed"):
+            raise AssertionError("passive module should be allowed")
+        active = check_engagement_execution(
+            "infra_nmap",
+            "example.com",
+            case_id=case["id"],
+            authorisation_confirmed=False,
+            conn=conn,
+        )
+        if active.get("allowed"):
+            raise AssertionError("active module should be blocked without authorisation")
+        level = get_module_testing_level("infra_nmap", {"nmap_options": {"script_category": "vuln"}})
+        if level != "intrusive_active_check":
+            raise AssertionError("nmap vuln scripts should map to intrusive level")
+        if not is_active_testing_level(level):
+            raise AssertionError("intrusive nmap level should be active")
+    finally:
+        conn.close()
+
+
 def main() -> int:
     print(f"Project Overwatch smoke check (root: {PROJECT_ROOT})")
     errors = 0
@@ -2601,6 +2671,11 @@ def main() -> int:
     run(
         "module SDK unit tests",
         lambda: _check_module_sdk_unit_tests(),
+    )
+
+    run(
+        "engagement framework",
+        lambda: _check_engagement_framework(),
     )
 
     run(

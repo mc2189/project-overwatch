@@ -20,6 +20,7 @@ from ui.evidence_page import render_evidence_page
 from ui.findings_page import render_findings_page
 from ui.metrics import load_case_metrics
 from ui.roadmap import render_roadmap_page
+from ui.engagements_page import render_engagements_page
 from ui.run_operation import render_run_operation_page
 from ui.sidebar import render_sidebar
 from utils.local_auth import render_local_auth_gate
@@ -65,6 +66,8 @@ metrics = load_case_metrics(st.session_state.case_id)
 
 if nav_page == "Run Operation":
     render_run_operation_page(current_case, metrics)
+elif nav_page == "Client Engagements":
+    render_engagements_page(current_case)
 elif nav_page == "Findings":
     render_findings_page(st.session_state.case_id, metrics)
 elif nav_page == "Entity Workspace":

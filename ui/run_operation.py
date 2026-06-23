@@ -5,6 +5,7 @@ from __future__ import annotations
 import streamlit as st
 
 from database.db_setup import create_or_get_entity, get_db_conn, infer_entity_type
+from database.engagements import get_engagement_for_case
 from modules.executor import execute_module
 from modules.module_registry import get_module, is_executable
 from ui.constants import IMPLEMENTED_MODULE_IDS, MODULE_CARD_TITLES
@@ -17,6 +18,7 @@ from utils.module_compatibility import (
     module_detailed_help,
     module_short_help,
 )
+from utils.engagement_guardrails import assess_target_scope, enrich_operation_plan
 from utils.nmap_options import PROFILE_QUICK_CHECK, SCRIPT_VULN
 from utils.nmap_ui import render_nmap_options
 from utils.run_modes import (
@@ -472,6 +474,38 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
 
     st.divider()
 
+    # Engagement context
+    linked_engagement = get_engagement_for_case(current_case["id"])
+    if linked_engagement:
+        st.markdown("### Client engagement")
+        st.info(
+            f"**{linked_engagement.get('name')}** · Client: {linked_engagement.get('client_name') or '—'} · "
+            f"Status: {linked_engagement.get('status')} · "
+            f"Auth ref: {linked_engagement.get('authorisation_reference') or '—'}"
+        )
+        if linked_engagement.get("emergency_stop_active"):
+            st.error("Emergency stop is active for this engagement — active/intrusive modules will be blocked.")
+    else:
+        st.caption(
+            "No client engagement linked to this case. Passive modules can run as usual. "
+            "Active modules require standalone authorised testing confirmation or a linked engagement."
+        )
+    if target.strip():
+        scope_preview = assess_target_scope(target.strip(), case_id=current_case["id"])
+        scope_label = scope_preview.get("scope_status") or "unknown"
+        st.caption(
+            f"Target scope status: **{scope_label.replace('_', ' ')}**"
+            + (
+                f" · Permitted level: {scope_preview.get('permitted_testing_level')}"
+                if scope_preview.get("permitted_testing_level")
+                else ""
+            )
+        )
+        for warning in scope_preview.get("warnings") or []:
+            st.warning(warning)
+
+    st.divider()
+
     # Step 4 — Operation Plan
     st.markdown("### Step 4 — Operation Plan")
     auth_required = _selection_requires_authorisation(selected_ids)
@@ -486,6 +520,16 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
         run_mode_id=run_mode,
         run_mode_label=get_run_mode_label(run_mode),
         recommendation_reason=recommendation_reason,
+    )
+    standalone_authorised = st.session_state.get("standalone_authorised_testing", False)
+    nmap_options_preview = st.session_state.get("nmap_options", {})
+    plan = enrich_operation_plan(
+        plan,
+        target=target,
+        case_id=current_case["id"],
+        selected_module_ids=selected_ids,
+        standalone_authorised_testing=standalone_authorised,
+        nmap_options=nmap_options_preview,
     )
 
     with st.container(border=True):
@@ -519,11 +563,26 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
                 st.warning("Some selected modules are incompatible with this target:")
                 for line in plan["incompatible_modules"]:
                     st.markdown(f"- {line}")
+            if plan.get("engagement_blocked_modules"):
+                st.warning("Engagement / scope guardrails block some selected modules:")
+                for line in plan["engagement_blocked_modules"]:
+                    st.markdown(f"- {line}")
 
     st.divider()
 
     # Authorisation and launch
     if auth_required:
+        if not linked_engagement:
+            standalone_authorised = st.checkbox(
+                "Standalone authorised testing (no linked engagement)",
+                value=st.session_state.get("standalone_authorised_testing", False),
+                key="standalone_authorised_testing_checkbox",
+                help=(
+                    "Use only for lab assets or targets with documented written permission when no "
+                    "client engagement record is linked to this case."
+                ),
+            )
+            st.session_state.standalone_authorised_testing = standalone_authorised
         authorisation_confirmed = st.checkbox(
             "I confirm I am authorised to run active checks against this target.",
             value=st.session_state.get("authorisation_confirmed", False),
@@ -538,6 +597,24 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
         st.caption("No authorisation checkbox is required — all selected modules are passive.")
         authorisation_confirmed = False
 
+    plan = enrich_operation_plan(
+        build_operation_plan(
+            case_name=current_case["name"],
+            case_id=current_case["id"],
+            target=target,
+            selected_module_ids=selected_ids,
+            authorisation_confirmed=authorisation_confirmed if auth_required else True,
+            run_mode_id=run_mode,
+            run_mode_label=get_run_mode_label(run_mode),
+            recommendation_reason=recommendation_reason,
+        ),
+        target=target,
+        case_id=current_case["id"],
+        selected_module_ids=selected_ids,
+        standalone_authorised_testing=st.session_state.get("standalone_authorised_testing", False),
+        nmap_options=st.session_state.get("nmap_options", {}),
+    )
+
     launch_blocked_reason = None
     if not target.strip():
         launch_blocked_reason = "Enter a target before running modules."
@@ -547,6 +624,8 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
         launch_blocked_reason = "Remove incompatible modules from the selection."
     elif auth_required and not authorisation_confirmed:
         launch_blocked_reason = "Confirm authorisation for active modules before running."
+    elif plan.get("engagement_blocked_modules"):
+        launch_blocked_reason = "Resolve engagement/scope guardrail blocks before running."
 
     execute_btn = st.button(
         "Run selected modules",
@@ -581,6 +660,9 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
                     options = {}
                     if module_id == "infra_nmap":
                         options = {"nmap_options": nmap_options}
+                    options["standalone_authorised_testing"] = st.session_state.get(
+                        "standalone_authorised_testing", False
+                    )
                     result = execute_module(
                         module_id,
                         target_value,
