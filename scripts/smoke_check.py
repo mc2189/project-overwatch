@@ -228,6 +228,19 @@ def _check_settings_manager() -> None:
         if aipdb_validation["ok"]:
             raise AssertionError("intel_abuseipdb should fail validation without API key")
 
+    gn = registry.get_module("intel_greynoise")
+    if gn is None or not gn.implemented:
+        raise AssertionError("intel_greynoise should be implemented")
+    if gn.requires_api_key:
+        raise AssertionError("intel_greynoise should not require API key")
+    if gn.api_key_names != ("GREYNOISE_API_KEY",):
+        raise AssertionError("intel_greynoise api_key_names mismatch")
+    if gn.accepted_target_types != ("ipv4",):
+        raise AssertionError("intel_greynoise accepted_target_types mismatch")
+    gn_validation = settings.validate_module_settings("intel_greynoise")
+    if not gn_validation["ok"]:
+        raise AssertionError("intel_greynoise should pass validation without API key")
+
     providers = settings.list_api_provider_status()
     if len(providers) < 8:
         raise AssertionError("expected at least 8 API provider definitions")
@@ -1615,6 +1628,7 @@ def _check_module_sdk() -> None:
         "infra_whois_rdap",
         "intel_virustotal",
         "intel_abuseipdb",
+        "intel_greynoise",
     ):
         module = registry.get_module(module_id)
         if module is None:
@@ -1833,20 +1847,125 @@ def _check_abuseipdb_module() -> None:
         raise AssertionError("security redaction failed in abuseipdb smoke path")
 
 
+def _check_greynoise_module() -> None:
+    import importlib.util
+
+    registry = __import__("modules.module_registry", fromlist=["get_module"])
+    module = registry.get_module("intel_greynoise")
+    if module is None or not module.implemented:
+        raise AssertionError("intel_greynoise should be implemented")
+    if module.display_name != "GreyNoise Internet Noise Intelligence":
+        raise AssertionError("intel_greynoise display_name mismatch")
+    if module.requires_api_key:
+        raise AssertionError("intel_greynoise should have optional API key")
+    if module.accepted_target_types != ("ipv4",):
+        raise AssertionError("intel_greynoise accepted_target_types mismatch")
+
+    executor = __import__("modules.executor", fromlist=["is_runtime_ready"])
+    if not executor.is_runtime_ready("intel_greynoise"):
+        raise AssertionError("intel_greynoise runtime should be ready")
+
+    gn_path = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_greynoise.py"
+    spec = importlib.util.spec_from_file_location("intel_greynoise_smoke", gn_path)
+    if spec is None or spec.loader is None:
+        raise AssertionError("could not load intel_greynoise module")
+    gn_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gn_mod)
+
+    no_key = gn_mod.run_greynoise_lookup("8.8.8.8", api_key=None, options={"mock_response": {
+        "ip": "8.8.8.8",
+        "noise": False,
+        "riot": True,
+        "classification": "benign",
+        "name": "Google Public DNS",
+        "message": "Success",
+    }})
+    if not no_key.get("success"):
+        raise AssertionError("missing-key mock GreyNoise lookup should succeed")
+    warnings_text = str(no_key.get("warnings"))
+    if "GreyNoise API key is not configured" not in warnings_text:
+        raise AssertionError("missing key should add community lookup warning")
+
+    private = gn_mod.run_greynoise_lookup("192.168.1.1", api_key="smoke-test-key", target_type="ipv4")
+    if not private.get("success") or not private.get("parsed_data", {}).get("private_local_ip"):
+        raise AssertionError("private IP should complete without API query")
+
+    domain_blocked = gn_mod.run_greynoise_lookup("example.com", api_key="smoke-test-key")
+    if domain_blocked.get("status") != "blocked":
+        raise AssertionError("domain target should be blocked for greynoise")
+
+    mock_noise = {
+        "ip": "8.8.8.8",
+        "noise": True,
+        "riot": False,
+        "classification": "malicious",
+        "name": "smoke-scanner",
+        "link": "https://viz.greynoise.io/ip/8.8.8.8",
+        "last_seen": "2024-06-01",
+        "message": "Success",
+    }
+    lookup = gn_mod.run_greynoise_lookup(
+        "8.8.8.8",
+        api_key="smoke-test-key",
+        options={"mock_response": mock_noise},
+    )
+    if not lookup.get("success"):
+        raise AssertionError("mock GreyNoise lookup should succeed")
+    parsed = lookup.get("parsed_data") or {}
+    if not parsed.get("noise"):
+        raise AssertionError("mock GreyNoise lookup missing noise flag")
+    if not lookup.get("evidence"):
+        raise AssertionError("mock GreyNoise lookup should declare evidence hints")
+    raw = lookup.get("raw_output") or ""
+    if "smoke-test-key" in raw:
+        raise AssertionError("raw_output must not contain API key")
+
+    interpreter = __import__(
+        "utils.greynoise_interpreter",
+        fromlist=["interpret_greynoise_results"],
+    )
+    findings = interpreter.interpret_greynoise_results(parsed)
+    if not findings:
+        raise AssertionError("greynoise interpreter should return findings")
+
+    findings_registry = __import__(
+        "utils.findings_registry",
+        fromlist=["interpret_module_findings", "module_has_findings_pipeline"],
+    )
+    if not findings_registry.module_has_findings_pipeline("intel_greynoise"):
+        raise AssertionError("intel_greynoise should have findings pipeline")
+    pipeline_findings = findings_registry.interpret_module_findings("intel_greynoise", parsed)
+    if not pipeline_findings:
+        raise AssertionError("findings pipeline returned no greynoise findings")
+
+
 def _check_api_module_helpers() -> None:
+    import time
+
     helpers = __import__(
         "utils.api_module_helpers",
         fromlist=[
             "classify_provider_http_status",
             "missing_api_key_blocked_result",
             "project_user_agent",
+            "rate_limit_seconds",
             "request_timeout_seconds",
+            "reset_api_courtesy_delay_for_tests",
+            "respect_api_courtesy_delay",
         ],
     )
     if "ProjectOverwatch/" not in helpers.project_user_agent():
         raise AssertionError("project_user_agent missing version")
     if helpers.request_timeout_seconds() <= 0:
         raise AssertionError("request_timeout_seconds should be positive")
+    helpers.reset_api_courtesy_delay_for_tests()
+    start = time.monotonic()
+    helpers.respect_api_courtesy_delay()
+    helpers.respect_api_courtesy_delay()
+    elapsed = time.monotonic() - start
+    if elapsed < helpers.rate_limit_seconds() * 0.9:
+        raise AssertionError("respect_api_courtesy_delay should pause between consecutive calls")
+    helpers.reset_api_courtesy_delay_for_tests()
     status, success, _, _ = helpers.classify_provider_http_status(429)
     if status != "completed_with_warnings" or not success:
         raise AssertionError("429 should map to completed_with_warnings")
@@ -2057,6 +2176,11 @@ def main() -> int:
     run(
         "abuseipdb module",
         lambda: _check_abuseipdb_module(),
+    )
+
+    run(
+        "greynoise module",
+        lambda: _check_greynoise_module(),
     )
 
     run(

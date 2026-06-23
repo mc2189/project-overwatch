@@ -696,6 +696,118 @@ def capture_abuseipdb_evidence(
     return items
 
 
+def capture_greynoise_evidence(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    observation_id: int,
+    module_id: str,
+    result: dict[str, Any],
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    parsed_data = result.get("parsed_data") or {}
+    raw_response = parsed_data.get("raw_response")
+    api_meta = parsed_data.get("api") or {}
+
+    if parsed_data.get("private_local_ip"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Private/local IP — no GreyNoise lookup",
+                summary="Public internet-noise lookup is not applicable for private/local addresses.",
+                content_text=(
+                    "Private/local IP address — public GreyNoise internet-noise lookup is not applicable."
+                ),
+                content_type="text/plain",
+                evidence_type=EVIDENCE_SYSTEM_GENERATED,
+                source_name="GreyNoise",
+                collection_method="policy_skip",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+        return items
+
+    if raw_response:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="GreyNoise API response",
+                summary="Third-party internet-noise response from GreyNoise Community API (redacted summary).",
+                content_text=_text_summary(raw_response),
+                content_type="application/json",
+                evidence_type=EVIDENCE_THIRD_PARTY_SOURCE,
+                source_name="GreyNoise",
+                source_url="https://www.greynoise.io/",
+                collection_method="api_reputation_lookup",
+                reliability=RELIABILITY_MEDIUM,
+            )
+        )
+
+    if any(parsed_data.get(field) is not None for field in ("noise", "riot", "classification", "name")):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="GreyNoise internet-noise summary",
+                summary="Parsed noise/RIOT/classification metadata.",
+                content_text=_text_summary(
+                    {
+                        "target": parsed_data.get("target"),
+                        "ip_address": parsed_data.get("ip_address"),
+                        "noise": parsed_data.get("noise"),
+                        "riot": parsed_data.get("riot"),
+                        "classification": parsed_data.get("classification"),
+                        "name": parsed_data.get("name"),
+                        "last_seen": parsed_data.get("last_seen"),
+                        "message": parsed_data.get("message"),
+                        "link": parsed_data.get("link"),
+                        "authenticated": api_meta.get("authenticated"),
+                    }
+                ),
+                content_type="application/json",
+                evidence_type=EVIDENCE_THIRD_PARTY_SOURCE,
+                source_name="GreyNoise",
+                source_url="https://www.greynoise.io/",
+                collection_method="api_reputation_lookup",
+                reliability=RELIABILITY_MEDIUM,
+            )
+        )
+
+    if api_meta.get("error") or api_meta.get("status_code") == 429:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="GreyNoise lookup limitation",
+                summary="GreyNoise source was unavailable, rate limited, unauthenticated, or returned an error.",
+                content_text=_text_summary(api_meta),
+                content_type="application/json",
+                evidence_type=EVIDENCE_UNAVAILABLE_SOURCE,
+                source_name="GreyNoise",
+                source_url="https://www.greynoise.io/",
+                collection_method="api_reputation_lookup",
+                reliability=RELIABILITY_UNKNOWN,
+            )
+        )
+
+    return items
+
+
 def capture_whois_rdap_evidence(
     conn: sqlite3.Connection,
     *,
@@ -858,6 +970,15 @@ def capture_module_evidence(
         )
     elif module_id == "intel_abuseipdb":
         items = capture_abuseipdb_evidence(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            result=result,
+        )
+    elif module_id == "intel_greynoise":
+        items = capture_greynoise_evidence(
             conn,
             case_id=case_id,
             entity_id=entity_id,

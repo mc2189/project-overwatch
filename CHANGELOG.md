@@ -2,6 +2,21 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.4.0 — GreyNoise Internet Noise Intelligence
+
+- **`intel_greynoise`** — passive internet-noise and RIOT lookup for public IPv4 via GreyNoise v3 Community API
+- Module path: `modules/4_threat_intelligence/intel_greynoise.py`
+- `GREYNOISE_API_KEY` optional but recommended — unauthenticated Community lookups may be limited
+- Public IPv4 only — domains/URLs incompatible; private/local IPs complete with informational result (no API query)
+- Uses v3 Community endpoint only — no deprecated v2 APIs
+- HTTP handling for 200/400/401/403/404/429/5xx, timeouts, and connection errors
+- Cautious findings interpreter — “reported by GreyNoise”, not “confirmed malicious”
+- Organisation entity/relationship when provider/actor name is useful
+- Evidence capture with `api_reputation_lookup` collection method; API keys redacted
+- Run mode recommendations for public IPv4 in Quick Check and Local Device / IP Check
+- Settings, Batch Queue, Entity Workspace, Evidence Locker, and reports integration
+- UI summary tab for noise/RIOT/classification; raw API JSON in collapsed expander
+
 ## v2.3.0 — AbuseIPDB Reputation Intelligence
 
 - **`intel_abuseipdb`** — passive abuse-confidence lookup for public IPv4 via AbuseIPDB check API

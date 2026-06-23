@@ -401,18 +401,41 @@ MODULES: list[ModuleEntry] = [
     ),
     ModuleEntry(
         module_id="intel_greynoise",
-        display_name="GreyNoise",
+        display_name="GreyNoise Internet Noise Intelligence",
         category="Threat Intel",
-        description="Classify internet background noise and scanner activity.",
-        status="planned",
+        description=(
+            "Passive GreyNoise lookup for public IPv4 addresses to identify internet noise, "
+            "scanner context and classification signals."
+        ),
+        status="active",
         mode="passive",
         risk_level="low",
         requires_authorisation=False,
-        requires_api_key=True,
-        implemented=False,
+        requires_api_key=False,
+        implemented=True,
+        accepted_target_types=("ipv4",),
         api_key_names=("GREYNOISE_API_KEY",),
-        config_notes="Requires GREYNOISE_API_KEY in local .env. Planned — not available in this release.",
-        rate_limit_notes="Community/enterprise tiers have different rate limits.",
+        config_notes=(
+            "Passive module — GREYNOISE_API_KEY in local .env is optional but recommended. "
+            "Unauthenticated Community API lookups may be limited. Key is masked in Settings and must never "
+            "be stored in observations, findings, evidence, reports or logs."
+        ),
+        rate_limit_notes="GreyNoise Community API daily rate limits apply — batch queue courtesy delay applies.",
+        short_help="Passive GreyNoise internet-noise and RIOT lookup for a public IPv4 address.",
+        detailed_help=(
+            "Queries the GreyNoise v3 Community API for third-party internet noise, RIOT, and classification context. "
+            "Results are reported by GreyNoise — they are leads for analyst review, not confirmed threats. "
+            "Private/local IPv4 addresses are not queried. Domains and URLs are not supported in this version."
+        ),
+        example_inputs=("8.8.8.8", "1.1.1.1"),
+        output_summary="Noise/RIOT flags, classification, provider name, last seen, and cautious advisory findings.",
+        caution_notes=(
+            "Internet-noise context requires manual verification.",
+            "RIOT/benign labels do not prove an IP is safe or in scope.",
+            "Respect GreyNoise API rate limits and terms of use.",
+            "Uses v3 Community API only — no deprecated v2 endpoints.",
+            "API key must remain in .env only — never commit or paste into case notes.",
+        ),
     ),
     ModuleEntry(
         module_id="intel_shodan",

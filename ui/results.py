@@ -231,6 +231,38 @@ def render_result_summary_tab(result: dict) -> None:
         if api.get("error") and not parsed_data.get("private_local_ip"):
             st.caption(f"AbuseIPDB note: {api['error']}")
 
+    if result["module_id"] == "intel_greynoise" and parsed_data:
+        st.caption(
+            "Results reported by GreyNoise — third-party internet-noise context only, not confirmed malicious activity."
+        )
+        st.markdown(f"**Target:** {parsed_data.get('ip_address') or parsed_data.get('target') or '—'}")
+        if parsed_data.get("private_local_ip"):
+            st.info("Private/local IP — public GreyNoise internet-noise lookup is not applicable.")
+        else:
+            if parsed_data.get("noise") is not None:
+                st.markdown(f"**Internet noise:** {parsed_data['noise']}")
+            if parsed_data.get("riot") is not None:
+                st.markdown(f"**RIOT (common service):** {parsed_data['riot']}")
+            if parsed_data.get("classification"):
+                st.markdown(f"**Classification:** {parsed_data['classification']}")
+            if parsed_data.get("name"):
+                st.markdown(f"**Name:** {parsed_data['name']}")
+            if parsed_data.get("message"):
+                st.markdown(f"**Message:** {parsed_data['message']}")
+            if parsed_data.get("last_seen"):
+                st.markdown(f"**Last seen:** {parsed_data['last_seen']}")
+            if parsed_data.get("link"):
+                st.markdown(f"**GreyNoise link:** {parsed_data['link']}")
+        api = parsed_data.get("api") or {}
+        if not api.get("authenticated"):
+            st.caption(
+                "GreyNoise API key is not configured. Community lookup may be limited or unavailable."
+            )
+        if api.get("status_code") == 429:
+            st.warning("GreyNoise rate limit reached — retry later.")
+        if api.get("error") and not parsed_data.get("private_local_ip"):
+            st.caption(f"GreyNoise note: {api['error']}")
+
     if result["module_id"] == "infra_website_metadata" and parsed_data:
         homepage = parsed_data.get("homepage") or {}
         if homepage.get("page_title"):
@@ -310,6 +342,14 @@ def render_result_module_output_tab(result: dict) -> None:
             from utils.security import redact_secrets_from_dict
 
             with st.expander("Raw AbuseIPDB API response", expanded=False):
+                st.json(redact_secrets_from_dict(raw_response))
+
+    if result["module_id"] == "intel_greynoise" and parsed_data:
+        raw_response = parsed_data.get("raw_response")
+        if raw_response:
+            from utils.security import redact_secrets_from_dict
+
+            with st.expander("Raw GreyNoise API response", expanded=False):
                 st.json(redact_secrets_from_dict(raw_response))
 
     if result["module_id"] == "infra_cert_subdomain":
@@ -428,6 +468,8 @@ def render_result_structured_tab(result: dict) -> None:
     if result["module_id"] == "intel_virustotal" and isinstance(parsed_data, dict):
         parsed_data = {key: value for key, value in parsed_data.items() if key != "raw_response"}
     if result["module_id"] == "intel_abuseipdb" and isinstance(parsed_data, dict):
+        parsed_data = {key: value for key, value in parsed_data.items() if key != "raw_response"}
+    if result["module_id"] == "intel_greynoise" and isinstance(parsed_data, dict):
         parsed_data = {key: value for key, value in parsed_data.items() if key != "raw_response"}
     payload = {
         "selected_options": result.get("selected_options"),

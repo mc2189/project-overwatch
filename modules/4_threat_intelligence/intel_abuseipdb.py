@@ -14,6 +14,7 @@ from utils.api_module_helpers import (
     missing_api_key_blocked_result,
     redact_api_error_text,
     request_timeout_seconds,
+    respect_api_courtesy_delay,
 )
 from utils.result_status import (
     STATUS_BLOCKED,
@@ -66,6 +67,7 @@ def _request_check(
     session: requests.Session | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """Query AbuseIPDB check endpoint (lookup-only — no report/submission)."""
+    respect_api_courtesy_delay()
     http = session or requests
     meta: dict[str, Any] = {"status_code": None, "endpoint": "check"}
     try:

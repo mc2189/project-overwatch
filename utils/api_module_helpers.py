@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from utils.result_status import (
@@ -13,6 +14,14 @@ from utils.result_status import (
 )
 from utils.security import redact_secrets_from_text
 from version import PROJECT_VERSION
+
+API_REPUTATION_MODULE_IDS: frozenset[str] = frozenset({
+    "intel_virustotal",
+    "intel_abuseipdb",
+    "intel_greynoise",
+})
+
+_LAST_API_REQUEST_MONOTONIC: float | None = None
 
 
 def project_user_agent() -> str:
@@ -28,6 +37,44 @@ def request_timeout_seconds() -> int:
         return default_timeout_seconds()
     except Exception:
         return 30
+
+
+def respect_api_courtesy_delay() -> None:
+    """Pause before a live API request if the previous lookup was too recent.
+
+    Uses PROJECT_OVERWATCH_RATE_LIMIT_SECONDS (default 1.5s). Applies across
+    VirusTotal, AbuseIPDB, GreyNoise and future API reputation modules so
+    Run Operation, Entity Workspace, and Batch Queue do not hammer providers.
+    """
+    global _LAST_API_REQUEST_MONOTONIC
+
+    delay = rate_limit_seconds()
+    if delay <= 0:
+        return
+
+    now = time.monotonic()
+    if _LAST_API_REQUEST_MONOTONIC is not None:
+        elapsed = now - _LAST_API_REQUEST_MONOTONIC
+        remaining = delay - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
+    _LAST_API_REQUEST_MONOTONIC = time.monotonic()
+
+
+def rate_limit_seconds() -> float:
+    """Return configured courtesy delay between API reputation lookups."""
+    try:
+        from utils.settings_manager import rate_limit_seconds as settings_rate_limit
+
+        return settings_rate_limit()
+    except Exception:
+        return 1.5
+
+
+def reset_api_courtesy_delay_for_tests() -> None:
+    """Reset inter-request timing (smoke tests only)."""
+    global _LAST_API_REQUEST_MONOTONIC
+    _LAST_API_REQUEST_MONOTONIC = None
 
 
 def api_key_header(api_key: str, *, header_name: str = "x-apikey") -> dict[str, str]:

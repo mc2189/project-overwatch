@@ -11,6 +11,7 @@ from utils.whois_rdap_helpers import is_public_ipv4
 
 VIRUSTOTAL_MODULE_ID = "intel_virustotal"
 ABUSEIPDB_MODULE_ID = "intel_abuseipdb"
+GREYNOISE_MODULE_ID = "intel_greynoise"
 
 QUICK_CHECK = "quick_check"
 WEBSITE_FOOTPRINT = "website_footprint"
@@ -111,6 +112,11 @@ def _abuseipdb_configured() -> bool:
     return has_api_key("ABUSEIPDB_API_KEY")
 
 
+def _greynoise_available() -> bool:
+    """GreyNoise Community API works without a key; module is always available for public IPv4."""
+    return True
+
+
 def _append_reputation_modules(
     modules: list[str],
     *,
@@ -124,6 +130,8 @@ def _append_reputation_modules(
         updated.append(VIRUSTOTAL_MODULE_ID)
     if target and _abuseipdb_recommended(mode_id, target_type, target) and ABUSEIPDB_MODULE_ID not in updated:
         updated.append(ABUSEIPDB_MODULE_ID)
+    if target and _greynoise_recommended(mode_id, target_type, target) and GREYNOISE_MODULE_ID not in updated:
+        updated.append(GREYNOISE_MODULE_ID)
     return updated
 
 
@@ -143,6 +151,18 @@ def _virustotal_recommended(mode_id: str, target_type: str, target: str | None) 
 
 def _abuseipdb_recommended(mode_id: str, target_type: str, target: str | None) -> bool:
     if not _abuseipdb_configured():
+        return False
+    if target_type != "ipv4" or not target:
+        return False
+    if is_private_or_local_ip(target):
+        return False
+    if not is_public_ipv4(target):
+        return False
+    return mode_id in {QUICK_CHECK, LOCAL_IP_CHECK, CUSTOM}
+
+
+def _greynoise_recommended(mode_id: str, target_type: str, target: str | None) -> bool:
+    if not _greynoise_available():
         return False
     if target_type != "ipv4" or not target:
         return False
@@ -227,10 +247,10 @@ def get_recommendation_reason(
                 "Planned identity modules may support this target type in a future release."
             )
         if target_type == "ipv4":
-            if _virustotal_configured() or _abuseipdb_configured():
+            if _virustotal_configured() or _abuseipdb_configured() or _greynoise_available():
                 return (
                     f"Quick Check recommends an active network service check for this {label}, "
-                    "with optional passive reputation enrichment when API keys are configured."
+                    "with optional passive reputation and internet-noise enrichment."
                 )
             return f"Quick Check recommends an active network service check for this {label}."
         if target_type in {"domain", "url"}:
@@ -276,10 +296,12 @@ def get_recommendation_reason(
         if target and is_private_or_local_ip(target):
             return (
                 "Local Device / IP Check recommends Network Service Check with a conservative "
-                "scan profile for this private/local address. AbuseIPDB and VirusTotal are not "
+                "scan profile for this private/local address. AbuseIPDB, GreyNoise and VirusTotal are not "
                 "recommended for private IPs."
             )
         reputation_bits = []
+        if _greynoise_available():
+            reputation_bits.append("GreyNoise")
         if _abuseipdb_configured():
             reputation_bits.append("AbuseIPDB")
         if _virustotal_configured():

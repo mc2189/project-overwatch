@@ -1,10 +1,10 @@
-# Project Overwatch v2.3
+# Project Overwatch v2.4
 
 Project Overwatch is a **local** Python/Streamlit dashboard for defensive security intelligence.
 
-**v2.3** adds AbuseIPDB Reputation Intelligence for public IPv4 abuse-confidence lookups.
+**v2.4** adds GreyNoise Internet Noise Intelligence for public IPv4 internet-noise and RIOT context.
 
-**v2.2** added VirusTotal Reputation Intelligence, API module scaffolding, RDAP cache management, CI security audit, and passive-source result wording polish.
+**v2.3** added AbuseIPDB Reputation Intelligence. **v2.2** added VirusTotal and platform scaffold polish.
 
 **v2.1** established the secure-by-design baseline.
 
@@ -53,7 +53,7 @@ After collection populates entities, open **Entity Workspace** to pivot between 
 3. Use **Pivot actions** — compatible modules are recommended from existing target compatibility rules:
    - **Domain** → WHOIS/RDAP Intelligence, Domain Intelligence, Certificate & Subdomain Intelligence, Website Metadata Review
    - **URL** → WHOIS/RDAP Intelligence, Domain Intelligence, Website Metadata Review (hostname normalised)
-   - **IPv4** → Network Service Check (authorisation required); public IPs may also use WHOIS/RDAP, AbuseIPDB, or VirusTotal as passive context when API keys are configured
+   - **IPv4** → Network Service Check (authorisation required); public IPs may also use WHOIS/RDAP, AbuseIPDB, VirusTotal, or GreyNoise as passive context
    - **Service** → no direct module; review the parent host entity
    - **Email / username** → no implemented modules yet
 4. **Run compatible modules** from the workspace using the same executor path as Run Operation. Active modules still require the authorisation checkbox; passive modules do not.
@@ -86,6 +86,7 @@ Results appear automatically in Operations, Observations, Findings, Relationship
 - **WHOIS / RDAP Intelligence** — passive registration/allocation metadata for domain, URL (host extracted), or public IPv4 via public RDAP.
 - **VirusTotal Reputation Intelligence** — passive API reputation enrichment for domain, URL, or public IPv4 (`VIRUSTOTAL_API_KEY` required; private IPs skipped).
 - **AbuseIPDB Reputation Intelligence** — passive abuse-confidence lookup for public IPv4 only (`ABUSEIPDB_API_KEY` required; lookup-only, no report submission).
+- **GreyNoise Internet Noise Intelligence** — passive internet-noise/RIOT lookup for public IPv4 (`GREYNOISE_API_KEY` optional but recommended).
 - **Domain Intelligence** — passive DNS/HTTP/TLS/Wayback for domain or URL.
 - **Certificate & Subdomain Intelligence** — passive certificate transparency names for domain or URL.
 - **Website Metadata Review** — passive homepage title, meta tags, headers, robots.txt, and sitemap hints for domain or URL.
@@ -96,9 +97,9 @@ After entering a target, choose **What do you want to do?** on Run Operation:
 
 | Run mode | Purpose | Typical recommendations |
 |----------|---------|-------------------------|
-| **Quick Check** | Simple default | IPv4 → Network Service Check (+ WHOIS/RDAP for public IPs; optional AbuseIPDB/VirusTotal if keys configured); domain/URL → WHOIS/RDAP + Domain Intelligence + Certificate & Subdomain + Website Metadata (+ optional VirusTotal if key configured); email/username/unknown → none |
-| **Website / Domain Footprint** | Passive domain footprint | WHOIS/RDAP + Domain Intelligence + Certificate & Subdomain + Website Metadata (+ VirusTotal if key configured; no Nmap or AbuseIPDB by default) |
-| **Local Device / IP Check** | Conservative active IP scan | Network Service Check with Quick check Nmap profile; public IPv4 may also recommend WHOIS/RDAP and optional AbuseIPDB/VirusTotal; private/local IPs skip RDAP and API reputation modules; authorisation required |
+| **Quick Check** | Simple default | IPv4 → Network Service Check (+ WHOIS/RDAP; optional AbuseIPDB/VirusTotal when keyed; GreyNoise for public IPv4); domain/URL → passive domain modules (+ optional VirusTotal); email/username/unknown → none |
+| **Website / Domain Footprint** | Passive domain footprint | WHOIS/RDAP + Domain Intelligence + Certificate & Subdomain + Website Metadata (+ VirusTotal if key configured; no Nmap, AbuseIPDB or GreyNoise by default) |
+| **Local Device / IP Check** | Conservative active IP scan | Network Service Check; public IPv4 may recommend WHOIS/RDAP, GreyNoise, and optional AbuseIPDB/VirusTotal; private/local IPs skip API reputation modules; authorisation required |
 | **Custom Module Selection** | Power-user manual pick | All compatible modules shown; no automatic preselection when you change target |
 
 Recommendations are deterministic and local — they filter by target type and run mode only. **Compatibility checks and the authorisation gate still apply**; passive-only runs do not require authorisation.
@@ -178,13 +179,32 @@ Passive third-party abuse-confidence lookup for **public IPv4** targets only.
 
 Requires AbuseIPDB API terms compliance and respects configured courtesy delays in batch runs.
 
+### GreyNoise Internet Noise Intelligence (v2.4)
+
+Passive third-party internet-noise and RIOT context for **public IPv4** targets only.
+
+1. Optionally add `GREYNOISE_API_KEY=your_key_here` to local `.env` (recommended; see `.env.example`).
+2. Open **Settings** — GreyNoise provider shows configured yes/no with **masked** key when present.
+3. Select the module on **Run Operation**, **Entity Workspace**, or **Batch Queue** for compatible public IPv4 addresses.
+
+**Behaviour:**
+
+- **Missing key** — module may still perform limited unauthenticated Community API lookups with a clear warning (operational notice, not a target risk finding).
+- **Private/local IPv4** — completes with informational result; no GreyNoise API call.
+- **Domain/URL targets** — incompatible in this version (no in-module DNS resolution).
+- **Rate limit (HTTP 429)** — warning/operational notice; batch queue continues safely.
+- **v3 Community API only** — uses `https://api.greynoise.io/v3/community/{ip}`; no deprecated v2 endpoints.
+- **Rate limiting** — `PROJECT_OVERWATCH_RATE_LIMIT_SECONDS` applies before each live API reputation request (shared with VirusTotal and AbuseIPDB).
+- **Results** — noise/RIOT/classification flags are *reported by GreyNoise* — treat as context, not confirmed threats or benign proof.
+- **Evidence** — summaries stored in Evidence Locker with redaction; full raw JSON remains collapsed in the UI.
+
 ### Developing API-backed modules (v2.2+)
 
-Use the shared scaffold when adding GreyNoise, Shodan, or similar modules:
+Use the shared scaffold when adding Shodan, Censys, or similar modules:
 
 1. Copy `modules/TEMPLATE_api_module.py` to `modules/4_threat_intelligence/<your_module>.py`
 2. Reuse `utils/api_module_helpers.py` for timeout, User-Agent, HTTP status mapping, missing-key blocked results, and redaction
-3. Reference `modules/4_threat_intelligence/intel_virustotal.py` or `intel_abuseipdb.py` for complete working examples
+3. Reference `intel_virustotal.py`, `intel_abuseipdb.py`, or `intel_greynoise.py` for complete working examples
 4. Register in `module_registry.py`, wire `executor.py`, add interpreter + evidence capture
 5. Run `python scripts/smoke_check.py` and `python scripts/security_audit.py`
 
@@ -216,13 +236,13 @@ python scripts/security_audit.py
 python scripts/smoke_check.py
 ```
 
-Supported API keys: **VirusTotal** (`intel_virustotal`), **AbuseIPDB** (`intel_abuseipdb`). Optional future keys: GreyNoise, Shodan, Censys (ID + secret), SecurityTrails, Hunter.io, Have I Been Pwned.
+Supported API keys: **VirusTotal** (`intel_virustotal`), **AbuseIPDB** (`intel_abuseipdb`), **GreyNoise** (`intel_greynoise`, optional). Optional future keys: Shodan, Censys (ID + secret), SecurityTrails, Hunter.io, Have I Been Pwned.
 
 General settings:
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `PROJECT_OVERWATCH_RATE_LIMIT_SECONDS` | Delay between passive batch lookups | `1.5` |
+| `PROJECT_OVERWATCH_RATE_LIMIT_SECONDS` | Courtesy delay between passive batch runs **and** consecutive API reputation lookups (VirusTotal, AbuseIPDB, GreyNoise) | `1.5` |
 | `PROJECT_OVERWATCH_DEFAULT_TIMEOUT` | Default HTTP timeout (seconds) | `30` |
 | `PROJECT_OVERWATCH_MAX_BATCH_ITEMS` | Max queued batch items per case | `50` |
 | `PROJECT_OVERWATCH_ENABLE_ACTIVE_MODULES` | Global active module toggle | `true` |
@@ -638,7 +658,7 @@ Run `validate_module_registry()` or check **Settings → System status** for met
 python scripts/smoke_check.py
 ```
 
-Smoke checks verify SDK helpers, registry metadata for implemented modules, executor imports, evidence locker integration, and VirusTotal/AbuseIPDB mock lookups — no live network required.
+Smoke checks verify SDK helpers, registry metadata for implemented modules, executor imports, evidence locker integration, and VirusTotal/AbuseIPDB/GreyNoise mock lookups — no live network required.
 
 Unit tests live in `tests/test_module_sdk.py`. CI runs both smoke check and unit tests (see `.github/workflows/smoke_check.yml`).
 

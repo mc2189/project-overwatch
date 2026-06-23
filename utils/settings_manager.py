@@ -46,6 +46,10 @@ API_PROVIDERS: tuple[ApiProviderSpec, ...] = (
         "GreyNoise",
         ("GREYNOISE_API_KEY",),
         ("intel_greynoise",),
+        notes=(
+            "Used by GreyNoise Internet Noise Intelligence — optional but recommended. "
+            "Key is masked here and never stored in the database."
+        ),
     ),
     ApiProviderSpec(
         "shodan",

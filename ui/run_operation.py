@@ -412,6 +412,22 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
                             "AbuseIPDB is unavailable — ABUSEIPDB_API_KEY is not configured in your local "
                             ".env file. This module will be blocked until a key is set."
                         )
+                elif module_id == "intel_greynoise":
+                    st.caption("Passive module — no authorisation required.")
+                    st.write(
+                        "GREYNOISE_API_KEY in .env is optional but recommended. The key is masked in Settings "
+                        "and must never be stored in observations, findings, evidence, reports or logs."
+                    )
+                    st.write(
+                        "Queries GreyNoise v3 Community API for internet-noise and RIOT context on public IPv4 "
+                        "addresses only. Results are third-party signals and should be treated as reported "
+                        "intelligence, not confirmed fact."
+                    )
+                    if not has_api_key("GREYNOISE_API_KEY"):
+                        st.info(
+                            "No GreyNoise API key configured — limited unauthenticated Community lookups may "
+                            "still run. Add GREYNOISE_API_KEY to .env for authenticated lookups."
+                        )
         st.session_state.nmap_options = nmap_options
 
     st.divider()

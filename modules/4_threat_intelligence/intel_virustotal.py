@@ -20,7 +20,7 @@ from utils.result_status import (
 )
 from utils.security import is_private_or_local_ip, redact_secrets_from_text
 from utils.target_detection import get_target_type, normalize_target_value
-from version import PROJECT_VERSION
+from utils.api_module_helpers import project_user_agent, respect_api_courtesy_delay
 
 VT_API_BASE = "https://www.virustotal.com/api/v3"
 MISSING_KEY_MESSAGE = "VirusTotal API key is not configured."
@@ -37,7 +37,7 @@ def _request_timeout() -> int:
 
 
 def _user_agent() -> str:
-    return f"ProjectOverwatch/{PROJECT_VERSION}"
+    return project_user_agent()
 
 
 def _url_resource_id(url: str) -> str:
@@ -102,6 +102,7 @@ def _request_json(
     session: requests.Session | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """Perform a VirusTotal API request and return parsed JSON plus API metadata."""
+    respect_api_courtesy_delay()
     http = session or requests
     url = f"{VT_API_BASE}/{path.lstrip('/')}"
     meta: dict[str, Any] = {"status_code": None, "path": path}

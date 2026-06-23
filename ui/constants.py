@@ -26,6 +26,7 @@ IMPLEMENTED_MODULE_IDS: tuple[str, ...] = (
     "infra_whois_rdap",
     "intel_virustotal",
     "intel_abuseipdb",
+    "intel_greynoise",
 )
 
 MODULE_CARD_TITLES: dict[str, str] = {
@@ -36,6 +37,7 @@ MODULE_CARD_TITLES: dict[str, str] = {
     "infra_whois_rdap": "WHOIS / RDAP Intelligence",
     "intel_virustotal": "VirusTotal Reputation Intelligence",
     "intel_abuseipdb": "AbuseIPDB Reputation Intelligence",
+    "intel_greynoise": "GreyNoise Internet Noise Intelligence",
 }
 
 FINDING_SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")
