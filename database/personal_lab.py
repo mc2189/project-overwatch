@@ -41,7 +41,16 @@ DEFAULT_LAB_SCOPE_NOTES = "Added from Personal Lab quick authorisation"
 
 def ensure_personal_lab_tables(conn: sqlite3.Connection) -> None:
     conn.executescript(PERSONAL_LAB_SCOPE_SCHEMA + ";\n" + LAB_TESTING_LOG_SCHEMA)
+    _migrate_lab_testing_log(conn)
     conn.commit()
+
+
+def _migrate_lab_testing_log(conn: sqlite3.Connection) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(lab_testing_log)").fetchall()}
+    if "auto_scope_created" not in columns:
+        conn.execute(
+            "ALTER TABLE lab_testing_log ADD COLUMN auto_scope_created INTEGER NOT NULL DEFAULT 0"
+        )
 
 
 def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -110,13 +119,15 @@ def log_lab_testing_confirmation(
     confirmation_text: str,
     confirmation_version: str,
     conn: sqlite3.Connection,
+    auto_scope_created: bool = False,
 ) -> dict[str, Any]:
     ensure_personal_lab_tables(conn)
     cursor = conn.execute(
         """
         INSERT INTO lab_testing_log (
-            case_id, target, module_id, operating_context, confirmation_text, confirmation_version, logged_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            case_id, target, module_id, operating_context, confirmation_text,
+            confirmation_version, logged_at, auto_scope_created
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             case_id,
@@ -126,6 +137,7 @@ def log_lab_testing_confirmation(
             confirmation_text,
             confirmation_version,
             datetime.now(timezone.utc).isoformat(),
+            1 if auto_scope_created else 0,
         ),
     )
     conn.commit()

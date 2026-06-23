@@ -2,6 +2,27 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.14.0 — Actionable Next Steps and One-click Pivots
+
+- **Standardised next-action schema** — `utils/next_actions.py` actions include id, title, reason, priority, action_type, target, entity/finding/module ids, enabled flag, blocked_reason, and button_label
+- **One-click workflow cards** — `ui/action_cards.py` and `ui/workspace_actions.py` wire buttons for run module, add to queue, open entity/finding, review evidence, generate report, lab scope, and analyst notes
+- **Guardrail-aware suggestions** — API keys, passive vs active context, Personal Lab confirmation, engagement scope, and module compatibility disable actions with clear reasons
+- **Pivot discovery cards** — `utils/pivot_discovery.py` surfaces new entities with queue and entity workspace buttons (display capped)
+- **Per-result next steps** — `utils/result_next_actions.py` adds a practical button to each concise result card
+- **Session state navigation** — cross-page links for findings focus, report, evidence, and entity workspace without resetting the workspace
+- **Batch Queue integration** — add-to-queue actions use existing queue structure, skip duplicates, and do not auto-run active modules
+- Smoke check validates next-action schema without live network calls
+
+## v2.13.0 — Personal Lab Guardrail Fix
+
+- **Single Personal Lab confirmation** — one checkbox satisfies lab authorisation for active checks in the workspace run panel
+- **Auto-scope on run** — unknown targets are added to Personal Lab scope automatically when confirmed (safe active checks only)
+- **`utils/personal_lab_readiness.py`** — centralized readiness logic shared by UI preflight and executor (no UI/executor mismatch)
+- **Compact preflight** — shows Lab confirmation, scope (ready / will be added on run), testing level, and result without scary “scope unknown” when auto-scope applies
+- **Public/private target hints** — warnings for public targets; friendly wording for private/local lab targets
+- **Audit log** — `lab_testing_log.auto_scope_created` records whether scope was auto-created on run
+- Client Engagement and Passive Research behaviour unchanged
+
 ## v2.12.0 — Guided Assessment Workspace
 
 - **Assessment Workspace** replaces the long Run Operation scroll with a guided layout: target profile → goal → journey → run → results

@@ -1,10 +1,12 @@
-# Project Overwatch v2.12
+# Project Overwatch v2.14
 
 Project Overwatch is a **local** Python/Streamlit intelligence, OSINT, security testing and resilience advisory dashboard for **private internal use** supporting future client assessments.
 
-**v2.12** redesigns **Run Operation** as a **guided assessment workspace** — target profile, goal selector, recommended journey, concise run panel, result cards, and next-best-action suggestions.
+**v2.14** turns suggested next actions into **actionable one-click workflow cards** with guardrail-aware buttons, pivot discovery, and Batch Queue integration.
 
-**v2.11** added operating contexts (Passive Research, Personal Lab, Client Engagement). **v2.10** adds HTTP Security Header Review.
+**v2.13** improves **Personal Lab mode** — one confirmation checkbox auto-adds unknown targets to lab scope on run for safe active checks.
+
+**v2.12** redesigns Run Operation as a **guided assessment workspace**. **v2.11** added operating contexts.
 
 Use only on systems you own, lab environments, or targets with **written permission**.
 
@@ -105,7 +107,7 @@ Before running modules, choose **Operating context** on Run Operation:
 | **Personal Lab** | Your own systems, home network, lab devices | Allowed after Personal Lab confirmation and scope |
 | **Client Engagement** | Formal client assessments | Full engagement, scope, ROE, and authorisation checks |
 
-Personal Lab uses a separate scope table (not a fake client engagement). A preflight panel shows Ready / Needs action / Blocked with fix hints. Private/local IPs can be quick-added to Personal Lab scope.
+Personal Lab uses a separate scope table (not a fake client engagement). Tick **one confirmation checkbox** in the run panel — unknown targets are **auto-added to Personal Lab scope on run** for safe active checks (TLS Review, HTTP Header Review, conservative Nmap). Public targets show a permission reminder; private/local targets show home-lab guidance. Client Engagement mode remains stricter.
 
 ### Guided assessment workspace (v2.12)
 
@@ -120,6 +122,29 @@ Personal Lab uses a separate scope table (not a fake client engagement). A prefl
 7. **Advanced / Custom module selection** — full manual module picker for power users
 
 Raw module output and long configuration text are collapsed into expanders by default.
+
+### Actionable next steps and pivots (v2.14)
+
+Suggested next actions are now **concise workflow cards** with priority badges, one-line reasons, and one-click buttons:
+
+| Action type | What the button does |
+|-------------|----------------------|
+| **Run module** | Selects the module and focuses the run panel — **does not auto-run** active checks |
+| **Add to queue** | Adds target/module to **Batch Queue** (duplicates skipped) |
+| **Open entity** | Opens **Entity Workspace** for the pivot or target |
+| **Open finding** | Navigates to **Findings** with focus on the suggested item |
+| **Review evidence** | Opens **Evidence Locker** |
+| **Generate report** | Opens **Report** (no auto-generation) |
+| **Add lab scope** | Adds target to Personal Lab scope (confirmation required) |
+| **Update scope** | Links to **Client Engagements** for formal scope/ROE |
+
+**Guardrail-aware recommendations** respect target compatibility, API key availability, operating context, Personal Lab confirmation, Client Engagement scope/ROE, emergency stop, and module implementation status. Disabled cards show a **blocked reason** (for example “Add VIRUSTOTAL_API_KEY” instead of a broken Run button).
+
+**New pivots discovered** appear after runs with entity type, source module, suggested follow-up modules, **Add to queue**, and **Open entity** buttons (capped to avoid clutter).
+
+Each **concise result card** includes one practical next step (for example queue subdomains, run Shodan after clean reputation, add TLS remediation note).
+
+**Report journey** shortcuts: generate report, review evidence, and review open findings — all require a click; reports are never auto-generated.
 
 ### Guided run modes (v1.5)
 
@@ -647,7 +672,7 @@ Saved reports go to `reports/` (gitignored). Encrypted exports go to `exports/`.
 ```
 main.py                    Streamlit entry point and navigation router
 ui/                        Run Operation, archive pages, findings, metrics
-version.py                 PROJECT_VERSION = "2.12.0"
+version.py                 PROJECT_VERSION = "2.14.0"
 scripts/smoke_check.py     Local sanity checks
 requirements-optional.txt  kaleido, weasyprint (optional)
 database/db_setup.py       SQLite schema and helpers

@@ -6,7 +6,6 @@ import streamlit as st
 
 from database.db_setup import create_or_get_entity, get_db_conn, infer_entity_type
 from database.engagements import get_engagement_for_case
-from database.personal_lab import add_personal_lab_scope_item
 from modules.executor import execute_module
 from modules.module_registry import get_module, is_executable
 from ui.compact_preflight import render_compact_preflight
@@ -15,6 +14,7 @@ from ui.constants import IMPLEMENTED_MODULE_IDS, MODULE_CARD_TITLES
 from ui.metrics import render_compact_metrics
 from ui.module_config_compact import render_advanced_module_settings, render_module_info_expanders
 from ui.module_runtime import module_disable_reason, module_enabled_for_ui
+from ui.action_cards import render_action_cards
 from ui.run_status_panel import record_workspace_run, render_run_status_panel
 from utils.assessment_goals import (
     GOAL_CUSTOM,
@@ -49,7 +49,6 @@ from utils.run_modes import (
     quick_check_supports_port_scan_option,
     sync_run_mode_from_case,
 )
-from utils.security import is_private_or_local_ip
 from utils.target_detection import get_target_type, normalize_target_value, target_type_label
 from utils.target_profile import build_target_profile
 
@@ -229,16 +228,8 @@ def _render_custom_module_picker(target: str) -> None:
                 st.caption(reason)
 
 
-def _render_next_actions(actions: list[dict]) -> None:
-    st.markdown("**Suggested next actions**")
-    if not actions:
-        st.caption("Run checks to receive tailored suggestions.")
-        return
-    for action in actions[:8]:
-        priority = action.get("priority", "medium")
-        icon = {"high": "🔴", "medium": "🟡", "low": "⚪"}.get(priority, "○")
-        st.markdown(f"{icon} **{action['title']}**")
-        st.caption(action.get("reason", ""))
+def _render_next_actions(actions: list[dict], case_id: int) -> None:
+    render_action_cards(actions, case_id=case_id, key_prefix="ws_side")
 
 
 def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
@@ -259,6 +250,10 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
         if st.button("Dismiss notice", key="dismiss_startup_notice_ws"):
             st.session_state.startup_notice_dismissed = True
             st.rerun()
+
+    if st.session_state.get("workspace_focus_run_panel"):
+        st.markdown("### Run")
+        st.session_state.workspace_focus_run_panel = False
 
     main_col, side_col = st.columns([3, 2], gap="large")
 
@@ -432,6 +427,54 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
                 m3.metric("Active", active_count)
                 m4.metric("Auth", "Yes" if auth_required else "No")
             st.caption(OPERATING_CONTEXT_DESCRIPTIONS.get(operating_context, ""))
+
+            if auth_required and operating_context == PERSONAL_LAB:
+                personal_lab_confirmed = st.checkbox(
+                    PERSONAL_LAB_CONFIRMATION_TEXT,
+                    value=st.session_state.get("personal_lab_confirmed", False),
+                    key="workspace_personal_lab_confirmed",
+                )
+                st.session_state.personal_lab_confirmed = personal_lab_confirmed
+                from utils.personal_lab_readiness import classify_personal_lab_target
+
+                target_class = classify_personal_lab_target(target.strip())
+                if target_class.get("hint"):
+                    st.info(target_class["hint"])
+                if target_class.get("warning"):
+                    st.warning(target_class["warning"])
+            elif auth_required and operating_context == CLIENT_ENGAGEMENT:
+                authorisation_confirmed = st.checkbox(
+                    "I confirm authorisation under the linked client engagement.",
+                    value=st.session_state.get("authorisation_confirmed", False),
+                    key="workspace_client_auth_confirmed",
+                )
+                st.session_state.authorisation_confirmed = authorisation_confirmed
+
+            if auth_required and operating_context == PERSONAL_LAB:
+                plan_conn = get_db_conn()
+                try:
+                    plan = enrich_operation_plan_with_preflight(
+                        build_operation_plan(
+                            case_name=current_case["name"],
+                            case_id=current_case["id"],
+                            target=target,
+                            selected_module_ids=selected_ids,
+                            authorisation_confirmed=personal_lab_confirmed,
+                            run_mode_id=run_mode_id,
+                            run_mode_label=goal_label(goal_id),
+                        ),
+                        target=target,
+                        case_id=current_case["id"],
+                        selected_module_ids=selected_ids,
+                        operating_context=operating_context,
+                        personal_lab_confirmed=personal_lab_confirmed,
+                        authorisation_confirmed=authorisation_confirmed,
+                        nmap_options=st.session_state.get("nmap_options", {}),
+                        conn=plan_conn,
+                    )
+                finally:
+                    plan_conn.close()
+
             if plan.get("expected_outputs"):
                 st.caption(
                     "Expected: "
@@ -445,43 +488,9 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
                 selected_module_ids=selected_ids,
             )
             scope_ready = not plan.get("engagement_blocked_modules")
+            if operating_context == PERSONAL_LAB and auth_required:
+                scope_ready = preflight_status.get("ready", False)
             st.caption(f"Scope ready: **{'Yes' if scope_ready else 'No'}**")
-
-            if auth_required and operating_context == PERSONAL_LAB:
-                personal_lab_confirmed = st.checkbox(
-                    PERSONAL_LAB_CONFIRMATION_TEXT,
-                    value=st.session_state.get("personal_lab_confirmed", False),
-                    key="workspace_personal_lab_confirmed",
-                )
-                st.session_state.personal_lab_confirmed = personal_lab_confirmed
-            elif auth_required and operating_context == CLIENT_ENGAGEMENT:
-                authorisation_confirmed = st.checkbox(
-                    "I confirm authorisation under the linked client engagement.",
-                    value=st.session_state.get("authorisation_confirmed", False),
-                    key="workspace_client_auth_confirmed",
-                )
-                st.session_state.authorisation_confirmed = authorisation_confirmed
-
-            if (
-                operating_context == PERSONAL_LAB
-                and target.strip()
-                and any(row.get("needs_lab_scope_add") for row in plan.get("module_preflights") or [])
-            ):
-                is_private = target_type == "ipv4" and is_private_or_local_ip(target.strip())
-                if is_private and st.button("Add to Personal Lab scope", key="ws_lab_scope_private"):
-                    conn = get_db_conn()
-                    try:
-                        add_personal_lab_scope_item(current_case["id"], target.strip(), conn=conn)
-                    finally:
-                        conn.close()
-                    st.rerun()
-                elif personal_lab_confirmed and st.button("Add as authorised lab target", key="ws_lab_scope_public"):
-                    conn = get_db_conn()
-                    try:
-                        add_personal_lab_scope_item(current_case["id"], target.strip(), conn=conn)
-                    finally:
-                        conn.close()
-                    st.rerun()
 
             launch_blocked = None
             if goal_id == GOAL_EVIDENCE_REVIEW:
@@ -496,10 +505,10 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
                 launch_blocked = "Confirm Personal Lab authorisation."
             elif auth_required and operating_context == CLIENT_ENGAGEMENT and not authorisation_confirmed:
                 launch_blocked = "Confirm client engagement authorisation."
-            elif plan.get("engagement_blocked_modules"):
+            elif plan.get("engagement_blocked_modules") and operating_context != PERSONAL_LAB:
                 launch_blocked = "Resolve preflight items before running."
             elif preflight_status.get("has_active") and not preflight_status.get("ready"):
-                launch_blocked = "Active preflight needs action."
+                launch_blocked = "Complete active check preflight before running."
 
             run_clicked = st.button(
                 "Run selected checks",
@@ -549,11 +558,21 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
         render_run_status_panel()
 
         profile_with_scope = dict(profile)
-        profile_with_scope["needs_lab_scope"] = any(
-            row.get("needs_lab_scope_add")
-            for row in (plan.get("module_preflights") or [])
-            if isinstance(row, dict)
-        ) if target.strip() else False
+        if target.strip() and auth_required and st.session_state.get("operating_context") == PERSONAL_LAB:
+            blocked_preflight = [
+                row
+                for row in (plan.get("module_preflights") or [])
+                if not row.get("allowed")
+            ]
+            needs_manual_scope = any(
+                row.get("needs_lab_scope_add") and not row.get("can_auto_scope")
+                for row in (plan.get("module_preflights") or [])
+            )
+            profile_with_scope["personal_lab_blocked"] = bool(blocked_preflight)
+            profile_with_scope["needs_lab_scope"] = needs_manual_scope
+            profile_with_scope["personal_lab_confirmed"] = st.session_state.get(
+                "personal_lab_confirmed", False
+            )
 
         conn = get_db_conn()
         try:
@@ -564,11 +583,13 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
                 target_profile=profile_with_scope,
                 latest_results=st.session_state.get("latest_run_results") or [],
                 operating_context=st.session_state.get("operating_context", PASSIVE_RESEARCH),
+                personal_lab_confirmed=bool(st.session_state.get("personal_lab_confirmed")),
+                authorisation_confirmed=bool(st.session_state.get("authorisation_confirmed")),
                 conn=conn,
             )
         finally:
             conn.close()
-        _render_next_actions(actions)
+        _render_next_actions(actions, current_case["id"])
 
         st.markdown("**Analyst notes**")
         st.text_area(

@@ -2852,10 +2852,6 @@ def _check_operating_context_framework() -> None:
         if lab_blocked.get("allowed"):
             raise AssertionError("Personal Lab active module should block without confirmation")
 
-        add_personal_lab_scope_item(case_id, "192.168.1.10", conn=conn)
-        if not list_personal_lab_scope(case_id, conn=conn):
-            raise AssertionError("personal lab scope item not stored")
-
         lab_ready = check_module_execution_guardrails(
             "infra_tls_review",
             "192.168.1.10",
@@ -2866,9 +2862,30 @@ def _check_operating_context_framework() -> None:
             conn=conn,
         )
         if not lab_ready.get("allowed"):
-            raise AssertionError("Personal Lab active module should be ready after scope + confirmation")
+            raise AssertionError(
+                "Personal Lab active module should be ready after confirmation (auto-scope on run)"
+            )
+        if not lab_ready.get("will_auto_scope_on_run"):
+            raise AssertionError("unknown lab target should show will_auto_scope_on_run when confirmed")
         if lab_ready.get("result") != "ready":
             raise AssertionError("Personal Lab preflight should report ready")
+
+        lab_exec = check_module_execution_guardrails(
+            "infra_tls_review",
+            "192.168.1.10",
+            case_id=case_id,
+            authorisation_confirmed=False,
+            operating_context=PERSONAL_LAB,
+            personal_lab_confirmed=True,
+            apply_auto_scope=True,
+            conn=conn,
+        )
+        if not lab_exec.get("allowed"):
+            raise AssertionError("Personal Lab executor preflight should pass after auto-scope")
+        if not lab_exec.get("auto_scope_created"):
+            raise AssertionError("apply_auto_scope should create personal lab scope item")
+        if not list_personal_lab_scope(case_id, conn=conn):
+            raise AssertionError("personal lab scope item not created by auto-scope")
 
         draft = create_engagement(name="Draft Smoke Engagement", status="draft", conn=conn)
         link_case_to_engagement(case_id, int(draft["id"]), conn=conn)
@@ -2906,10 +2923,128 @@ def _check_operating_context_framework() -> None:
         conn.close()
 
 
+def _check_next_actions_schema() -> None:
+    from database.db_setup import create_case, get_db_conn
+    from utils.next_actions import (
+        ACTION_TYPES,
+        enrich_action_readiness,
+        finalize_actions,
+        make_action,
+        make_action_id,
+        suggest_next_actions,
+    )
+    from utils.assessment_goals import GOAL_QUICK_SAFETY
+    from utils.target_profile import build_target_profile
+
+    required = {
+        "id",
+        "title",
+        "reason",
+        "priority",
+        "action_type",
+        "target",
+        "entity_id",
+        "module_id",
+        "finding_id",
+        "enabled",
+        "blocked_reason",
+        "button_label",
+    }
+    action = make_action(
+        title="Test action",
+        reason="Schema smoke test.",
+        action_type="run_module",
+        module_id="intel_shodan",
+        target="203.0.113.1",
+        enabled=False,
+        blocked_reason="Disabled for smoke test.",
+        button_label="Select module",
+    )
+    if not required.issubset(action.keys()):
+        raise AssertionError(f"action missing fields: {required - set(action.keys())}")
+    if action.get("enabled"):
+        raise AssertionError("explicitly disabled action should have enabled=False")
+    if not action.get("blocked_reason"):
+        raise AssertionError("disabled action should include blocked_reason")
+
+    action_id = make_action_id("add_to_queue", "Queue pivot", target="api.example.com")
+    if not action_id:
+        raise AssertionError("make_action_id should return a stable id")
+
+    if "no_action" not in ACTION_TYPES:
+        raise AssertionError("ACTION_TYPES should include no_action")
+
+    conn = get_db_conn()
+    try:
+        case = create_case("Next Actions Schema", conn=conn)
+        profile = build_target_profile(case["id"], "example.com", conn=conn)
+        actions = suggest_next_actions(
+            case_id=case["id"],
+            target="example.com",
+            goal_id=GOAL_QUICK_SAFETY,
+            target_profile=profile,
+            latest_results=[],
+            operating_context="passive_research",
+            conn=conn,
+        )
+        for item in actions:
+            if not required.issubset(item.keys()):
+                raise AssertionError(f"suggested action missing fields: {required - set(item.keys())}")
+            if not item.get("enabled") and not item.get("blocked_reason"):
+                raise AssertionError("disabled suggested action must explain why")
+
+        finalized = finalize_actions(
+            [
+                make_action(
+                    title="Run VirusTotal",
+                    reason="Reputation check.",
+                    action_type="run_module",
+                    module_id="intel_virustotal",
+                    target="example.com",
+                )
+            ],
+            case_id=case["id"],
+            operating_context="passive_research",
+            personal_lab_confirmed=False,
+            authorisation_confirmed=False,
+            conn=conn,
+        )
+        vt = finalized[0]
+        if vt.get("enabled") and vt.get("action_type") == "run_module":
+            from utils.settings_manager import has_api_key
+
+            if not has_api_key("VIRUSTOTAL_API_KEY"):
+                raise AssertionError("VirusTotal action should be blocked without API key")
+        elif not vt.get("blocked_reason") and vt.get("action_type") == "no_action":
+            raise AssertionError("blocked VT action should include blocked_reason or no_action hint")
+
+        blocked_active = enrich_action_readiness(
+            make_action(
+                title="Run TLS review",
+                reason="Active check.",
+                action_type="run_module",
+                module_id="infra_tls_review",
+                target="example.com",
+            ),
+            case_id=case["id"],
+            operating_context="passive_research",
+            personal_lab_confirmed=False,
+            authorisation_confirmed=False,
+            conn=conn,
+        )
+        if blocked_active.get("enabled"):
+            raise AssertionError("active module in passive context should be blocked")
+        if not blocked_active.get("blocked_reason"):
+            raise AssertionError("blocked active action should include blocked_reason")
+    finally:
+        conn.close()
+
+
 def _check_guided_workspace_helpers() -> None:
     from utils.assessment_goals import GOAL_QUICK_SAFETY, get_modules_for_goal, list_assessment_goals
     from utils.journey_planner import build_assessment_journey
     from utils.next_actions import suggest_next_actions
+    from utils.personal_lab_readiness import evaluate_personal_lab_readiness
     from utils.pivot_discovery import discover_pivots_from_results
     from utils.target_profile import build_target_profile
     from database.db_setup import create_case, get_db_conn
@@ -2945,6 +3080,28 @@ def _check_guided_workspace_helpers() -> None:
         )
         if not actions:
             raise AssertionError("next actions should return suggestions")
+        schema_fields = {
+            "id",
+            "title",
+            "reason",
+            "priority",
+            "action_type",
+            "enabled",
+            "blocked_reason",
+            "button_label",
+        }
+        for action in actions:
+            if not schema_fields.issubset(action.keys()):
+                raise AssertionError("next action schema incomplete")
+        readiness = evaluate_personal_lab_readiness(
+            "203.0.113.10",
+            case_id=case["id"],
+            personal_lab_confirmed=True,
+            testing_level="safe_active_check",
+            conn=conn,
+        )
+        if not readiness.get("will_auto_scope_on_run"):
+            raise AssertionError("confirmed public target should auto-scope on run")
     finally:
         conn.close()
 
@@ -3145,6 +3302,11 @@ def main() -> int:
     run(
         "operating context framework",
         lambda: _check_operating_context_framework(),
+    )
+
+    run(
+        "next actions schema",
+        lambda: _check_next_actions_schema(),
     )
 
     run(

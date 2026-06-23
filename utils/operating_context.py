@@ -16,8 +16,7 @@ from utils.module_testing_levels import (
     is_active_testing_level,
     testing_level_label,
 )
-from utils.security import is_private_or_local_ip
-from utils.settings_manager import personal_lab_enabled, personal_lab_private_quick_scope_enabled
+from utils.personal_lab_readiness import evaluate_personal_lab_readiness
 from utils.target_detection import get_target_type, target_type_label
 
 PASSIVE_RESEARCH = "passive_research"
@@ -169,6 +168,7 @@ def check_module_execution_guardrails(
     authorisation_confirmed: bool,
     operating_context: str = PASSIVE_RESEARCH,
     personal_lab_confirmed: bool = False,
+    apply_auto_scope: bool = False,
     options: dict[str, Any] | None = None,
     conn: Any | None = None,
 ) -> dict[str, Any]:
@@ -249,6 +249,7 @@ def check_module_execution_guardrails(
             case_id=case_id,
             authorisation_confirmed=authorisation_confirmed,
             personal_lab_confirmed=personal_lab_confirmed,
+            apply_auto_scope=apply_auto_scope,
             options=options,
             conn=conn,
             testing_level=testing_level,
@@ -272,124 +273,99 @@ def _check_personal_lab_guardrails(
     case_id: int | None,
     authorisation_confirmed: bool,
     personal_lab_confirmed: bool,
+    apply_auto_scope: bool,
     options: dict[str, Any],
     conn: Any | None,
     testing_level: str,
 ) -> dict[str, Any]:
-    items: list[dict[str, Any]] = []
-    blocked_reason: str | None = None
+    confirmed = personal_lab_confirmed or authorisation_confirmed
+    readiness = evaluate_personal_lab_readiness(
+        target,
+        case_id=case_id,
+        personal_lab_confirmed=confirmed,
+        testing_level=testing_level,
+        conn=conn,
+        apply_auto_scope=apply_auto_scope,
+    )
+    classification = readiness.get("classification") or {}
 
-    items.append(
+    items: list[dict[str, Any]] = [
         _preflight_item(
             "operating_context",
             "Operating context",
             ok=True,
-            value=f"{PERSONAL_LAB_PROFILE['name']} (self-owned / lab testing)",
-        )
-    )
-
-    enabled = personal_lab_enabled()
-    items.append(
+            value=f"{PERSONAL_LAB_PROFILE['name']}",
+        ),
         _preflight_item(
             "personal_lab_enabled",
             "Personal Lab Mode enabled",
-            ok=enabled,
+            ok=readiness.get("enabled", False),
             fix="Enable Personal Lab Mode in Settings or set PROJECT_OVERWATCH_PERSONAL_LAB_ENABLED=true.",
-        )
-    )
-    if not enabled:
-        blocked_reason = "Personal Lab Mode is disabled in settings."
-
-    confirmed = personal_lab_confirmed or authorisation_confirmed
-    items.append(
+        ),
         _preflight_item(
             "lab_confirmation",
-            "Personal Lab confirmation",
-            ok=confirmed,
-            fix="Tick the Personal Lab confirmation checkbox before running active modules.",
-        )
-    )
-    if not blocked_reason and not confirmed:
-        blocked_reason = "Personal Lab confirmation is required before running active modules."
-
-    lab_scope = assess_personal_lab_scope(target, case_id=case_id, conn=conn)
-    scope_status = lab_scope.get("scope_status") or "unknown"
-    permitted = lab_scope.get("permitted_testing_level") or "safe_active"
-    in_scope = scope_status == "in_scope" and lab_scope.get("scope_item") is not None
-
-    target_type = get_target_type(target)
-    is_private = target_type == "ipv4" and is_private_or_local_ip(target)
-    quick_scope_ok = is_private and personal_lab_private_quick_scope_enabled()
-
-    items.append(
+            "Lab confirmation",
+            ok=readiness.get("confirmed", False),
+            value="confirmed" if readiness.get("confirmed") else "required",
+            fix="Tick Personal Lab confirmation to continue.",
+        ),
         _preflight_item(
             "lab_scope",
-            "Personal Lab scope",
-            ok=in_scope,
-            value=scope_status.replace("_", " "),
-            fix=(
-                "Add to Personal Lab scope and continue"
-                if is_private
-                else "Add as authorised lab target"
-            ),
-        )
-    )
-    if not blocked_reason and not in_scope:
-        if quick_scope_ok:
-            blocked_reason = (
-                "Target is not in Personal Lab scope — use “Add to Personal Lab scope and continue”."
-            )
-        else:
-            blocked_reason = (
-                "Target is not in Personal Lab scope — add as authorised lab target after confirmation."
-            )
-
-    allowed_levels = SCOPE_LEVEL_ALLOWS.get(permitted, SCOPE_LEVEL_ALLOWS["safe_active"])
-    level_ok = testing_level in allowed_levels if in_scope else False
-    items.append(
+            "Lab scope",
+            ok=readiness.get("in_scope") or readiness.get("will_auto_scope_on_run", False),
+            value=readiness.get("scope_label", "unknown"),
+            fix="Tick Personal Lab confirmation to continue." if not confirmed else None,
+        ),
         _preflight_item(
             "testing_level",
-            "Testing level permitted",
-            ok=level_ok or not in_scope,
-            value=permitted.replace("_", " ") if in_scope else "—",
+            "Testing level",
+            ok=readiness.get("testing_level_ok", False),
+            value="safe active permitted",
             fix="Personal Lab scope must permit safe active checks.",
-        )
-    )
-    if not blocked_reason and in_scope and not level_ok:
-        blocked_reason = (
-            f"Module testing level ({testing_level_label(testing_level)}) exceeds Personal Lab scope."
-        )
-
-    items.append(
+        ),
         _preflight_item(
             "emergency_stop",
             "Emergency stop",
             ok=True,
-            value="not applicable (Personal Lab)",
-        )
-    )
+            value="not applicable",
+        ),
+    ]
 
-    allowed = blocked_reason is None
-    return _aggregate_preflight(
-        allowed=allowed,
+    blocked_reason = readiness.get("blocked_reason")
+    if readiness.get("result") == "needs_confirmation" and not blocked_reason:
+        blocked_reason = "Personal Lab confirmation is required before running active modules."
+
+    result_state = readiness.get("result", "blocked")
+    if result_state == "needs_confirmation":
+        result_state = "needs_action"
+
+    payload = _aggregate_preflight(
+        allowed=readiness.get("allowed", False),
         operating_context=PERSONAL_LAB,
         target=target,
         module_id=module_id,
         testing_level=testing_level,
         items=items,
         blocked_reason=blocked_reason,
-        warnings=lab_scope.get("warnings"),
         extra={
-            "scope_status": scope_status,
-            "testing_level_permitted": permitted,
+            "scope_status": readiness.get("scope_status"),
+            "testing_level_permitted": readiness.get("testing_level_permitted"),
             "personal_lab_confirmed": confirmed,
             "authorisation_confirmed": confirmed,
             "emergency_stop_active": False,
-            "is_private_target": is_private,
-            "quick_scope_available": quick_scope_ok and not in_scope,
-            "needs_lab_scope_add": not in_scope,
+            "is_private_target": readiness.get("is_private_target", False),
+            "is_public_target": readiness.get("is_public_target", False),
+            "target_hint": readiness.get("target_hint"),
+            "target_warning": readiness.get("target_warning"),
+            "will_auto_scope_on_run": readiness.get("will_auto_scope_on_run", False),
+            "auto_scope_created": readiness.get("auto_scope_created", False),
+            "needs_lab_scope_add": readiness.get("needs_lab_scope_add", False),
+            "can_auto_scope": readiness.get("can_auto_scope", False),
+            "lab_readiness": readiness,
         },
     )
+    payload["result"] = result_state if not readiness.get("allowed") else "ready"
+    return payload
 
 
 def _check_client_engagement_guardrails(

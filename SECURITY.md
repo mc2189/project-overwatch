@@ -107,6 +107,7 @@ Run Operation uses three operating contexts:
 | **Client Engagement** | Formal client work | Full engagement, scope, ROE, and authorisation checks |
 
 - **Personal Lab** is not a client engagement — it uses a separate scope table and logs confirmation text/version
+- **Personal Lab auto-scope** — after ticking the single confirmation checkbox, unknown targets are added to lab scope automatically when you run safe active checks
 - **Client Engagement** remains strict: draft engagements, out-of-scope targets, emergency stop, and ROE limits still block active checks
 - **Passive modules** run in Passive Research without engagement, ROE, or lab confirmation
 

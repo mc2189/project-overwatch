@@ -7,10 +7,14 @@ from typing import Any
 import streamlit as st
 
 from modules.module_registry import get_module
+from ui.action_cards import render_pivot_cards
 from ui.constants import SEVERITY_RANK
 from ui.results import render_result_detail_tabs
+from ui.workspace_actions import apply_workspace_action
 from utils.finding_interpreter import risk_findings
+from utils.next_actions import finalize_actions, make_action
 from utils.pivot_discovery import discover_pivots_from_results
+from utils.result_next_actions import suggest_result_action
 from utils.result_status import status_label
 from utils.result_summary import summarize_run_results
 
@@ -27,20 +31,14 @@ def _highest_severity(findings: list[dict]) -> str | None:
     return best
 
 
-def _suggested_action_for_result(result: dict[str, Any]) -> str:
-    risk = risk_findings(result.get("interpreter_findings") or [])
-    if not risk:
-        if result.get("warnings"):
-            return "Review warnings and decide whether follow-up checks are needed."
-        return "No immediate action — review details if this target is in scope."
-    top = risk[0]
-    actions = top.get("suggested_actions") or []
-    if actions:
-        return str(actions[0])
-    return f"Review {top.get('title', 'finding')} ({top.get('severity', 'info')})."
-
-
-def render_concise_result_card(result: dict[str, Any], *, expanded: bool = False) -> None:
+def render_concise_result_card(
+    result: dict[str, Any],
+    *,
+    target: str,
+    case_id: int,
+    expanded: bool = False,
+    card_index: int = 0,
+) -> None:
     """Render a single concise result card with collapsed details."""
     module = get_module(result.get("module_id"))
     display_name = module.display_name if module else result.get("module_id", "Module")
@@ -48,6 +46,13 @@ def render_concise_result_card(result: dict[str, Any], *, expanded: bool = False
     highest = _highest_severity(risk)
     warning_count = len(result.get("warnings") or [])
     run_status = result.get("status", "unknown")
+    next_action = finalize_actions(
+        [suggest_result_action(result, target=target)],
+        case_id=case_id,
+        operating_context=st.session_state.get("operating_context", "passive_research"),
+        personal_lab_confirmed=bool(st.session_state.get("personal_lab_confirmed")),
+        authorisation_confirmed=bool(st.session_state.get("authorisation_confirmed")),
+    )[0]
 
     with st.container(border=True):
         cols = st.columns([3, 1])
@@ -72,7 +77,19 @@ def render_concise_result_card(result: dict[str, Any], *, expanded: bool = False
         if summary:
             st.write(summary[:280] + ("…" if len(summary) > 280 else ""))
 
-        st.caption(f"Suggested action: {_suggested_action_for_result(result)}")
+        st.caption(f"Next step: {next_action.get('title')}")
+        if next_action.get("action_type") != "no_action" and next_action.get("enabled"):
+            if st.button(
+                next_action.get("button_label", "Go"),
+                key=f"result_action_{card_index}_{result.get('module_id')}",
+                width="stretch",
+            ):
+                st.session_state.workspace_action_message = apply_workspace_action(
+                    next_action, case_id
+                )
+                st.rerun()
+        elif next_action.get("blocked_reason"):
+            st.caption(next_action["blocked_reason"])
 
         with st.expander("Details", expanded=expanded):
             render_result_detail_tabs(result)
@@ -89,6 +106,11 @@ def render_workspace_results(
         return []
 
     st.markdown("### Results")
+    if st.session_state.get("workspace_action_message"):
+        st.success(st.session_state.workspace_action_message)
+        if st.button("Dismiss action message", key="result_dismiss_action_msg"):
+            del st.session_state["workspace_action_message"]
+            st.rerun()
     st.caption(f"Target: `{target}`")
     summary = summarize_run_results(results)
     c1, c2, c3, c4 = st.columns(4)
@@ -98,38 +120,59 @@ def render_workspace_results(
     c4.metric("Highest", summary["highest_severity"] or "—")
 
     for index, result in enumerate(results):
-        render_concise_result_card(result, expanded=index == 0 and len(results) == 1)
+        render_concise_result_card(
+            result,
+            target=target,
+            case_id=case_id,
+            expanded=index == 0 and len(results) == 1,
+            card_index=index,
+        )
 
     pivots = discover_pivots_from_results(results)
-    if pivots:
-        st.markdown("**New pivots discovered**")
-        for pivot in pivots[:8]:
-            cols = st.columns([3, 1, 1])
-            with cols[0]:
-                st.markdown(f"**{pivot['pivot_type']}** — `{pivot['value']}`")
-                st.caption(f"From {pivot.get('source_module', 'run')}")
-            with cols[1]:
-                if st.button("Add to queue", key=f"pivot_queue_{pivot['pivot_type']}_{pivot['value']}"):
-                    st.session_state.workspace_queue_pivot = pivot
-            with cols[2]:
-                if st.button("Open entity", key=f"pivot_entity_{pivot['pivot_type']}_{pivot['value']}"):
-                    st.session_state.operation_target = pivot["value"]
-                    st.session_state.nav_page = "Entity Workspace"
-                    st.rerun()
+    render_pivot_cards(pivots, case_id=case_id, key_prefix="result_pivot")
 
+    report_actions = finalize_actions(
+        [
+            make_action(
+                title="Generate report",
+                reason="Summarise this run in a case report.",
+                action_type="create_report",
+                priority="medium",
+                button_label="Generate report",
+                action_id="result_journey_report",
+            ),
+            make_action(
+                title="Review evidence",
+                reason="Check evidence locker before reporting.",
+                action_type="review_evidence",
+                priority="medium",
+                button_label="Review evidence",
+                action_id="result_journey_evidence",
+            ),
+            make_action(
+                title="Review findings",
+                reason="Triage open findings from this run.",
+                action_type="open_finding",
+                priority="medium",
+                button_label="Open findings",
+                action_id="result_journey_findings",
+            ),
+        ],
+        case_id=case_id,
+        operating_context=st.session_state.get("operating_context", "passive_research"),
+        personal_lab_confirmed=bool(st.session_state.get("personal_lab_confirmed")),
+        authorisation_confirmed=bool(st.session_state.get("authorisation_confirmed")),
+    )
     st.markdown("**Report journey**")
-    r1, r2, r3 = st.columns(3)
-    with r1:
-        if st.button("Generate report", key="workspace_generate_report"):
-            st.session_state.nav_page = "Report"
-            st.rerun()
-    with r2:
-        if st.button("Review findings", key="workspace_review_findings"):
-            st.session_state.nav_page = "Findings"
-            st.rerun()
-    with r3:
-        if st.button("Review evidence", key="workspace_review_evidence"):
-            st.session_state.nav_page = "Evidence Locker"
-            st.rerun()
+    cols = st.columns(len(report_actions))
+    for col, action in zip(cols, report_actions):
+        with col:
+            if action.get("enabled") and st.button(
+                action.get("button_label", "Go"),
+                key=f"rj_{action['id']}",
+                width="stretch",
+            ):
+                st.session_state.workspace_action_message = apply_workspace_action(action, case_id)
+                st.rerun()
 
     return pivots

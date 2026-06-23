@@ -190,6 +190,10 @@ def render_findings_page(case_id: int, metrics: dict) -> None:
         "Findings are analyst aids, not final proof of risk."
     )
 
+    focus_id = st.session_state.pop("findings_focus_id", None)
+    if focus_id is not None:
+        st.info(f"Focused finding #{focus_id} from workspace action.")
+
     module_options = sorted({finding.get("module_id") for finding in findings if finding.get("module_id")})
     filter_col1, filter_col2, filter_col3 = st.columns(3)
     with filter_col1:

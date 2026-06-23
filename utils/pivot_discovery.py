@@ -24,6 +24,14 @@ def _unique(values: list[str]) -> list[str]:
     return ordered
 
 
+def pivot_entity_type(value: str, pivot_type: str) -> str:
+    """Map pivot value to entity/target type label."""
+    detected = get_target_type(value)
+    if detected != "unknown":
+        return detected
+    return pivot_type
+
+
 def discover_pivots_from_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return pivot suggestions discovered in the latest run results."""
     pivots: list[dict[str, Any]] = []
@@ -146,5 +154,7 @@ def discover_pivots_from_results(results: list[dict[str, Any]]) -> list[dict[str
         if key in seen:
             continue
         seen.add(key)
+        pivot["entity_type"] = pivot_entity_type(value, pivot_type)
         deduped.append(pivot)
     return deduped[:25]
+

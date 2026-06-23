@@ -3981,6 +3981,9 @@ def execute_module(
         authorisation_confirmed=authorisation_confirmed,
         operating_context=operating_context,
         personal_lab_confirmed=personal_lab_confirmed,
+        apply_auto_scope=(
+            operating_context == PERSONAL_LAB and personal_lab_confirmed
+        ),
         options=options,
         conn=db_context,
     )
@@ -4023,6 +4026,7 @@ def execute_module(
             operating_context=operating_context,
             confirmation_text=PERSONAL_LAB_CONFIRMATION_TEXT,
             confirmation_version=PERSONAL_LAB_CONFIRMATION_VERSION,
+            auto_scope_created=bool(guardrail.get("auto_scope_created")),
             conn=db_context,
         )
 
