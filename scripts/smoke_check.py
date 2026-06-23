@@ -255,9 +255,29 @@ def _check_settings_manager() -> None:
         if shodan_validation["ok"]:
             raise AssertionError("intel_shodan should fail validation without API key")
 
+    urlhaus = registry.get_module("intel_urlhaus")
+    if urlhaus is None or not urlhaus.implemented:
+        raise AssertionError("intel_urlhaus should be implemented")
+    if not urlhaus.requires_api_key:
+        raise AssertionError("intel_urlhaus should require API key")
+    if urlhaus.api_key_names != ("ABUSECH_AUTH_KEY", "URLHAUS_AUTH_KEY"):
+        raise AssertionError("intel_urlhaus api_key_names mismatch")
+    if urlhaus.accepted_target_types != ("url", "domain", "ipv4"):
+        raise AssertionError("intel_urlhaus accepted_target_types mismatch")
+    if not settings.get_urlhaus_auth_key():
+        urlhaus_validation = settings.validate_module_settings("intel_urlhaus")
+        if urlhaus_validation["ok"]:
+            raise AssertionError("intel_urlhaus should fail validation without API key")
+
+    st = registry.get_module("intel_securitytrails")
+    if st is None or st.implemented:
+        raise AssertionError("intel_securitytrails should remain planned/not implemented")
+    if registry.is_executable(st):
+        raise AssertionError("intel_securitytrails must not be executable")
+
     providers = settings.list_api_provider_status()
-    if len(providers) < 8:
-        raise AssertionError("expected at least 8 API provider definitions")
+    if len(providers) < 9:
+        raise AssertionError("expected at least 9 API provider definitions")
     modules = settings.list_module_config_status()
     if not any(row["module_id"] == "infra_nmap" for row in modules):
         raise AssertionError("list_module_config_status missing infra_nmap")
@@ -1644,6 +1664,7 @@ def _check_module_sdk() -> None:
         "intel_abuseipdb",
         "intel_greynoise",
         "intel_shodan",
+        "intel_urlhaus",
     ):
         module = registry.get_module(module_id)
         if module is None:
@@ -2074,6 +2095,151 @@ def _check_shodan_module() -> None:
         raise AssertionError("shodan URL key redaction failed in smoke path")
 
 
+def _check_urlhaus_module() -> None:
+    import importlib.util
+    import json
+
+    registry = __import__("modules.module_registry", fromlist=["get_module", "is_executable"])
+    module = registry.get_module("intel_urlhaus")
+    if module is None or not module.implemented:
+        raise AssertionError("intel_urlhaus should be implemented")
+    if module.display_name != "URLhaus Malware URL Intelligence":
+        raise AssertionError("intel_urlhaus display_name mismatch")
+    if module.accepted_target_types != ("url", "domain", "ipv4"):
+        raise AssertionError("intel_urlhaus accepted_target_types mismatch")
+    if registry.is_executable(registry.get_module("intel_securitytrails")):
+        raise AssertionError("intel_securitytrails must not be executable")
+
+    executor = __import__("modules.executor", fromlist=["is_runtime_ready"])
+    if not executor.is_runtime_ready("intel_urlhaus"):
+        raise AssertionError("intel_urlhaus runtime should be ready")
+
+    module_path = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_urlhaus.py"
+    source = module_path.read_text(encoding="utf-8")
+    for forbidden in (
+        "urls/recent",
+        "payloads/",
+        "urlhaus.abuse.ch/api/",
+        "v1/download",
+    ):
+        if forbidden in source:
+            raise AssertionError(f"intel_urlhaus must not reference forbidden endpoint: {forbidden}")
+
+    spec = importlib.util.spec_from_file_location("intel_urlhaus_smoke", module_path)
+    if spec is None or spec.loader is None:
+        raise AssertionError("could not load intel_urlhaus module")
+    urlhaus_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(urlhaus_mod)
+
+    missing = urlhaus_mod.run_urlhaus_lookup("http://example.com/test", auth_key="")
+    if missing.get("status") != "blocked":
+        raise AssertionError("missing Auth-Key should return blocked status")
+    if "URLhaus / abuse.ch Auth-Key is not configured" not in str(missing.get("errors")):
+        raise AssertionError("missing Auth-Key message mismatch")
+
+    private = urlhaus_mod.run_urlhaus_lookup("192.168.1.1", auth_key="smoke-test-key", target_type="ipv4")
+    if not private.get("success") or not private.get("parsed_data", {}).get("private_local_ip"):
+        raise AssertionError("private IP should complete without API query")
+
+    email_blocked = urlhaus_mod.run_urlhaus_lookup("user@example.com", auth_key="smoke-test-key")
+    if email_blocked.get("status") != "blocked":
+        raise AssertionError("email target should be blocked for urlhaus")
+
+    mock_url = {
+        "query_status": "ok",
+        "id": "12345",
+        "urlhaus_reference": "https://urlhaus.abuse.ch/url/12345/",
+        "url": "http://example.com/malware.exe",
+        "url_status": "online",
+        "host": "example.com",
+        "date_added": "2024-06-01 12:00:00 UTC",
+        "threat": "malware_download",
+        "blacklists": {"spamhaus_dbl": "not listed"},
+        "tags": ["exe"],
+        "payloads": [
+            {
+                "filename": "malware.exe",
+                "sha256_hash": "abc123",
+                "urlhaus_download": "https://urlhaus.abuse.ch/download/abc123/",
+            }
+        ],
+    }
+    url_lookup = urlhaus_mod.run_urlhaus_lookup(
+        "http://example.com/malware.exe",
+        auth_key="smoke-test-key",
+        options={"mock_response": mock_url, "mock_lookup_type": "url"},
+    )
+    if not url_lookup.get("success"):
+        raise AssertionError("mock URLhaus URL lookup should succeed")
+    parsed = url_lookup.get("parsed_data") or {}
+    if parsed.get("lookup_type") != "url":
+        raise AssertionError("mock URL lookup missing lookup_type")
+    if "urlhaus_download" in json.dumps(parsed):
+        raise AssertionError("parsed_data should strip urlhaus_download fields")
+    if not url_lookup.get("evidence"):
+        raise AssertionError("mock URLhaus URL lookup should declare evidence hints")
+
+    mock_host = {
+        "query_status": "ok",
+        "urlhaus_reference": "https://urlhaus.abuse.ch/host/example.com/",
+        "host": "example.com",
+        "firstseen": "2024-01-01",
+        "url_count": "2",
+        "blacklists": {"surbl": "listed"},
+        "urls": [
+            {
+                "id": "1",
+                "url": "http://example.com/a.exe",
+                "url_status": "online",
+                "threat": "malware_download",
+                "date_added": "2024-06-01 12:00:00 UTC",
+            },
+            {
+                "id": "2",
+                "url": "http://example.com/b.exe",
+                "url_status": "offline",
+                "threat": "malware_download",
+                "date_added": "2024-05-01 12:00:00 UTC",
+            },
+        ],
+    }
+    host_lookup = urlhaus_mod.run_urlhaus_lookup(
+        "example.com",
+        auth_key="smoke-test-key",
+        options={"mock_response": mock_host, "mock_lookup_type": "host"},
+    )
+    if not host_lookup.get("success"):
+        raise AssertionError("mock URLhaus host lookup should succeed")
+    host_parsed = host_lookup.get("parsed_data") or {}
+    if host_parsed.get("lookup_type") != "host":
+        raise AssertionError("mock host lookup missing lookup_type")
+    if not host_parsed.get("sampled_urls"):
+        raise AssertionError("mock host lookup missing sampled URLs")
+
+    interpreter = __import__(
+        "utils.urlhaus_interpreter",
+        fromlist=["interpret_urlhaus_results"],
+    )
+    findings = interpreter.interpret_urlhaus_results(parsed)
+    if not findings:
+        raise AssertionError("urlhaus interpreter should return findings")
+
+    findings_registry = __import__(
+        "utils.findings_registry",
+        fromlist=["interpret_module_findings", "module_has_findings_pipeline"],
+    )
+    if not findings_registry.module_has_findings_pipeline("intel_urlhaus"):
+        raise AssertionError("intel_urlhaus should have findings pipeline")
+    pipeline_findings = findings_registry.interpret_module_findings("intel_urlhaus", parsed)
+    if not pipeline_findings:
+        raise AssertionError("findings pipeline returned no urlhaus findings")
+
+    security = __import__("utils.security", fromlist=["redact_secrets_from_text"])
+    redacted = security.redact_secrets_from_text("Auth-Key: supersecretauthkey123456")
+    if "supersecretauthkey" in redacted:
+        raise AssertionError("Auth-Key redaction failed in urlhaus smoke path")
+
+
 def _check_api_module_helpers() -> None:
     import time
 
@@ -2321,6 +2487,11 @@ def main() -> int:
     run(
         "shodan module",
         lambda: _check_shodan_module(),
+    )
+
+    run(
+        "urlhaus module",
+        lambda: _check_urlhaus_module(),
     )
 
     run(

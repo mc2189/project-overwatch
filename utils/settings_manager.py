@@ -59,6 +59,16 @@ API_PROVIDERS: tuple[ApiProviderSpec, ...] = (
         notes="Used by Shodan Internet Exposure Intelligence — key is masked here and never stored in the database.",
     ),
     ApiProviderSpec(
+        "urlhaus",
+        "URLhaus / abuse.ch",
+        ("ABUSECH_AUTH_KEY", "URLHAUS_AUTH_KEY"),
+        ("intel_urlhaus",),
+        notes=(
+            "Used by URLhaus Malware URL Intelligence — ABUSECH_AUTH_KEY preferred; "
+            "URLHAUS_AUTH_KEY is an optional alias. Key is masked here and never stored in the database."
+        ),
+    ),
+    ApiProviderSpec(
         "censys",
         "Censys",
         ("CENSYS_API_ID", "CENSYS_API_SECRET"),
@@ -70,6 +80,10 @@ API_PROVIDERS: tuple[ApiProviderSpec, ...] = (
         "SecurityTrails",
         ("SECURITYTRAILS_API_KEY",),
         ("intel_securitytrails",),
+        notes=(
+            "Planned only — SecurityTrails appears to require paid/API access and is not implemented. "
+            "Roadmap placeholder; not available in Run Operation."
+        ),
     ),
     ApiProviderSpec(
         "hunter",
@@ -188,12 +202,29 @@ def has_api_key(env_key: str) -> bool:
     return bool(get_env(env_key))
 
 
+def get_urlhaus_auth_key() -> str | None:
+    """Return URLhaus/abuse.ch Auth-Key (ABUSECH_AUTH_KEY preferred, URLHAUS_AUTH_KEY fallback)."""
+    return get_env("ABUSECH_AUTH_KEY") or get_env("URLHAUS_AUTH_KEY")
+
+
+def _module_api_keys_configured(module) -> bool:
+    """Return True when required API keys for a module are configured."""
+    keys = tuple(module.api_key_names or ())
+    if not keys:
+        return True
+    if module.module_id == "intel_urlhaus":
+        return bool(get_urlhaus_auth_key())
+    return all(has_api_key(key) for key in keys)
+
+
 def mask_api_key(value: str | None, *, visible_prefix: int = 3, visible_suffix: int = 4) -> str:
     """Return a masked display value such as vt_****abcd. Never use for logging secrets."""
     return mask_secret(value, visible_prefix=visible_prefix, visible_suffix=visible_suffix)
 
 
 def provider_configured(provider: ApiProviderSpec) -> bool:
+    if provider.provider_id == "urlhaus":
+        return bool(get_urlhaus_auth_key())
     return all(has_api_key(key) for key in provider.env_keys)
 
 
@@ -256,10 +287,24 @@ def module_api_key_status(module) -> dict[str, Any]:
         }
 
     missing = [key for key in required_keys if not has_api_key(key)]
+    if module.module_id == "intel_urlhaus":
+        configured = _module_api_keys_configured(module)
+        missing = [] if configured else ["ABUSECH_AUTH_KEY"]
+        masked = {}
+        for key in ("ABUSECH_AUTH_KEY", "URLHAUS_AUTH_KEY"):
+            if has_api_key(key):
+                masked[key] = mask_api_key(get_env(key))
+        return {
+            "required": True,
+            "configured": configured,
+            "missing_keys": missing,
+            "masked_keys": masked,
+        }
+
     masked = {key: mask_api_key(get_env(key)) for key in required_keys if has_api_key(key)}
     return {
         "required": True,
-        "configured": not missing,
+        "configured": _module_api_keys_configured(module),
         "missing_keys": missing,
         "masked_keys": masked,
     }
@@ -307,6 +352,15 @@ def validate_module_settings(module_id: str) -> dict[str, Any]:
                 "reason": (
                     "Shodan API key is not configured. "
                     "Add SHODAN_API_KEY to your local .env file."
+                ),
+                "missing_keys": key_status["missing_keys"],
+            }
+        if module.module_id == "intel_urlhaus":
+            return {
+                "ok": False,
+                "reason": (
+                    "URLhaus / abuse.ch Auth-Key is not configured. "
+                    "Add ABUSECH_AUTH_KEY to your local .env file."
                 ),
                 "missing_keys": key_status["missing_keys"],
             }

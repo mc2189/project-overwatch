@@ -325,6 +325,65 @@ def render_result_summary_tab(result: dict) -> None:
         if api.get("error") and not parsed_data.get("private_local_ip"):
             st.caption(f"Shodan note: {api['error']}")
 
+    if result["module_id"] == "intel_urlhaus" and parsed_data:
+        st.caption(
+            "Results reported by URLhaus — third-party malware URL intelligence only. "
+            "Not independently verified by Overwatch. No payloads are downloaded."
+        )
+        st.markdown(f"**Target:** {parsed_data.get('lookup_value') or parsed_data.get('target') or '—'}")
+        if parsed_data.get("private_local_ip"):
+            st.info("Private/local IP — public URLhaus malware URL lookup is not applicable.")
+        else:
+            if parsed_data.get("lookup_type"):
+                st.markdown(f"**Lookup type:** {parsed_data['lookup_type']}")
+            if parsed_data.get("query_status"):
+                st.markdown(f"**Query status:** {parsed_data['query_status']}")
+            if parsed_data.get("url_status"):
+                st.markdown(f"**URL status:** {parsed_data['url_status']}")
+            if parsed_data.get("threat"):
+                st.markdown(f"**Threat:** {parsed_data['threat']}")
+            if parsed_data.get("url_count") is not None:
+                st.markdown(f"**URL count:** {parsed_data['url_count']}")
+            if any(parsed_data.get(key) is not None for key in ("active_url_count", "offline_url_count")):
+                st.markdown(
+                    f"**Active/offline/unknown:** "
+                    f"{parsed_data.get('active_url_count', 0)}/"
+                    f"{parsed_data.get('offline_url_count', 0)}/"
+                    f"{parsed_data.get('unknown_url_count', 0)}"
+                )
+            if parsed_data.get("blacklist_summary"):
+                st.markdown(f"**Blacklist:** {parsed_data['blacklist_summary']}")
+            if parsed_data.get("tags"):
+                st.markdown(f"**Tags:** {', '.join(str(tag) for tag in parsed_data['tags'][:15])}")
+            if parsed_data.get("date_added"):
+                st.markdown(f"**Date added:** {parsed_data['date_added']}")
+            if parsed_data.get("first_seen"):
+                st.markdown(f"**First seen:** {parsed_data['first_seen']}")
+            if parsed_data.get("last_online"):
+                st.markdown(f"**Last online:** {parsed_data['last_online']}")
+            if parsed_data.get("output_capped"):
+                st.warning(
+                    "URLhaus returned a large result set; displayed/stored entity output was capped for usability."
+                )
+            sampled = parsed_data.get("sampled_urls") or []
+            if sampled:
+                rows = [
+                    {
+                        "url": item.get("url"),
+                        "url_status": item.get("url_status"),
+                        "threat": item.get("threat"),
+                        "date_added": item.get("date_added"),
+                    }
+                    for item in sampled[:20]
+                ]
+                with st.expander("Sampled reported URLs (collapsed)", expanded=False):
+                    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+        api = parsed_data.get("api") or {}
+        if api.get("status_code") == 429:
+            st.warning("URLhaus rate limit reached — retry later.")
+        if api.get("error") and not parsed_data.get("private_local_ip"):
+            st.caption(f"URLhaus note: {api['error']}")
+
     if result["module_id"] == "infra_website_metadata" and parsed_data:
         homepage = parsed_data.get("homepage") or {}
         if homepage.get("page_title"):
@@ -425,6 +484,23 @@ def render_result_module_output_tab(result: dict) -> None:
         if services:
             with st.expander("Full reported service summaries (collapsed)", expanded=False):
                 st.dataframe(pd.DataFrame(services), width="stretch", hide_index=True)
+
+    if result["module_id"] == "intel_urlhaus" and parsed_data:
+        raw_response = parsed_data.get("raw_response")
+        if raw_response:
+            from utils.security import redact_secrets_from_dict
+
+            with st.expander("Raw URLhaus API response (download links stripped)", expanded=False):
+                st.caption("Malware download links are not shown as actionable links.")
+                st.json(redact_secrets_from_dict(raw_response))
+        sampled = parsed_data.get("sampled_urls") or []
+        if sampled:
+            with st.expander("Full sampled URL summaries (collapsed)", expanded=False):
+                st.dataframe(pd.DataFrame(sampled), width="stretch", hide_index=True)
+        payload_hashes = parsed_data.get("payload_hashes") or []
+        if payload_hashes:
+            with st.expander("Payload hash summaries only (collapsed)", expanded=False):
+                st.dataframe(pd.DataFrame(payload_hashes), width="stretch", hide_index=True)
 
     if result["module_id"] == "infra_cert_subdomain":
         subdomains = parsed_data.get("subdomains") or []
@@ -546,6 +622,8 @@ def render_result_structured_tab(result: dict) -> None:
     if result["module_id"] == "intel_greynoise" and isinstance(parsed_data, dict):
         parsed_data = {key: value for key, value in parsed_data.items() if key != "raw_response"}
     if result["module_id"] == "intel_shodan" and isinstance(parsed_data, dict):
+        parsed_data = {key: value for key, value in parsed_data.items() if key != "raw_response"}
+    if result["module_id"] == "intel_urlhaus" and isinstance(parsed_data, dict):
         parsed_data = {key: value for key, value in parsed_data.items() if key != "raw_response"}
     payload = {
         "selected_options": result.get("selected_options"),

@@ -138,6 +138,13 @@ MODULE_EVIDENCE_DEFAULTS: dict[str, dict[str, Any]] = {
         "reliability": RELIABILITY_MEDIUM,
         "collection_method": "api_exposure_lookup",
     },
+    "intel_urlhaus": {
+        "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
+        "source_name": "URLhaus",
+        "source_url": "https://urlhaus.abuse.ch/",
+        "reliability": RELIABILITY_MEDIUM,
+        "collection_method": "api_malware_url_lookup",
+    },
 }
 
 RELATIONSHIP_EVIDENCE_DEFAULTS: dict[tuple[str, str], dict[str, Any]] = {
@@ -206,6 +213,22 @@ RELATIONSHIP_EVIDENCE_DEFAULTS: dict[tuple[str, str], dict[str, Any]] = {
         "reliability": RELIABILITY_MEDIUM,
     },
     ("intel_shodan", "has_hostname"): {
+        "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
+        "reliability": RELIABILITY_MEDIUM,
+    },
+    ("intel_urlhaus", "hosted_on"): {
+        "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
+        "reliability": RELIABILITY_MEDIUM,
+    },
+    ("intel_urlhaus", "reported_by"): {
+        "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
+        "reliability": RELIABILITY_MEDIUM,
+    },
+    ("intel_urlhaus", "has_reported_url"): {
+        "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
+        "reliability": RELIABILITY_MEDIUM,
+    },
+    ("intel_urlhaus", "associated_with"): {
         "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
         "reliability": RELIABILITY_MEDIUM,
     },
@@ -338,6 +361,16 @@ def observation_evidence_for_module(
             meta["reliability"] = RELIABILITY_UNKNOWN
             meta["evidence_type"] = EVIDENCE_UNAVAILABLE_SOURCE
     if module_id == "intel_shodan" and result is not None:
+        parsed = result.get("parsed_data") or {}
+        if parsed.get("private_local_ip"):
+            meta["evidence_type"] = EVIDENCE_SYSTEM_GENERATED
+            meta["source_name"] = "project_overwatch"
+            meta["reliability"] = RELIABILITY_HIGH
+            meta["collection_method"] = "policy_skip"
+        elif parsed.get("api", {}).get("error"):
+            meta["reliability"] = RELIABILITY_UNKNOWN
+            meta["evidence_type"] = EVIDENCE_UNAVAILABLE_SOURCE
+    if module_id == "intel_urlhaus" and result is not None:
         parsed = result.get("parsed_data") or {}
         if parsed.get("private_local_ip"):
             meta["evidence_type"] = EVIDENCE_SYSTEM_GENERATED

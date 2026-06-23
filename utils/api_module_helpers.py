@@ -20,6 +20,7 @@ API_REPUTATION_MODULE_IDS: frozenset[str] = frozenset({
     "intel_abuseipdb",
     "intel_greynoise",
     "intel_shodan",
+    "intel_urlhaus",
 })
 
 _LAST_API_REQUEST_MONOTONIC: float | None = None

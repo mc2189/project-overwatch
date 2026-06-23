@@ -249,6 +249,32 @@ RULES: list[tuple[str, str, re.Pattern[str], str, str, bool]] = [
         True,
     ),
     (
+        MEDIUM_SEVERITY,
+        "auth-key header leak",
+        re.compile(r'(?i)Auth-Key\s*[:=]\s*["\'][^"\']{8,}["\']'),
+        "Auth-Key header value may be hard-coded or logged.",
+        "Load ABUSECH_AUTH_KEY from environment; never log or persist Auth-Key values.",
+        True,
+    ),
+    (
+        HIGH_SEVERITY,
+        "urlhaus forbidden endpoint",
+        re.compile(
+            r"urlhaus-api\.abuse\.ch/v1/(?:urls/recent|payloads|tag|signature|download|urls/download|host/urls)"
+        ),
+        "URLhaus feed/download/submit-style endpoint reference detected.",
+        "Use only v1/url/ and v1/host/ lookup endpoints in lookup-only modules.",
+        True,
+    ),
+    (
+        HIGH_SEVERITY,
+        "urlhaus submit endpoint",
+        re.compile(r"urlhaus\.abuse\.ch/api/"),
+        "URLhaus submission API endpoint reference detected.",
+        "This module must not submit URLs to URLhaus.",
+        True,
+    ),
+    (
         LOW_SEVERITY,
         "suspicious subprocess shell string",
         re.compile(r"""subprocess\.(?:run|Popen|call)\(\s*['"][^'"]*[;&|`$][^'"]*['"]"""),
@@ -328,6 +354,8 @@ def scan_file(path: Path, result: AuditResult) -> None:
                 "hard-coded api key",
                 "hard-coded token",
                 "hard-coded password",
+                "urlhaus forbidden endpoint",
+                "urlhaus submit endpoint",
             }:
                 continue
             if is_example_doc and category in {

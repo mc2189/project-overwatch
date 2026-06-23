@@ -13,6 +13,7 @@ VIRUSTOTAL_MODULE_ID = "intel_virustotal"
 ABUSEIPDB_MODULE_ID = "intel_abuseipdb"
 GREYNOISE_MODULE_ID = "intel_greynoise"
 SHODAN_MODULE_ID = "intel_shodan"
+URLHAUS_MODULE_ID = "intel_urlhaus"
 
 QUICK_CHECK = "quick_check"
 WEBSITE_FOOTPRINT = "website_footprint"
@@ -122,6 +123,12 @@ def _shodan_configured() -> bool:
     return has_api_key("SHODAN_API_KEY")
 
 
+def _urlhaus_configured() -> bool:
+    from utils.settings_manager import get_urlhaus_auth_key
+
+    return bool(get_urlhaus_auth_key())
+
+
 def _append_reputation_modules(
     modules: list[str],
     *,
@@ -139,6 +146,8 @@ def _append_reputation_modules(
         updated.append(GREYNOISE_MODULE_ID)
     if target and _shodan_recommended(mode_id, target_type, target) and SHODAN_MODULE_ID not in updated:
         updated.append(SHODAN_MODULE_ID)
+    if target and _urlhaus_recommended(mode_id, target_type, target) and URLHAUS_MODULE_ID not in updated:
+        updated.append(URLHAUS_MODULE_ID)
     return updated
 
 
@@ -190,6 +199,22 @@ def _shodan_recommended(mode_id: str, target_type: str, target: str | None) -> b
     if not is_public_ipv4(target):
         return False
     return mode_id in {QUICK_CHECK, LOCAL_IP_CHECK, CUSTOM}
+
+
+def _urlhaus_recommended(mode_id: str, target_type: str, target: str | None) -> bool:
+    if not _urlhaus_configured():
+        return False
+    if target_type == "url":
+        return mode_id in {QUICK_CHECK, WEBSITE_FOOTPRINT, CUSTOM}
+    if target_type == "domain":
+        return mode_id in {QUICK_CHECK, WEBSITE_FOOTPRINT, CUSTOM}
+    if target_type == "ipv4" and target:
+        if is_private_or_local_ip(target):
+            return False
+        if not is_public_ipv4(target):
+            return False
+        return mode_id in {QUICK_CHECK, LOCAL_IP_CHECK, CUSTOM}
+    return False
 
 
 def get_recommended_modules_for_mode(

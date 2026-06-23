@@ -444,6 +444,24 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
                             "Shodan is unavailable — SHODAN_API_KEY is not configured in your local "
                             ".env file. This module will be blocked until a key is set."
                         )
+                elif module_id == "intel_urlhaus":
+                    from utils.settings_manager import get_urlhaus_auth_key
+
+                    st.caption("Passive module — no authorisation required.")
+                    st.write(
+                        "Requires ABUSECH_AUTH_KEY in .env (URLHAUS_AUTH_KEY optional alias). "
+                        "The Auth-Key is masked in Settings and must never be stored in observations, "
+                        "findings, evidence, reports or logs."
+                    )
+                    st.write(
+                        "Queries URLhaus v1 URL or host endpoints for passive malware URL intelligence. "
+                        "Lookup-only — does not submit URLs or download malware samples/payloads."
+                    )
+                    if not get_urlhaus_auth_key():
+                        st.warning(
+                            "URLhaus is unavailable — ABUSECH_AUTH_KEY is not configured in your local "
+                            ".env file. This module will be blocked until a key is set."
+                        )
         st.session_state.nmap_options = nmap_options
 
     st.divider()

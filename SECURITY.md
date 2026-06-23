@@ -54,6 +54,16 @@ Project Overwatch is a **local-only** defensive intelligence dashboard. This doc
 
 Normal domain names, IPs, and module output are preserved when possible.
 
+## URLhaus / abuse.ch lookup boundary (v2.6)
+
+The **URLhaus Malware URL Intelligence** module (`intel_urlhaus`) is **lookup-only**:
+
+- Allowed: `POST https://urlhaus-api.abuse.ch/v1/url/` and `POST https://urlhaus-api.abuse.ch/v1/host/` with `Auth-Key` header
+- **Not allowed** in this module: URL submission, malware sample/payload download, recent feeds, bulk datasets, IDS rules, or tag/signature bulk endpoints
+- The module does **not** fetch malicious URLs or download payloads locally
+- `ABUSECH_AUTH_KEY` (or `URLHAUS_AUTH_KEY` alias) must remain in `.env` only — never persisted in observations, findings, evidence, or reports
+- Malware download links (`urlhaus_download`) are stripped from summaries; raw JSON remains collapsed in the UI
+
 ## Security audit
 
 Run the local audit before releases or after changing configuration handling:

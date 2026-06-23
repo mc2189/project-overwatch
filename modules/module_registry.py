@@ -480,6 +480,50 @@ MODULES: list[ModuleEntry] = [
         ),
     ),
     ModuleEntry(
+        module_id="intel_urlhaus",
+        display_name="URLhaus Malware URL Intelligence",
+        category="Threat Intel",
+        description="Passive abuse.ch URLhaus lookup for malware URL and host intelligence.",
+        status="active",
+        mode="passive",
+        risk_level="low",
+        requires_authorisation=False,
+        requires_api_key=True,
+        implemented=True,
+        accepted_target_types=("url", "domain", "ipv4"),
+        api_key_names=("ABUSECH_AUTH_KEY", "URLHAUS_AUTH_KEY"),
+        config_notes=(
+            "Passive module — requires ABUSECH_AUTH_KEY in local .env (URLHAUS_AUTH_KEY optional alias). "
+            "Auth-Key is sent in the HTTP header only and must never be stored in observations, findings, "
+            "evidence, reports or logs. Lookup-only — does not submit URLs or download malware samples."
+        ),
+        rate_limit_notes="URLhaus API rate limits depend on your abuse.ch account — batch queue courtesy delay applies.",
+        short_help="Passive URLhaus malware URL/host lookup for URLs, domains, and public IPv4 addresses.",
+        detailed_help=(
+            "Queries URLhaus v1 URL or host endpoints for third-party malware URL intelligence. "
+            "URL targets use the URL information endpoint; domain/host/public IPv4 targets use the host endpoint. "
+            "Results are reported by URLhaus — not independently confirmed by Overwatch. "
+            "Private/local IPv4 addresses are not queried."
+        ),
+        example_inputs=(
+            "http://example.com/malware.exe",
+            "example.com",
+            "8.8.8.8",
+        ),
+        output_summary=(
+            "Query status, URL/host status, threat/tags, blacklist summary, sampled URLs, "
+            "payload hash summaries, and cautious advisory findings."
+        ),
+        caution_notes=(
+            "URLhaus results are third-party malware URL intelligence.",
+            "Host matches do not mean every URL/path on the host is malicious.",
+            "Results are reported by URLhaus — not independently confirmed by Overwatch.",
+            "No malware payloads are downloaded and no URLs are submitted.",
+            "No active verification or fetching of malicious URLs is performed.",
+            "Auth-Key must remain in .env only — never commit or paste into case notes.",
+        ),
+    ),
+    ModuleEntry(
         module_id="intel_censys",
         display_name="Censys",
         category="Threat Intel",
@@ -498,7 +542,7 @@ MODULES: list[ModuleEntry] = [
         module_id="intel_securitytrails",
         display_name="SecurityTrails",
         category="Threat Intel",
-        description="DNS and domain history intelligence.",
+        description="DNS and domain history intelligence (planned — paid/API access likely required).",
         status="planned",
         mode="passive",
         risk_level="low",
@@ -506,8 +550,15 @@ MODULES: list[ModuleEntry] = [
         requires_api_key=True,
         implemented=False,
         api_key_names=("SECURITYTRAILS_API_KEY",),
-        config_notes="Requires SECURITYTRAILS_API_KEY in local .env. Planned — not available in this release.",
-        rate_limit_notes="Monthly API allowance depends on your plan.",
+        config_notes=(
+            "Requires SECURITYTRAILS_API_KEY in local .env. Planned only — SecurityTrails appears to require "
+            "paid/API access and is not implemented in this release. Roadmap placeholder only."
+        ),
+        rate_limit_notes="Monthly API allowance depends on your SecurityTrails plan (when implemented).",
+        caution_notes=(
+            "Not available in Run Operation, Entity Workspace, or Batch Queue.",
+            "SecurityTrails integration is deferred pending API access review.",
+        ),
     ),
     ModuleEntry(
         module_id="ident_hunter",

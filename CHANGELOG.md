@@ -2,6 +2,23 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.6.0 — URLhaus Malware URL Intelligence
+
+- **`intel_urlhaus`** — passive abuse.ch URLhaus lookup for URLs, domains, and public IPv4
+- Module path: `modules/4_threat_intelligence/intel_urlhaus.py`
+- Requires `ABUSECH_AUTH_KEY` in local `.env` (`URLHAUS_AUTH_KEY` optional alias) — blocked cleanly when missing
+- URL targets use `POST /v1/url/`; domain/host/public IPv4 use `POST /v1/host/` — lookup-only
+- Private/local IPv4 completes with informational result (no API query)
+- No URL submission, malware sample download, recent feeds, bulk datasets, or payload endpoints
+- Auth-Key sent in HTTP header only — redacted from logs, evidence, reports, and persisted output
+- Cautious findings — “reported by URLhaus”, not “confirmed malicious”
+- URL/host entities with `hosted_on`, `reported_by`, `has_reported_url`, and optional malware signature links
+- Evidence capture with `api_malware_url_lookup`; download links stripped from summaries
+- Output caps for large host results (20 displayed, 50 entity max) with usability warning
+- Run mode recommendations for URL/domain/public IPv4 in Quick Check, Website Footprint, and Local IP Check
+- SecurityTrails remains Roadmap-only (planned, not implemented, likely paid/API access)
+- Settings, Batch Queue, Entity Workspace, Evidence Locker, and reports integration
+
 ## v2.5.0 — Shodan Internet Exposure Intelligence
 
 - **`intel_shodan`** — passive Shodan host lookup for public IPv4 via `GET /shodan/host/{ip}`

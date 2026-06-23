@@ -28,6 +28,7 @@ IMPLEMENTED_MODULE_IDS: tuple[str, ...] = (
     "intel_abuseipdb",
     "intel_greynoise",
     "intel_shodan",
+    "intel_urlhaus",
 )
 
 MODULE_CARD_TITLES: dict[str, str] = {
@@ -40,6 +41,7 @@ MODULE_CARD_TITLES: dict[str, str] = {
     "intel_abuseipdb": "AbuseIPDB Reputation Intelligence",
     "intel_greynoise": "GreyNoise Internet Noise Intelligence",
     "intel_shodan": "Shodan Internet Exposure Intelligence",
+    "intel_urlhaus": "URLhaus Malware URL Intelligence",
 }
 
 FINDING_SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")

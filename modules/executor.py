@@ -44,6 +44,7 @@ VIRUSTOTAL_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "i
 ABUSEIPDB_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_abuseipdb.py"
 GREYNOISE_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_greynoise.py"
 SHODAN_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_shodan.py"
+URLHAUS_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_urlhaus.py"
 
 _nmap_handlers: tuple[Any, Any] | None = None
 _nmap_load_error: str | None = None
@@ -72,6 +73,9 @@ _greynoise_load_attempted = False
 _shodan_handler: Any | None = None
 _shodan_load_error: str | None = None
 _shodan_load_attempted = False
+_urlhaus_handler: Any | None = None
+_urlhaus_load_error: str | None = None
+_urlhaus_load_attempted = False
 
 
 def _observation_evidence_kwargs(module_id: str, result: dict[str, Any]) -> dict[str, Any]:
@@ -355,6 +359,29 @@ def _load_shodan_handler() -> None:
         _shodan_load_error = str(exc)
 
 
+def _load_urlhaus_handler() -> None:
+    global _urlhaus_handler, _urlhaus_load_error, _urlhaus_load_attempted
+
+    if _urlhaus_load_attempted:
+        return
+
+    _urlhaus_load_attempted = True
+
+    if not URLHAUS_MODULE_PATH.is_file():
+        _urlhaus_load_error = f"Module file not found: {URLHAUS_MODULE_PATH}"
+        return
+
+    try:
+        spec = importlib.util.spec_from_file_location("intel_urlhaus", URLHAUS_MODULE_PATH)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load module spec from {URLHAUS_MODULE_PATH}")
+        intel_urlhaus = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(intel_urlhaus)
+        _urlhaus_handler = intel_urlhaus.run_urlhaus_lookup
+    except Exception as exc:
+        _urlhaus_load_error = str(exc)
+
+
 def _nmap_binary_available() -> bool:
     return shutil.which("nmap") is not None
 
@@ -388,6 +415,9 @@ def is_runtime_ready(module_id: str) -> bool:
     if module_id == "intel_shodan":
         _load_shodan_handler()
         return _shodan_handler is not None
+    if module_id == "intel_urlhaus":
+        _load_urlhaus_handler()
+        return _urlhaus_handler is not None
     return False
 
 
@@ -425,6 +455,9 @@ def get_runtime_error(module_id: str) -> str | None:
     if module_id == "intel_shodan":
         _load_shodan_handler()
         return _shodan_load_error
+    if module_id == "intel_urlhaus":
+        _load_urlhaus_handler()
+        return _urlhaus_load_error
     return None
 
 
@@ -1769,6 +1802,232 @@ def _persist_shodan_entities(
         )
 
 
+def _urlhaus_host_entity_type(host: str) -> str:
+    return "ip_address" if get_target_type(host) == "ipv4" else "domain"
+
+
+def _persist_urlhaus_records(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    module_id: str,
+    target: str,
+    result: dict[str, Any],
+    authorisation_confirmed: bool,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> None:
+    """Save URLhaus operations, observations, and findings."""
+    result = _prepare_module_result(result)
+    create_operation_log(
+        case_id,
+        module_id,
+        target,
+        result["status"],
+        authorisation_confirmed=authorisation_confirmed,
+        summary=result["summary"],
+        run_mode_id=run_mode_id,
+        run_mode_label=run_mode_label,
+        conn=conn,
+    )
+
+    if not should_persist_observation(result["status"]):
+        return
+
+    parsed_data = result.get("parsed_data") or {}
+    observation = create_observation(
+        case_id,
+        entity_id,
+        module_id,
+        "threat_intel_lookup",
+        "URLhaus lookup result",
+        summary=result["summary"],
+        data_json=json.dumps(
+            {
+                "module_id": module_id,
+                "success": result["success"],
+                "status": result["status"],
+                "findings": result.get("findings", []),
+                "interpreter_findings": result.get("interpreter_findings", []),
+                "warnings": result.get("warnings", []),
+                "target": parsed_data.get("target"),
+                "lookup_type": parsed_data.get("lookup_type"),
+                "lookup_value": parsed_data.get("lookup_value"),
+                "query_status": parsed_data.get("query_status"),
+                "url_count": parsed_data.get("url_count"),
+                "api": parsed_data.get("api", {}),
+            }
+        ),
+        raw_output=result["raw_output"],
+        **_observation_evidence_kwargs(module_id, result),
+        conn=conn,
+    )
+
+    _persist_observation_evidence(
+        conn,
+        case_id=case_id,
+        entity_id=entity_id,
+        observation_id=observation["id"],
+        module_id=module_id,
+        result=result,
+    )
+
+    interpreter_findings = result.get("interpreter_findings") or []
+    if interpreter_findings:
+        _persist_module_findings(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation["id"],
+            module_id=module_id,
+            interpreter_findings=interpreter_findings,
+        )
+
+    _persist_urlhaus_entities(
+        conn,
+        case_id=case_id,
+        source_entity_id=entity_id,
+        module_id=module_id,
+        parsed_data=parsed_data,
+    )
+
+
+def _persist_urlhaus_entities(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    source_entity_id: int,
+    module_id: str,
+    parsed_data: dict[str, Any],
+) -> None:
+    """Create URL/host entities and relationships from URLhaus metadata."""
+    if parsed_data.get("private_local_ip"):
+        return
+
+    urlhaus_entity = create_or_get_entity(
+        case_id,
+        "organization",
+        "URLhaus (abuse.ch)",
+        label="URLhaus (abuse.ch)",
+        source=module_id,
+        confidence=70,
+        conn=conn,
+    )
+
+    lookup_type = parsed_data.get("lookup_type")
+    if lookup_type == "url":
+        url_value = parsed_data.get("lookup_value") or parsed_data.get("target")
+        if url_value:
+            url_entity = create_or_get_entity(
+                case_id,
+                "url",
+                str(url_value),
+                label=str(url_value),
+                source=module_id,
+                confidence=75,
+                conn=conn,
+            )
+            create_relationship(
+                case_id,
+                url_entity["id"],
+                "reported_by",
+                urlhaus_entity["id"],
+                source_module=module_id,
+                confidence=75,
+                conn=conn,
+            )
+            host_value = parsed_data.get("host")
+            if host_value:
+                host_entity = create_or_get_entity(
+                    case_id,
+                    _urlhaus_host_entity_type(str(host_value)),
+                    str(host_value),
+                    label=str(host_value),
+                    source=module_id,
+                    confidence=75,
+                    conn=conn,
+                )
+                create_relationship(
+                    case_id,
+                    url_entity["id"],
+                    "hosted_on",
+                    host_entity["id"],
+                    source_module=module_id,
+                    confidence=75,
+                    conn=conn,
+                )
+            for signature in (parsed_data.get("signatures") or parsed_data.get("tags") or [])[:5]:
+                if not signature:
+                    continue
+                sig_entity = create_or_get_entity(
+                    case_id,
+                    "malware_signature",
+                    str(signature),
+                    label=str(signature),
+                    source=module_id,
+                    confidence=65,
+                    conn=conn,
+                )
+                create_relationship(
+                    case_id,
+                    url_entity["id"],
+                    "associated_with",
+                    sig_entity["id"],
+                    source_module=module_id,
+                    confidence=65,
+                    conn=conn,
+                )
+        return
+
+    host_value = parsed_data.get("host") or parsed_data.get("lookup_value") or parsed_data.get("target")
+    if not host_value:
+        return
+    host_entity = create_or_get_entity(
+        case_id,
+        _urlhaus_host_entity_type(str(host_value)),
+        str(host_value),
+        label=str(host_value),
+        source=module_id,
+        confidence=75,
+        conn=conn,
+    )
+    create_relationship(
+        case_id,
+        host_entity["id"],
+        "reported_by",
+        urlhaus_entity["id"],
+        source_module=module_id,
+        confidence=70,
+        conn=conn,
+    )
+
+    for item in (parsed_data.get("sampled_urls") or [])[:50]:
+        if not isinstance(item, dict):
+            continue
+        url_text = item.get("url")
+        if not url_text:
+            continue
+        url_entity = create_or_get_entity(
+            case_id,
+            "url",
+            str(url_text),
+            label=str(url_text),
+            source=module_id,
+            confidence=65,
+            conn=conn,
+        )
+        create_relationship(
+            case_id,
+            host_entity["id"],
+            "has_reported_url",
+            url_entity["id"],
+            source_module=module_id,
+            confidence=65,
+            conn=conn,
+        )
+
+
 def _scan_output_text(scan_data: dict[str, Any]) -> str:
     parts = [
         scan_data.get("raw_output", ""),
@@ -2715,6 +2974,118 @@ def _execute_shodan(
     return result
 
 
+def _execute_urlhaus(
+    module_id: str,
+    target: str,
+    options: dict[str, Any],
+    db_context: sqlite3.Connection | None,
+    authorisation_confirmed: bool,
+    case_id: int | None,
+    entity_id: int | None,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> dict[str, Any]:
+    _load_urlhaus_handler()
+    if _urlhaus_handler is None:
+        error_message = _urlhaus_load_error or "URLhaus module is not available."
+        return make_result(
+            module_id,
+            success=False,
+            status="error",
+            summary="URLhaus module is not available.",
+            errors=[error_message],
+        )
+
+    from utils.settings_manager import get_urlhaus_auth_key
+
+    auth_key = get_urlhaus_auth_key()
+    target_type = get_target_type(target)
+    intel_data = _urlhaus_handler(
+        target,
+        auth_key=auth_key,
+        target_type=target_type,
+        options=options,
+    )
+    status = intel_data.get("status") or STATUS_ERROR
+    parsed_data = intel_data.get("parsed_data") or {}
+    lookup_target = parsed_data.get("lookup_value") or parsed_data.get("target") or target
+    interpreter_findings = interpret_module_findings(module_id, parsed_data)
+    warnings = list(intel_data.get("warnings") or [])
+    errors = list(intel_data.get("errors") or [])
+
+    if not intel_data.get("success"):
+        summary = errors[0] if errors else "URLhaus lookup failed."
+        result = make_result(
+            module_id,
+            success=False,
+            status=status,
+            summary=summary,
+            raw_output=intel_data.get("raw_output", ""),
+            errors=errors,
+            parsed_data=parsed_data,
+            warnings=warnings,
+            evidence=intel_data.get("evidence", []),
+            interpreter_findings=interpreter_findings,
+        )
+        if db_context is not None and case_id is not None:
+            create_operation_log(
+                case_id,
+                module_id,
+                lookup_target,
+                result["status"],
+                authorisation_confirmed=authorisation_confirmed,
+                summary=summary,
+                run_mode_id=run_mode_id,
+                run_mode_label=run_mode_label,
+                conn=db_context,
+            )
+        return result
+
+    if parsed_data.get("private_local_ip"):
+        summary = "Private/local IP address — public URLhaus malware URL lookup is not applicable."
+    else:
+        summary = f"URLhaus malware URL lookup completed for {lookup_target}."
+    status = intel_data.get("status") or STATUS_COMPLETED
+    result = make_result(
+        module_id,
+        success=True,
+        status=status,
+        summary=summary,
+        raw_output=intel_data.get("raw_output", ""),
+        findings=intel_data.get("findings", []),
+        warnings=warnings,
+        parsed_data=parsed_data,
+        interpreter_findings=interpreter_findings,
+        evidence=intel_data.get("evidence", []),
+    )
+
+    if db_context is not None and case_id is not None:
+        entity_type = ENTITY_TYPE_BY_TARGET.get(parsed_data.get("target_type") or target_type, "unknown")
+        if entity_type == "domain" and target_type == "url":
+            entity_type = "url"
+        target_entity = create_or_get_entity(
+            case_id,
+            entity_type,
+            lookup_target,
+            label=lookup_target,
+            source=module_id,
+            conn=db_context,
+        )
+        _persist_urlhaus_records(
+            db_context,
+            case_id=case_id,
+            entity_id=target_entity["id"],
+            module_id=module_id,
+            target=lookup_target,
+            result=result,
+            authorisation_confirmed=authorisation_confirmed,
+            run_mode_id=run_mode_id,
+            run_mode_label=run_mode_label,
+        )
+
+    return result
+
+
 def execute_module(
     module_id: str,
     target: str,
@@ -3025,6 +3396,28 @@ def execute_module(
                 errors=[error_message],
             )
         return _execute_shodan(
+            module_id,
+            target,
+            options,
+            db_context,
+            authorisation_confirmed,
+            case_id,
+            entity_id,
+            run_mode_id,
+            run_mode_label,
+        )
+
+    if module_id == "intel_urlhaus":
+        if not is_runtime_ready(module_id):
+            error_message = get_runtime_error(module_id) or "URLhaus runtime is not ready."
+            return make_result(
+                module_id,
+                success=False,
+                status="error",
+                summary="URLhaus module is not available.",
+                errors=[error_message],
+            )
+        return _execute_urlhaus(
             module_id,
             target,
             options,

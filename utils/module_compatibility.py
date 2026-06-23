@@ -138,6 +138,11 @@ def get_module_disable_reason(
                     "Shodan API key is not configured. "
                     "Add SHODAN_API_KEY to your local .env file."
                 )
+            if module.module_id == "intel_urlhaus":
+                return (
+                    "URLhaus / abuse.ch Auth-Key is not configured. "
+                    "Add ABUSECH_AUTH_KEY to your local .env file."
+                )
             missing = ", ".join(key_status["missing_keys"])
             return f"Missing required API key(s): {missing}. Add them to your local .env file."
     return None
