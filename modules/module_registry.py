@@ -366,18 +366,38 @@ MODULES: list[ModuleEntry] = [
     ),
     ModuleEntry(
         module_id="intel_abuseipdb",
-        display_name="AbuseIPDB",
+        display_name="AbuseIPDB Reputation Intelligence",
         category="Threat Intel",
-        description="Check IP reputation and abuse reports.",
-        status="planned",
+        description="Passive AbuseIPDB abuse-confidence lookup for public IPv4 addresses.",
+        status="active",
         mode="passive",
         risk_level="low",
         requires_authorisation=False,
         requires_api_key=True,
-        implemented=False,
+        implemented=True,
+        accepted_target_types=("ipv4",),
         api_key_names=("ABUSEIPDB_API_KEY",),
-        config_notes="Requires ABUSEIPDB_API_KEY in local .env. Planned — not available in this release.",
-        rate_limit_notes="Daily query limits depend on your AbuseIPDB plan.",
+        config_notes=(
+            "Passive module — requires ABUSEIPDB_API_KEY in local .env. "
+            "Key is masked in Settings and must never be stored in observations, findings, evidence, reports or logs. "
+            "Lookup-only — does not submit abuse reports."
+        ),
+        rate_limit_notes="AbuseIPDB daily query limits depend on your plan — batch queue courtesy delay applies.",
+        short_help="Passive AbuseIPDB abuse-confidence lookup for a public IPv4 address.",
+        detailed_help=(
+            "Queries the AbuseIPDB check API for third-party abuse reports and confidence scores. "
+            "Results are reported by AbuseIPDB — they are leads for analyst review, not confirmed malicious activity. "
+            "Private/local IPv4 addresses are not queried. Domains and URLs are not supported in v2.3."
+        ),
+        example_inputs=("203.0.113.10", "8.8.8.8"),
+        output_summary="Abuse confidence score, report counts, ISP/country context, and cautious advisory findings.",
+        caution_notes=(
+            "Third-party abuse reports require manual verification.",
+            "Low or zero scores do not prove an IP is safe or in scope.",
+            "Respect AbuseIPDB API rate limits and terms of use.",
+            "Lookup-only — never submit reports through Project Overwatch.",
+            "API key must remain in .env only — never commit or paste into case notes.",
+        ),
     ),
     ModuleEntry(
         module_id="intel_greynoise",

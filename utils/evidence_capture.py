@@ -564,6 +564,138 @@ def capture_virustotal_evidence(
     return items
 
 
+def capture_abuseipdb_evidence(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    observation_id: int,
+    module_id: str,
+    result: dict[str, Any],
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    parsed_data = result.get("parsed_data") or {}
+    raw_response = parsed_data.get("raw_response")
+    api_meta = parsed_data.get("api") or {}
+
+    if parsed_data.get("private_local_ip"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Private/local IP — no AbuseIPDB lookup",
+                summary="Public reputation lookup is not applicable for private/local addresses.",
+                content_text="Private/local IP address — public AbuseIPDB reputation lookup is not applicable.",
+                content_type="text/plain",
+                evidence_type=EVIDENCE_SYSTEM_GENERATED,
+                source_name="AbuseIPDB",
+                collection_method="policy_skip",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+        return items
+
+    if api_meta.get("error") == "AbuseIPDB API key is not configured." or api_meta.get("status_code") in {401, 403}:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="AbuseIPDB API key not configured",
+                summary="AbuseIPDB lookup was blocked because the API key is missing or rejected.",
+                content_text=_text_summary(api_meta),
+                content_type="application/json",
+                evidence_type=EVIDENCE_SYSTEM_GENERATED,
+                source_name="AbuseIPDB",
+                collection_method="policy_skip",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+        return items
+
+    if raw_response:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="AbuseIPDB API response",
+                summary="Third-party abuse-confidence response from AbuseIPDB (redacted summary).",
+                content_text=_text_summary(raw_response),
+                content_type="application/json",
+                evidence_type=EVIDENCE_THIRD_PARTY_SOURCE,
+                source_name="AbuseIPDB",
+                source_url="https://www.abuseipdb.com/",
+                collection_method="api_reputation_lookup",
+                reliability=RELIABILITY_MEDIUM,
+            )
+        )
+
+    if parsed_data.get("abuse_confidence_score") is not None or parsed_data.get("total_reports") is not None:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="AbuseIPDB reputation summary",
+                summary="Parsed abuse confidence score and report metadata.",
+                content_text=_text_summary(
+                    {
+                        "target": parsed_data.get("target"),
+                        "ip_address": parsed_data.get("ip_address"),
+                        "abuse_confidence_score": parsed_data.get("abuse_confidence_score"),
+                        "total_reports": parsed_data.get("total_reports"),
+                        "num_distinct_users": parsed_data.get("num_distinct_users"),
+                        "country_code": parsed_data.get("country_code"),
+                        "country_name": parsed_data.get("country_name"),
+                        "isp": parsed_data.get("isp"),
+                        "domain": parsed_data.get("domain"),
+                        "usage_type": parsed_data.get("usage_type"),
+                        "last_reported_label": parsed_data.get("last_reported_label"),
+                        "is_whitelisted": parsed_data.get("is_whitelisted"),
+                    }
+                ),
+                content_type="application/json",
+                evidence_type=EVIDENCE_THIRD_PARTY_SOURCE,
+                source_name="AbuseIPDB",
+                source_url="https://www.abuseipdb.com/",
+                collection_method="api_reputation_lookup",
+                reliability=RELIABILITY_MEDIUM,
+            )
+        )
+
+    if api_meta.get("error") or api_meta.get("status_code") == 429:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="AbuseIPDB lookup limitation",
+                summary="AbuseIPDB source was unavailable, rate limited, or returned an error during this run.",
+                content_text=_text_summary(api_meta),
+                content_type="application/json",
+                evidence_type=EVIDENCE_UNAVAILABLE_SOURCE,
+                source_name="AbuseIPDB",
+                source_url="https://www.abuseipdb.com/",
+                collection_method="api_reputation_lookup",
+                reliability=RELIABILITY_UNKNOWN,
+            )
+        )
+
+    return items
+
+
 def capture_whois_rdap_evidence(
     conn: sqlite3.Connection,
     *,
@@ -717,6 +849,15 @@ def capture_module_evidence(
         )
     elif module_id == "intel_virustotal":
         items = capture_virustotal_evidence(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            result=result,
+        )
+    elif module_id == "intel_abuseipdb":
+        items = capture_abuseipdb_evidence(
             conn,
             case_id=case_id,
             entity_id=entity_id,

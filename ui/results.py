@@ -198,6 +198,39 @@ def render_result_summary_tab(result: dict) -> None:
         if api.get("error") and not parsed_data.get("private_local_ip"):
             st.caption(f"VirusTotal note: {api['error']}")
 
+    if result["module_id"] == "intel_abuseipdb" and parsed_data:
+        st.caption(
+            "Results reported by AbuseIPDB — third-party abuse reports only, not confirmed malicious activity."
+        )
+        st.markdown(f"**Target:** {parsed_data.get('ip_address') or parsed_data.get('target') or '—'}")
+        if parsed_data.get("private_local_ip"):
+            st.info("Private/local IP — public AbuseIPDB reputation lookup is not applicable.")
+        else:
+            if parsed_data.get("abuse_confidence_score") is not None:
+                st.markdown(f"**Abuse confidence score:** {parsed_data['abuse_confidence_score']}")
+            if parsed_data.get("total_reports") is not None:
+                st.markdown(f"**Total reports:** {parsed_data['total_reports']}")
+            if parsed_data.get("num_distinct_users") is not None:
+                st.markdown(f"**Distinct reporting users:** {parsed_data['num_distinct_users']}")
+            country = parsed_data.get("country_name") or parsed_data.get("country_code")
+            if country:
+                st.markdown(f"**Country:** {country}")
+            if parsed_data.get("isp"):
+                st.markdown(f"**ISP:** {parsed_data['isp']}")
+            if parsed_data.get("domain"):
+                st.markdown(f"**Hostname/domain:** {parsed_data['domain']}")
+            if parsed_data.get("usage_type"):
+                st.markdown(f"**Usage type:** {parsed_data['usage_type']}")
+            if parsed_data.get("last_reported_label"):
+                st.markdown(f"**Last reported:** {parsed_data['last_reported_label']}")
+            if parsed_data.get("is_whitelisted"):
+                st.caption("AbuseIPDB reported a whitelist flag for this IP.")
+        api = parsed_data.get("api") or {}
+        if api.get("status_code") == 429:
+            st.warning("AbuseIPDB rate limit reached — retry later.")
+        if api.get("error") and not parsed_data.get("private_local_ip"):
+            st.caption(f"AbuseIPDB note: {api['error']}")
+
     if result["module_id"] == "infra_website_metadata" and parsed_data:
         homepage = parsed_data.get("homepage") or {}
         if homepage.get("page_title"):
@@ -269,6 +302,14 @@ def render_result_module_output_tab(result: dict) -> None:
             from utils.security import redact_secrets_from_dict
 
             with st.expander("Raw VirusTotal API response", expanded=False):
+                st.json(redact_secrets_from_dict(raw_response))
+
+    if result["module_id"] == "intel_abuseipdb" and parsed_data:
+        raw_response = parsed_data.get("raw_response")
+        if raw_response:
+            from utils.security import redact_secrets_from_dict
+
+            with st.expander("Raw AbuseIPDB API response", expanded=False):
                 st.json(redact_secrets_from_dict(raw_response))
 
     if result["module_id"] == "infra_cert_subdomain":
@@ -385,6 +426,8 @@ def render_result_raw_tab(result: dict) -> None:
 def render_result_structured_tab(result: dict) -> None:
     parsed_data = result.get("parsed_data")
     if result["module_id"] == "intel_virustotal" and isinstance(parsed_data, dict):
+        parsed_data = {key: value for key, value in parsed_data.items() if key != "raw_response"}
+    if result["module_id"] == "intel_abuseipdb" and isinstance(parsed_data, dict):
         parsed_data = {key: value for key, value in parsed_data.items() if key != "raw_response"}
     payload = {
         "selected_options": result.get("selected_options"),

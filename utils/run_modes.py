@@ -10,6 +10,7 @@ from utils.target_detection import TARGET_TYPES, target_type_label
 from utils.whois_rdap_helpers import is_public_ipv4
 
 VIRUSTOTAL_MODULE_ID = "intel_virustotal"
+ABUSEIPDB_MODULE_ID = "intel_abuseipdb"
 
 QUICK_CHECK = "quick_check"
 WEBSITE_FOOTPRINT = "website_footprint"
@@ -106,6 +107,26 @@ def _virustotal_configured() -> bool:
     return has_api_key("VIRUSTOTAL_API_KEY")
 
 
+def _abuseipdb_configured() -> bool:
+    return has_api_key("ABUSEIPDB_API_KEY")
+
+
+def _append_reputation_modules(
+    modules: list[str],
+    *,
+    mode_id: str,
+    target_type: str,
+    target: str | None,
+) -> list[str]:
+    """Append optional API reputation modules when configured and appropriate."""
+    updated = list(modules)
+    if target and _virustotal_recommended(mode_id, target_type, target) and VIRUSTOTAL_MODULE_ID not in updated:
+        updated.append(VIRUSTOTAL_MODULE_ID)
+    if target and _abuseipdb_recommended(mode_id, target_type, target) and ABUSEIPDB_MODULE_ID not in updated:
+        updated.append(ABUSEIPDB_MODULE_ID)
+    return updated
+
+
 def _virustotal_recommended(mode_id: str, target_type: str, target: str | None) -> bool:
     if not _virustotal_configured():
         return False
@@ -118,6 +139,18 @@ def _virustotal_recommended(mode_id: str, target_type: str, target: str | None) 
             return False
         return mode_id in {QUICK_CHECK, LOCAL_IP_CHECK, CUSTOM}
     return False
+
+
+def _abuseipdb_recommended(mode_id: str, target_type: str, target: str | None) -> bool:
+    if not _abuseipdb_configured():
+        return False
+    if target_type != "ipv4" or not target:
+        return False
+    if is_private_or_local_ip(target):
+        return False
+    if not is_public_ipv4(target):
+        return False
+    return mode_id in {QUICK_CHECK, LOCAL_IP_CHECK, CUSTOM}
 
 
 def get_recommended_modules_for_mode(
@@ -133,17 +166,15 @@ def get_recommended_modules_for_mode(
         target_type = "unknown"
     by_target = _MODE_TARGET_RECOMMENDATIONS.get(mode_id, {})
     modules = list(by_target.get(target_type, ()))
-    if (
-        target
-        and target_type == "ipv4"
-        and mode_id in {QUICK_CHECK, LOCAL_IP_CHECK}
-        and is_public_ipv4(target)
-        and "infra_whois_rdap" not in modules
-    ):
-        modules.append("infra_whois_rdap")
-    if target and _virustotal_recommended(mode_id, target_type, target) and VIRUSTOTAL_MODULE_ID not in modules:
-        modules.append(VIRUSTOTAL_MODULE_ID)
-    return modules
+    if target and target_type == "ipv4" and mode_id in {QUICK_CHECK, LOCAL_IP_CHECK} and is_public_ipv4(target):
+        if "infra_whois_rdap" not in modules:
+            modules.append("infra_whois_rdap")
+    return _append_reputation_modules(
+        modules,
+        mode_id=mode_id,
+        target_type=target_type,
+        target=target,
+    )
 
 
 def resolve_recommended_modules_for_mode(
@@ -196,6 +227,11 @@ def get_recommendation_reason(
                 "Planned identity modules may support this target type in a future release."
             )
         if target_type == "ipv4":
+            if _virustotal_configured() or _abuseipdb_configured():
+                return (
+                    f"Quick Check recommends an active network service check for this {label}, "
+                    "with optional passive reputation enrichment when API keys are configured."
+                )
             return f"Quick Check recommends an active network service check for this {label}."
         if target_type in {"domain", "url"}:
             if quick_check_include_port_scan:
@@ -240,13 +276,20 @@ def get_recommendation_reason(
         if target and is_private_or_local_ip(target):
             return (
                 "Local Device / IP Check recommends Network Service Check with a conservative "
-                "scan profile for this private/local address. VirusTotal is not recommended for private IPs."
+                "scan profile for this private/local address. AbuseIPDB and VirusTotal are not "
+                "recommended for private IPs."
             )
+        reputation_bits = []
+        if _abuseipdb_configured():
+            reputation_bits.append("AbuseIPDB")
         if _virustotal_configured():
+            reputation_bits.append("VirusTotal")
+        if reputation_bits:
+            joined = " and ".join(reputation_bits)
             return (
                 "Local Device / IP Check recommends Network Service Check with a conservative "
-                "scan profile. Public IPv4 addresses may also include passive WHOIS/RDAP context and "
-                "optional VirusTotal reputation enrichment. Authorisation is required before launch."
+                f"scan profile. Public IPv4 addresses may also include passive WHOIS/RDAP context and "
+                f"optional {joined} reputation enrichment. Authorisation is required before launch."
             )
         return (
             "Local Device / IP Check recommends Network Service Check with a conservative "

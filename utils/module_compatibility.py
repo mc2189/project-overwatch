@@ -128,6 +128,11 @@ def get_module_disable_reason(
                     "VirusTotal API key is not configured. "
                     "Add VIRUSTOTAL_API_KEY to your local .env file."
                 )
+            if module.module_id == "intel_abuseipdb":
+                return (
+                    "AbuseIPDB API key is not configured. "
+                    "Add ABUSEIPDB_API_KEY to your local .env file."
+                )
             missing = ", ".join(key_status["missing_keys"])
             return f"Missing required API key(s): {missing}. Add them to your local .env file."
     return None

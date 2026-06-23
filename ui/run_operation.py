@@ -396,6 +396,22 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
                             "VirusTotal is unavailable — VIRUSTOTAL_API_KEY is not configured in your local "
                             ".env file. This module will be blocked until a key is set."
                         )
+                elif module_id == "intel_abuseipdb":
+                    st.caption("Passive module — no authorisation required.")
+                    st.write(
+                        "Requires ABUSEIPDB_API_KEY in .env. The key is masked in Settings and must never "
+                        "be stored in observations, findings, evidence, reports or logs."
+                    )
+                    st.write(
+                        "Queries AbuseIPDB for passive abuse-confidence enrichment on public IPv4 addresses only. "
+                        "Lookup-only — does not submit reports. Results are third-party reputation signals and "
+                        "should be treated as reported intelligence, not confirmed fact."
+                    )
+                    if not has_api_key("ABUSEIPDB_API_KEY"):
+                        st.warning(
+                            "AbuseIPDB is unavailable — ABUSEIPDB_API_KEY is not configured in your local "
+                            ".env file. This module will be blocked until a key is set."
+                        )
         st.session_state.nmap_options = nmap_options
 
     st.divider()

@@ -2,6 +2,21 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.3.0 — AbuseIPDB Reputation Intelligence
+
+- **`intel_abuseipdb`** — passive abuse-confidence lookup for public IPv4 via AbuseIPDB check API
+- Module path: `modules/4_threat_intelligence/intel_abuseipdb.py`
+- Requires `ABUSEIPDB_API_KEY` in local `.env` — blocked cleanly when missing (not a target risk finding)
+- Public IPv4 only — domains/URLs incompatible; private/local IPs complete with informational result (no API query)
+- Lookup-only — no AbuseIPDB report/submission endpoints
+- HTTP handling for 200/400/401/403/422/429/5xx, timeouts, and connection errors
+- Cautious findings interpreter — “reported by AbuseIPDB”, not “confirmed malicious”
+- ISP organisation entity/relationship on successful lookups
+- Evidence capture with `api_reputation_lookup` collection method; API keys redacted
+- Run mode recommendations for public IPv4 in Quick Check and Local Device / IP Check when key configured
+- Settings, Batch Queue, Entity Workspace, Evidence Locker, and reports integration
+- UI summary tab for abuse score, report counts, ISP/country context; raw API JSON in collapsed expander
+
 ## v2.2.0 — VirusTotal Reputation Intelligence, platform scaffold and passive-source polish
 
 ### VirusTotal Reputation Intelligence

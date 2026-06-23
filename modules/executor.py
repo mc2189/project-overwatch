@@ -41,6 +41,7 @@ CERT_SUBDOMAIN_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "in
 WEBSITE_METADATA_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_website_metadata.py"
 WHOIS_RDAP_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_whois_rdap.py"
 VIRUSTOTAL_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_virustotal.py"
+ABUSEIPDB_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_abuseipdb.py"
 
 _nmap_handlers: tuple[Any, Any] | None = None
 _nmap_load_error: str | None = None
@@ -60,6 +61,9 @@ _whois_rdap_load_attempted = False
 _virustotal_handler: Any | None = None
 _virustotal_load_error: str | None = None
 _virustotal_load_attempted = False
+_abuseipdb_handler: Any | None = None
+_abuseipdb_load_error: str | None = None
+_abuseipdb_load_attempted = False
 
 
 def _observation_evidence_kwargs(module_id: str, result: dict[str, Any]) -> dict[str, Any]:
@@ -274,6 +278,29 @@ def _load_virustotal_handler() -> None:
         _virustotal_load_error = str(exc)
 
 
+def _load_abuseipdb_handler() -> None:
+    global _abuseipdb_handler, _abuseipdb_load_error, _abuseipdb_load_attempted
+
+    if _abuseipdb_load_attempted:
+        return
+
+    _abuseipdb_load_attempted = True
+
+    if not ABUSEIPDB_MODULE_PATH.is_file():
+        _abuseipdb_load_error = f"Module file not found: {ABUSEIPDB_MODULE_PATH}"
+        return
+
+    try:
+        spec = importlib.util.spec_from_file_location("intel_abuseipdb", ABUSEIPDB_MODULE_PATH)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load module spec from {ABUSEIPDB_MODULE_PATH}")
+        intel_abuseipdb = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(intel_abuseipdb)
+        _abuseipdb_handler = intel_abuseipdb.run_abuseipdb_lookup
+    except Exception as exc:
+        _abuseipdb_load_error = str(exc)
+
+
 def _nmap_binary_available() -> bool:
     return shutil.which("nmap") is not None
 
@@ -298,6 +325,9 @@ def is_runtime_ready(module_id: str) -> bool:
     if module_id == "intel_virustotal":
         _load_virustotal_handler()
         return _virustotal_handler is not None
+    if module_id == "intel_abuseipdb":
+        _load_abuseipdb_handler()
+        return _abuseipdb_handler is not None
     return False
 
 
@@ -326,6 +356,9 @@ def get_runtime_error(module_id: str) -> str | None:
     if module_id == "intel_virustotal":
         _load_virustotal_handler()
         return _virustotal_load_error
+    if module_id == "intel_abuseipdb":
+        _load_abuseipdb_handler()
+        return _abuseipdb_load_error
     return None
 
 
@@ -1228,6 +1261,126 @@ def _persist_virustotal_entities(
             )
 
 
+def _persist_abuseipdb_records(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    module_id: str,
+    target: str,
+    result: dict[str, Any],
+    authorisation_confirmed: bool,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> None:
+    """Save AbuseIPDB operations, observations, and findings."""
+    result = _prepare_module_result(result)
+    create_operation_log(
+        case_id,
+        module_id,
+        target,
+        result["status"],
+        authorisation_confirmed=authorisation_confirmed,
+        summary=result["summary"],
+        run_mode_id=run_mode_id,
+        run_mode_label=run_mode_label,
+        conn=conn,
+    )
+
+    if not should_persist_observation(result["status"]):
+        return
+
+    parsed_data = result.get("parsed_data") or {}
+    observation = create_observation(
+        case_id,
+        entity_id,
+        module_id,
+        "threat_intel_lookup",
+        "AbuseIPDB lookup result",
+        summary=result["summary"],
+        data_json=json.dumps(
+            {
+                "module_id": module_id,
+                "success": result["success"],
+                "status": result["status"],
+                "findings": result.get("findings", []),
+                "interpreter_findings": result.get("interpreter_findings", []),
+                "warnings": result.get("warnings", []),
+                "target": parsed_data.get("target"),
+                "ip_address": parsed_data.get("ip_address"),
+                "abuse_confidence_score": parsed_data.get("abuse_confidence_score"),
+                "total_reports": parsed_data.get("total_reports"),
+                "api": parsed_data.get("api", {}),
+            }
+        ),
+        raw_output=result["raw_output"],
+        **_observation_evidence_kwargs(module_id, result),
+        conn=conn,
+    )
+
+    _persist_observation_evidence(
+        conn,
+        case_id=case_id,
+        entity_id=entity_id,
+        observation_id=observation["id"],
+        module_id=module_id,
+        result=result,
+    )
+
+    interpreter_findings = result.get("interpreter_findings") or []
+    if interpreter_findings:
+        _persist_module_findings(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation["id"],
+            module_id=module_id,
+            interpreter_findings=interpreter_findings,
+        )
+
+    _persist_abuseipdb_entities(
+        conn,
+        case_id=case_id,
+        source_entity_id=entity_id,
+        module_id=module_id,
+        parsed_data=parsed_data,
+    )
+
+
+def _persist_abuseipdb_entities(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    source_entity_id: int,
+    module_id: str,
+    parsed_data: dict[str, Any],
+) -> None:
+    """Create organisation entity and relationship from AbuseIPDB ISP metadata."""
+    if parsed_data.get("private_local_ip"):
+        return
+
+    isp = parsed_data.get("isp")
+    if isp:
+        org_entity = create_or_get_entity(
+            case_id,
+            "organization",
+            str(isp),
+            label=str(isp),
+            source=module_id,
+            confidence=70,
+            conn=conn,
+        )
+        create_relationship(
+            case_id,
+            source_entity_id,
+            "associated_with",
+            org_entity["id"],
+            source_module=module_id,
+            confidence=70,
+            conn=conn,
+        )
+
+
 def _scan_output_text(scan_data: dict[str, Any]) -> str:
     parts = [
         scan_data.get("raw_output", ""),
@@ -1847,6 +2000,115 @@ def _execute_virustotal(
     return result
 
 
+def _execute_abuseipdb(
+    module_id: str,
+    target: str,
+    options: dict[str, Any],
+    db_context: sqlite3.Connection | None,
+    authorisation_confirmed: bool,
+    case_id: int | None,
+    entity_id: int | None,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> dict[str, Any]:
+    _load_abuseipdb_handler()
+    if _abuseipdb_handler is None:
+        error_message = _abuseipdb_load_error or "AbuseIPDB module is not available."
+        return make_result(
+            module_id,
+            success=False,
+            status="error",
+            summary="AbuseIPDB module is not available.",
+            errors=[error_message],
+        )
+
+    from utils.settings_manager import get_env
+
+    api_key = get_env("ABUSEIPDB_API_KEY") or ""
+    target_type = get_target_type(target)
+    intel_data = _abuseipdb_handler(
+        target,
+        api_key=api_key,
+        target_type=target_type,
+        options=options,
+    )
+    status = intel_data.get("status") or STATUS_ERROR
+    parsed_data = intel_data.get("parsed_data") or {}
+    lookup_target = parsed_data.get("ip_address") or parsed_data.get("target") or target
+    interpreter_findings = interpret_module_findings(module_id, parsed_data)
+    warnings = list(intel_data.get("warnings") or [])
+    errors = list(intel_data.get("errors") or [])
+
+    if not intel_data.get("success"):
+        summary = errors[0] if errors else "AbuseIPDB lookup failed."
+        result = make_result(
+            module_id,
+            success=False,
+            status=status,
+            summary=summary,
+            raw_output=intel_data.get("raw_output", ""),
+            errors=errors,
+            parsed_data=parsed_data,
+            warnings=warnings,
+            evidence=intel_data.get("evidence", []),
+            interpreter_findings=interpreter_findings,
+        )
+        if db_context is not None and case_id is not None:
+            create_operation_log(
+                case_id,
+                module_id,
+                lookup_target,
+                result["status"],
+                authorisation_confirmed=authorisation_confirmed,
+                summary=summary,
+                run_mode_id=run_mode_id,
+                run_mode_label=run_mode_label,
+                conn=db_context,
+            )
+        return result
+
+    if parsed_data.get("private_local_ip"):
+        summary = "Private/local IP address — public AbuseIPDB reputation lookup is not applicable."
+    else:
+        summary = f"AbuseIPDB reputation lookup completed for {lookup_target}."
+    status = intel_data.get("status") or STATUS_COMPLETED
+    result = make_result(
+        module_id,
+        success=True,
+        status=status,
+        summary=summary,
+        raw_output=intel_data.get("raw_output", ""),
+        findings=intel_data.get("findings", []),
+        warnings=warnings,
+        parsed_data=parsed_data,
+        interpreter_findings=interpreter_findings,
+        evidence=intel_data.get("evidence", []),
+    )
+
+    if db_context is not None and case_id is not None:
+        target_entity = create_or_get_entity(
+            case_id,
+            "ipv4",
+            lookup_target,
+            label=lookup_target,
+            source=module_id,
+            conn=db_context,
+        )
+        _persist_abuseipdb_records(
+            db_context,
+            case_id=case_id,
+            entity_id=target_entity["id"],
+            module_id=module_id,
+            target=lookup_target,
+            result=result,
+            authorisation_confirmed=authorisation_confirmed,
+            run_mode_id=run_mode_id,
+            run_mode_label=run_mode_label,
+        )
+
+    return result
+
+
 def execute_module(
     module_id: str,
     target: str,
@@ -2091,6 +2353,28 @@ def execute_module(
                 errors=[error_message],
             )
         return _execute_virustotal(
+            module_id,
+            target,
+            options,
+            db_context,
+            authorisation_confirmed,
+            case_id,
+            entity_id,
+            run_mode_id,
+            run_mode_label,
+        )
+
+    if module_id == "intel_abuseipdb":
+        if not is_runtime_ready(module_id):
+            error_message = get_runtime_error(module_id) or "AbuseIPDB runtime is not ready."
+            return make_result(
+                module_id,
+                success=False,
+                status="error",
+                summary="AbuseIPDB module is not available.",
+                errors=[error_message],
+            )
+        return _execute_abuseipdb(
             module_id,
             target,
             options,

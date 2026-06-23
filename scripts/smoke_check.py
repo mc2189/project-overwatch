@@ -209,9 +209,24 @@ def _check_settings_manager() -> None:
         raise AssertionError("intel_virustotal should require API key")
     if vt.api_key_names != ("VIRUSTOTAL_API_KEY",):
         raise AssertionError("intel_virustotal api_key_names mismatch")
-    vt_validation = settings.validate_module_settings("intel_virustotal")
-    if vt_validation["ok"]:
-        raise AssertionError("intel_virustotal should fail validation without API key")
+    if not settings.has_api_key("VIRUSTOTAL_API_KEY"):
+        vt_validation = settings.validate_module_settings("intel_virustotal")
+        if vt_validation["ok"]:
+            raise AssertionError("intel_virustotal should fail validation without API key")
+
+    aipdb = registry.get_module("intel_abuseipdb")
+    if aipdb is None or not aipdb.implemented:
+        raise AssertionError("intel_abuseipdb should be implemented")
+    if not aipdb.requires_api_key:
+        raise AssertionError("intel_abuseipdb should require API key")
+    if aipdb.api_key_names != ("ABUSEIPDB_API_KEY",):
+        raise AssertionError("intel_abuseipdb api_key_names mismatch")
+    if aipdb.accepted_target_types != ("ipv4",):
+        raise AssertionError("intel_abuseipdb accepted_target_types mismatch")
+    if not settings.has_api_key("ABUSEIPDB_API_KEY"):
+        aipdb_validation = settings.validate_module_settings("intel_abuseipdb")
+        if aipdb_validation["ok"]:
+            raise AssertionError("intel_abuseipdb should fail validation without API key")
 
     providers = settings.list_api_provider_status()
     if len(providers) < 8:
@@ -1599,6 +1614,7 @@ def _check_module_sdk() -> None:
         "infra_website_metadata",
         "infra_whois_rdap",
         "intel_virustotal",
+        "intel_abuseipdb",
     ):
         module = registry.get_module(module_id)
         if module is None:
@@ -1724,8 +1740,97 @@ def _check_virustotal_module() -> None:
         raise AssertionError("security redaction failed in virustotal smoke path")
 
 
+def _check_abuseipdb_module() -> None:
+    import importlib.util
+
+    registry = __import__("modules.module_registry", fromlist=["get_module"])
+    module = registry.get_module("intel_abuseipdb")
+    if module is None or not module.implemented:
+        raise AssertionError("intel_abuseipdb should be implemented")
+    if module.display_name != "AbuseIPDB Reputation Intelligence":
+        raise AssertionError("intel_abuseipdb display_name mismatch")
+    if module.accepted_target_types != ("ipv4",):
+        raise AssertionError("intel_abuseipdb accepted_target_types mismatch")
+    if module.api_key_names != ("ABUSEIPDB_API_KEY",):
+        raise AssertionError("intel_abuseipdb api_key_names mismatch")
+
+    executor = __import__("modules.executor", fromlist=["is_runtime_ready"])
+    if not executor.is_runtime_ready("intel_abuseipdb"):
+        raise AssertionError("intel_abuseipdb runtime should be ready")
+
+    aipdb_path = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_abuseipdb.py"
+    spec = importlib.util.spec_from_file_location("intel_abuseipdb_smoke", aipdb_path)
+    if spec is None or spec.loader is None:
+        raise AssertionError("could not load intel_abuseipdb module")
+    aipdb_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(aipdb_mod)
+
+    missing = aipdb_mod.run_abuseipdb_lookup("8.8.8.8", api_key="")
+    if missing.get("status") != "blocked":
+        raise AssertionError("missing API key should return blocked status")
+    if "AbuseIPDB API key is not configured" not in str(missing.get("errors")):
+        raise AssertionError("missing API key message mismatch")
+
+    private = aipdb_mod.run_abuseipdb_lookup("192.168.1.1", api_key="smoke-test-key", target_type="ipv4")
+    if not private.get("success") or not private.get("parsed_data", {}).get("private_local_ip"):
+        raise AssertionError("private IP should complete without API query")
+
+    domain_blocked = aipdb_mod.run_abuseipdb_lookup("example.com", api_key="smoke-test-key")
+    if domain_blocked.get("status") != "blocked":
+        raise AssertionError("domain target should be blocked for abuseipdb")
+
+    mock_payload = {
+        "data": {
+            "ipAddress": "8.8.8.8",
+            "abuseConfidenceScore": 42,
+            "totalReports": 7,
+            "numDistinctUsers": 3,
+            "countryCode": "US",
+            "countryName": "United States",
+            "isp": "Smoke ISP",
+            "usageType": "Data Center/Web Hosting/Transit",
+            "isWhitelisted": False,
+            "lastReportedAt": "2024-06-01T12:00:00+00:00",
+        }
+    }
+    lookup = aipdb_mod.run_abuseipdb_lookup(
+        "8.8.8.8",
+        api_key="smoke-test-key",
+        options={"mock_response": mock_payload},
+    )
+    if not lookup.get("success"):
+        raise AssertionError("mock AbuseIPDB lookup should succeed")
+    parsed = lookup.get("parsed_data") or {}
+    if parsed.get("abuse_confidence_score") != 42:
+        raise AssertionError("mock AbuseIPDB lookup missing abuse score")
+    if not lookup.get("evidence"):
+        raise AssertionError("mock AbuseIPDB lookup should declare evidence hints")
+    raw = lookup.get("raw_output") or ""
+    if "smoke-test-key" in raw:
+        raise AssertionError("raw_output must not contain API key")
+
+    interpreter = __import__(
+        "utils.abuseipdb_interpreter",
+        fromlist=["interpret_abuseipdb_results"],
+    )
+    findings = interpreter.interpret_abuseipdb_results(parsed)
+    if not findings:
+        raise AssertionError("abuseipdb interpreter should return findings")
+
+    findings_registry = __import__(
+        "utils.findings_registry",
+        fromlist=["interpret_module_findings", "module_has_findings_pipeline"],
+    )
+    if not findings_registry.module_has_findings_pipeline("intel_abuseipdb"):
+        raise AssertionError("intel_abuseipdb should have findings pipeline")
+    pipeline_findings = findings_registry.interpret_module_findings("intel_abuseipdb", parsed)
+    if not pipeline_findings:
+        raise AssertionError("findings pipeline returned no abuseipdb findings")
+
+    security = __import__("utils.security", fromlist=["redact_secrets_from_text"])
+    redacted = security.redact_secrets_from_text("api_key=supersecretvalue1234567890")
     if "supersecretvalue" in redacted:
-        raise AssertionError("security redaction failed in virustotal smoke path")
+        raise AssertionError("security redaction failed in abuseipdb smoke path")
 
 
 def _check_api_module_helpers() -> None:
@@ -1947,6 +2052,11 @@ def main() -> int:
     run(
         "virustotal module",
         lambda: _check_virustotal_module(),
+    )
+
+    run(
+        "abuseipdb module",
+        lambda: _check_abuseipdb_module(),
     )
 
     run(
