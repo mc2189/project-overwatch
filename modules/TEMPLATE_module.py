@@ -11,6 +11,8 @@ Checklist before registering:
   4. Add a findings interpreter if the module produces advisory findings
   5. Add evidence capture in utils/evidence_capture.py if raw artefacts should be stored
   6. Run: python scripts/smoke_check.py
+
+For API-key modules, also see modules/TEMPLATE_api_module.py and utils/api_module_helpers.py.
 """
 
 from __future__ import annotations

@@ -32,6 +32,7 @@ API_PROVIDERS: tuple[ApiProviderSpec, ...] = (
         "VirusTotal",
         ("VIRUSTOTAL_API_KEY",),
         ("intel_virustotal",),
+        notes="Used by VirusTotal Reputation Intelligence — key is masked here and never stored in the database.",
     ),
     ApiProviderSpec(
         "abuseipdb",
@@ -276,6 +277,15 @@ def validate_module_settings(module_id: str) -> dict[str, Any]:
     key_status = module_api_key_status(module)
     if key_status["required"] and not key_status["configured"]:
         missing = ", ".join(key_status["missing_keys"])
+        if module.module_id == "intel_virustotal":
+            return {
+                "ok": False,
+                "reason": (
+                    "VirusTotal API key is not configured. "
+                    "Add VIRUSTOTAL_API_KEY to your local .env file."
+                ),
+                "missing_keys": key_status["missing_keys"],
+            }
         return {
             "ok": False,
             "reason": f"Missing required API key(s): {missing}. Add them to your local .env file.",

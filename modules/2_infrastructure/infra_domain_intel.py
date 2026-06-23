@@ -13,7 +13,11 @@ import dns.exception
 import dns.resolver
 import requests
 
-from utils.display_format import display_or_unavailable, format_wayback_timestamp
+from utils.display_format import (
+    display_or_unavailable,
+    format_wayback_timestamp,
+    format_wayback_user_error,
+)
 from utils.result_status import resolve_collection_status
 
 COMMON_SECURITY_HEADERS = [
@@ -190,7 +194,9 @@ def _check_wayback_availability(domain: str) -> dict[str, Any]:
             result["last_snapshot"] = raw_last
             result["last_snapshot_display"] = format_wayback_timestamp(raw_last)
     except (requests.RequestException, ValueError, IndexError) as exc:
-        result["error"] = str(exc)
+        raw_error = str(exc)
+        result["error"] = format_wayback_user_error(raw_error)
+        result["error_detail"] = raw_error
     return result
 
 
@@ -253,7 +259,8 @@ def _build_raw_output(parsed_data: dict[str, Any]) -> str:
         )
         lines.append(f"  snapshots available; first={first}; last={last}")
     else:
-        lines.append(f"  no snapshots found ({wayback.get('error') or 'none'})")
+        detail = wayback.get("error_detail") or wayback.get("error") or "none"
+        lines.append(f"  no snapshots found ({detail})")
 
     return "\n".join(lines)
 

@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from modules.module_registry import get_module
 from ui.constants import MODULE_CARD_TITLES
+from utils.security import is_private_or_local_ip
+from utils.settings_manager import has_api_key
 from utils.target_detection import TARGET_TYPES, target_type_label
 from utils.whois_rdap_helpers import is_public_ipv4
+
+VIRUSTOTAL_MODULE_ID = "intel_virustotal"
 
 QUICK_CHECK = "quick_check"
 WEBSITE_FOOTPRINT = "website_footprint"
@@ -98,6 +102,24 @@ def get_run_mode_description(mode_id: str) -> str:
     return MODE_DESCRIPTIONS.get(mode_id, "")
 
 
+def _virustotal_configured() -> bool:
+    return has_api_key("VIRUSTOTAL_API_KEY")
+
+
+def _virustotal_recommended(mode_id: str, target_type: str, target: str | None) -> bool:
+    if not _virustotal_configured():
+        return False
+    if target_type in {"domain", "url"}:
+        return mode_id in {QUICK_CHECK, WEBSITE_FOOTPRINT, CUSTOM}
+    if target_type == "ipv4" and target:
+        if is_private_or_local_ip(target):
+            return False
+        if not is_public_ipv4(target):
+            return False
+        return mode_id in {QUICK_CHECK, LOCAL_IP_CHECK, CUSTOM}
+    return False
+
+
 def get_recommended_modules_for_mode(
     mode_id: str,
     target_type: str,
@@ -119,6 +141,8 @@ def get_recommended_modules_for_mode(
         and "infra_whois_rdap" not in modules
     ):
         modules.append("infra_whois_rdap")
+    if target and _virustotal_recommended(mode_id, target_type, target) and VIRUSTOTAL_MODULE_ID not in modules:
+        modules.append(VIRUSTOTAL_MODULE_ID)
     return modules
 
 
@@ -179,6 +203,11 @@ def get_recommendation_reason(
                     f"Quick Check recommends passive domain modules plus an optional light port scan "
                     f"for this {label}. Authorisation is required for the port scan."
                 )
+            if _virustotal_configured():
+                return (
+                    f"Quick Check recommends passive domain modules and optional VirusTotal reputation "
+                    f"enrichment for this {label} (no port scan by default)."
+                )
             return (
                 f"Quick Check recommends passive domain modules for this {label} "
                 "(no port scan by default)."
@@ -192,6 +221,11 @@ def get_recommendation_reason(
                 "Website / Domain Footprint is designed for domain or URL targets. "
                 "Enter a domain or URL, or switch run mode."
             )
+        if _virustotal_configured():
+            return (
+                "Website / Domain Footprint recommends passive registration metadata (RDAP), DNS, HTTP/TLS, "
+                "certificate transparency, and optional VirusTotal reputation enrichment. Nmap is not included by default."
+            )
         return (
             "Website / Domain Footprint recommends passive registration metadata (RDAP), DNS, HTTP/TLS, "
             "and certificate transparency lookups. Nmap is not included by default."
@@ -202,6 +236,17 @@ def get_recommendation_reason(
             return (
                 "Local Device / IP Check is designed for IPv4 addresses. "
                 "Enter an IP address, or switch run mode."
+            )
+        if target and is_private_or_local_ip(target):
+            return (
+                "Local Device / IP Check recommends Network Service Check with a conservative "
+                "scan profile for this private/local address. VirusTotal is not recommended for private IPs."
+            )
+        if _virustotal_configured():
+            return (
+                "Local Device / IP Check recommends Network Service Check with a conservative "
+                "scan profile. Public IPv4 addresses may also include passive WHOIS/RDAP context and "
+                "optional VirusTotal reputation enrichment. Authorisation is required before launch."
             )
         return (
             "Local Device / IP Check recommends Network Service Check with a conservative "

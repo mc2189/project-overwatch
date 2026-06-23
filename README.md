@@ -1,10 +1,10 @@
-# Project Overwatch v2.1
+# Project Overwatch v2.2
 
-Project Overwatch is a **local** Python/Streamlit dashboard for defensive security intelligence. It helps analysts organise investigations into **cases**, collect data with authorised **active** scans and **passive** lookups, interpret results as advisory **findings**, and export **reports** — all stored in a local SQLite database on your machine.
+Project Overwatch is a **local** Python/Streamlit dashboard for defensive security intelligence.
 
-**v2.1** adds a **secure-by-design baseline**: secret hygiene, redaction before persistence, a security audit script, and a Security Posture panel in Settings.
+**v2.2** adds VirusTotal Reputation Intelligence, API module scaffolding, RDAP cache management on the Backup page, richer VirusTotal vendor breakdown UI, CI security audit, and passive-source result wording polish.
 
-**v2.0** introduced WHOIS/RDAP Intelligence; **v1.4** reorganised the interface around an investigation workflow.
+**v2.1** established the secure-by-design baseline.
 
 Use only on systems you own, lab environments, or targets with **written permission**.
 
@@ -82,6 +82,7 @@ Results appear automatically in Operations, Observations, Findings, Relationship
 
 - **Network Service Check, powered by Nmap** — active; IPv4 or domain only (not URL — enter hostname separately for port scans).
 - **WHOIS / RDAP Intelligence** — passive registration/allocation metadata for domain, URL (host extracted), or public IPv4 via public RDAP.
+- **VirusTotal Reputation Intelligence** — passive API reputation enrichment for domain, URL, or public IPv4 (`VIRUSTOTAL_API_KEY` required; private IPs skipped).
 - **Domain Intelligence** — passive DNS/HTTP/TLS/Wayback for domain or URL.
 - **Certificate & Subdomain Intelligence** — passive certificate transparency names for domain or URL.
 - **Website Metadata Review** — passive homepage title, meta tags, headers, robots.txt, and sitemap hints for domain or URL.
@@ -92,9 +93,9 @@ After entering a target, choose **What do you want to do?** on Run Operation:
 
 | Run mode | Purpose | Typical recommendations |
 |----------|---------|-------------------------|
-| **Quick Check** | Simple default | IPv4 → Network Service Check (+ WHOIS/RDAP for public IPs); domain/URL → WHOIS/RDAP + Domain Intelligence + Certificate & Subdomain Intelligence + Website Metadata Review; email/username/unknown → none |
-| **Website / Domain Footprint** | Passive domain footprint | WHOIS/RDAP + Domain Intelligence + Certificate & Subdomain Intelligence + Website Metadata Review (no Nmap by default) |
-| **Local Device / IP Check** | Conservative active IP scan | Network Service Check with Quick check Nmap profile; public IPv4 may also recommend WHOIS/RDAP; private/local IPs skip RDAP; authorisation required |
+| **Quick Check** | Simple default | IPv4 → Network Service Check (+ WHOIS/RDAP for public IPs; optional VirusTotal if key configured); domain/URL → WHOIS/RDAP + Domain Intelligence + Certificate & Subdomain + Website Metadata (+ optional VirusTotal if key configured); email/username/unknown → none |
+| **Website / Domain Footprint** | Passive domain footprint | WHOIS/RDAP + Domain Intelligence + Certificate & Subdomain + Website Metadata (+ VirusTotal if key configured; no Nmap by default) |
+| **Local Device / IP Check** | Conservative active IP scan | Network Service Check with Quick check Nmap profile; public IPv4 may also recommend WHOIS/RDAP and optional VirusTotal; private/local IPs skip RDAP/VirusTotal; authorisation required |
 | **Custom Module Selection** | Power-user manual pick | All compatible modules shown; no automatic preselection when you change target |
 
 Recommendations are deterministic and local — they filter by target type and run mode only. **Compatibility checks and the authorisation gate still apply**; passive-only runs do not require authorisation.
@@ -133,6 +134,49 @@ Project Overwatch loads local settings from `.env` (never committed) and optiona
 3. Open **Settings** in the sidebar to see **masked** key status, **Security posture**, and module readiness.
 4. **Never commit `.env`** — it is listed in `.gitignore`.
 
+python scripts/smoke_check.py
+```
+
+### VirusTotal Reputation Intelligence (v2.2)
+
+Passive third-party reputation enrichment for **domain**, **URL**, and **public IPv4** targets.
+
+1. Add `VIRUSTOTAL_API_KEY=your_key_here` to local `.env` (see `.env.example`).
+2. Open **Settings** — VirusTotal provider shows configured yes/no with **masked** key only.
+3. Select the module on **Run Operation**, **Entity Workspace**, or **Batch Queue** when compatible.
+
+**Behaviour:**
+
+- **Missing key** — module is blocked with a clear configuration message (operational issue, not a target risk finding).
+- **Private/local IPv4** — completes with informational result; no VirusTotal API call.
+- **Rate limit (HTTP 429)** — warning/operational notice; batch queue continues safely.
+- **Results** — security vendor analysis counts and reputation are *reported by VirusTotal* — treat as leads, not confirmed threats or benign proof.
+- **Evidence** — summaries stored in Evidence Locker with redaction; full raw JSON remains collapsed in the UI.
+
+Requires VirusTotal API terms compliance and respects configured courtesy delays in batch runs.
+
+### Developing API-backed modules (v2.2)
+
+Use the shared scaffold when adding AbuseIPDB, GreyNoise, Shodan, or similar modules:
+
+1. Copy `modules/TEMPLATE_api_module.py` to `modules/4_threat_intelligence/<your_module>.py`
+2. Reuse `utils/api_module_helpers.py` for timeout, User-Agent, HTTP status mapping, missing-key blocked results, and redaction
+3. Reference `modules/4_threat_intelligence/intel_virustotal.py` for a complete working example
+4. Register in `module_registry.py`, wire `executor.py`, add interpreter + evidence capture
+5. Run `python scripts/smoke_check.py` and `python scripts/security_audit.py`
+
+API keys stay in `.env` only — never hard-code or persist full keys.
+
+### RDAP cache (Backup page)
+
+WHOIS/RDAP responses are cached per case in `rdap_lookup_cache`. On **Backup**:
+
+- View cached query summaries for the active case
+- Clear cache for the case
+- Export/import cache via case backup JSON (`rdap_lookup_cache` key)
+
+Optional TTL: `PROJECT_OVERWATCH_RDAP_CACHE_TTL_HOURS` (0 = no expiry).
+
 ### Secure-by-design baseline (v2.1)
 
 - **`utils/security.py`** — `mask_secret()`, `redact_secrets_from_text()`, target validation, env parsing helpers.
@@ -149,7 +193,7 @@ python scripts/security_audit.py
 python scripts/smoke_check.py
 ```
 
-Supported future API keys (optional until modules are implemented): VirusTotal, AbuseIPDB, GreyNoise, Shodan, Censys (ID + secret), SecurityTrails, Hunter.io, Have I Been Pwned.
+Supported API keys: **VirusTotal** (implemented — `intel_virustotal`). Optional future keys: AbuseIPDB, GreyNoise, Shodan, Censys (ID + secret), SecurityTrails, Hunter.io, Have I Been Pwned.
 
 General settings:
 
@@ -159,6 +203,8 @@ General settings:
 | `PROJECT_OVERWATCH_DEFAULT_TIMEOUT` | Default HTTP timeout (seconds) | `30` |
 | `PROJECT_OVERWATCH_MAX_BATCH_ITEMS` | Max queued batch items per case | `50` |
 | `PROJECT_OVERWATCH_ENABLE_ACTIVE_MODULES` | Global active module toggle | `true` |
+| `PROJECT_OVERWATCH_RDAP_CACHE_TTL_HOURS` | RDAP/WHOIS cache expiry (0 = never) | `0` |
+| `PROJECT_OVERWATCH_LOCAL_ENCRYPTION_KEY` | Optional Fernet key scaffold (not applied to DB yet) | unset |
 
 Future API-backed modules are blocked cleanly when keys are missing. Current passive modules (WHOIS/RDAP Intelligence, Domain Intelligence, Certificate & Subdomain Intelligence, Website Metadata Review) and Nmap do **not** require API keys.
 

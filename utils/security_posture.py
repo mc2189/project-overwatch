@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from utils.crypto_utils import cryptography_installed, encryption_available, local_encryption_configured
 from utils.security import elevated_privileges_available
 from utils.settings_manager import active_modules_enabled, env_example_exists, env_ignored_by_git
 
@@ -63,9 +64,20 @@ def collect_security_posture() -> list[SecurityPostureItem]:
         ),
         SecurityPostureItem(
             "Database encryption",
-            "not enabled yet",
+            "scaffold only" if not encryption_available() else "key configured (not applied to DB yet)",
             ok=None,
-            detail="Future item — see SECURITY.md and utils/crypto_utils.py TODO.",
+            detail=(
+                "Optional PROJECT_OVERWATCH_LOCAL_ENCRYPTION_KEY + cryptography package. "
+                "Full database encryption is not enabled yet."
+                if not encryption_available()
+                else "Local encryption key is set; evidence/database encryption not applied yet."
+            ),
+        ),
+        SecurityPostureItem(
+            "Local encryption library",
+            "available" if cryptography_installed() else "not installed",
+            ok=cryptography_installed(),
+            detail="pip install cryptography for optional Fernet helpers in utils/crypto_utils.py.",
         ),
         SecurityPostureItem(
             "Security audit",

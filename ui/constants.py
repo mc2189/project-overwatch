@@ -24,6 +24,7 @@ IMPLEMENTED_MODULE_IDS: tuple[str, ...] = (
     "infra_cert_subdomain",
     "infra_website_metadata",
     "infra_whois_rdap",
+    "intel_virustotal",
 )
 
 MODULE_CARD_TITLES: dict[str, str] = {
@@ -32,6 +33,7 @@ MODULE_CARD_TITLES: dict[str, str] = {
     "infra_cert_subdomain": "Certificate & Subdomain Intelligence",
     "infra_website_metadata": "Website Metadata Review",
     "infra_whois_rdap": "WHOIS / RDAP Intelligence",
+    "intel_virustotal": "VirusTotal Reputation Intelligence",
 }
 
 FINDING_SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")

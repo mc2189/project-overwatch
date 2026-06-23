@@ -29,6 +29,7 @@ from database.db_setup import (
     sync_batch_queue_items,
     get_case,
 )
+from utils.rdap_cache import export_rdap_cache_for_case, import_rdap_cache_entries
 
 
 def export_case_bundle(case_id: int) -> dict[str, Any]:
@@ -51,6 +52,7 @@ def export_case_bundle(case_id: int) -> dict[str, Any]:
             "batch_queue_items": list_batch_queue_items(case_id=case_id, conn=conn),
             "evidence_items": list_evidence_items(case_id=case_id, conn=conn),
             "evidence_finding_links": list_evidence_finding_links(case_id=case_id, conn=conn),
+            "rdap_lookup_cache": export_rdap_cache_for_case(case_id, conn=conn),
         }
     finally:
         conn.close()
@@ -243,6 +245,10 @@ def import_case_bundle(bundle: dict[str, Any], *, new_case_name: str | None = No
             )
         if imported_batch_items:
             sync_batch_queue_items(case_id, imported_batch_items, conn=conn)
+
+        cache_entries = bundle.get("rdap_lookup_cache") or []
+        if cache_entries:
+            import_rdap_cache_entries(case_id, cache_entries, conn=conn)
 
         return new_case
     finally:

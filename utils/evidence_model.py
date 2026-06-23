@@ -112,10 +112,10 @@ MODULE_EVIDENCE_DEFAULTS: dict[str, dict[str, Any]] = {
     },
     "intel_virustotal": {
         "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
-        "source_name": "virustotal",
+        "source_name": "VirusTotal",
         "source_url": "https://www.virustotal.com/",
         "reliability": RELIABILITY_MEDIUM,
-        "collection_method": "api_lookup",
+        "collection_method": "api_reputation_lookup",
     },
 }
 
@@ -161,6 +161,10 @@ RELATIONSHIP_EVIDENCE_DEFAULTS: dict[tuple[str, str], dict[str, Any]] = {
         "reliability": RELIABILITY_MEDIUM,
     },
     ("infra_whois_rdap", "has_abuse_contact"): {
+        "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
+        "reliability": RELIABILITY_MEDIUM,
+    },
+    ("intel_virustotal", "associated_with"): {
         "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
         "reliability": RELIABILITY_MEDIUM,
     },

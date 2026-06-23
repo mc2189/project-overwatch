@@ -333,9 +333,9 @@ MODULES: list[ModuleEntry] = [
     # Threat Intel
     ModuleEntry(
         module_id="intel_virustotal",
-        display_name="VirusTotal",
+        display_name="VirusTotal Reputation Intelligence",
         category="Threat Intel",
-        description="Lookup files, URLs, and IPs against threat intelligence feeds.",
+        description="Passive reputation enrichment for domains, URLs and public IPv4 addresses using VirusTotal.",
         status="active",
         mode="passive",
         risk_level="low",
@@ -344,19 +344,24 @@ MODULES: list[ModuleEntry] = [
         implemented=True,
         accepted_target_types=("ipv4", "domain", "url"),
         api_key_names=("VIRUSTOTAL_API_KEY",),
-        config_notes="Requires VIRUSTOTAL_API_KEY in local .env.",
-        rate_limit_notes="Public API rate limits apply — batch queue courtesy delay applies.",
-        short_help="Passive VirusTotal lookup for an IPv4 address, domain, or URL.",
+        config_notes=(
+            "Passive module — requires VIRUSTOTAL_API_KEY in local .env. "
+            "Key is masked in Settings and must never be stored in observations, findings, evidence, reports or logs."
+        ),
+        rate_limit_notes="VirusTotal public API rate limits apply — batch queue courtesy delay applies between lookups.",
+        short_help="Passive VirusTotal reputation lookup for a domain, URL, or public IPv4 address.",
         detailed_help=(
-            "Queries the VirusTotal API v3 for third-party engine detections and community metadata. "
-            "Detection counts are leads for analyst review — they do not confirm compromise or benign status."
+            "Queries the VirusTotal API v3 for third-party security vendor analysis counts and community metadata. "
+            "Results are reported by VirusTotal — they are leads for analyst review, not confirmed threats or benign status. "
+            "Private/local IPv4 addresses are not queried."
         ),
         example_inputs=("203.0.113.10", "example.com", "https://example.com/path"),
-        output_summary="Engine detection counts, reputation hints, and advisory findings.",
+        output_summary="Security vendor analysis summary, reputation score, and cautious advisory findings.",
         caution_notes=(
-            "Third-party engine labels require manual verification.",
+            "Third-party vendor labels require manual verification.",
             "Clean VirusTotal results do not prove a target is safe or in scope.",
             "Respect VirusTotal API rate limits and terms of use.",
+            "API key must remain in .env only — never commit or paste into case notes.",
         ),
     ),
     ModuleEntry(

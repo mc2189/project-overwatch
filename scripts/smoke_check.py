@@ -1631,19 +1631,33 @@ def _check_virustotal_module() -> None:
     module = registry.get_module("intel_virustotal")
     if module is None or not module.implemented:
         raise AssertionError("intel_virustotal should be implemented")
+    if module.display_name != "VirusTotal Reputation Intelligence":
+        raise AssertionError("intel_virustotal display_name mismatch")
     if module.accepted_target_types != ("ipv4", "domain", "url"):
         raise AssertionError("intel_virustotal accepted_target_types mismatch")
+    if module.api_key_names != ("VIRUSTOTAL_API_KEY",):
+        raise AssertionError("intel_virustotal api_key_names mismatch")
 
     executor = __import__("modules.executor", fromlist=["is_runtime_ready"])
     if not executor.is_runtime_ready("intel_virustotal"):
         raise AssertionError("intel_virustotal runtime should be ready")
 
-    vt_path = PROJECT_ROOT / "modules" / "4_threat_intel" / "intel_virustotal.py"
+    vt_path = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_virustotal.py"
     spec = importlib.util.spec_from_file_location("intel_virustotal_smoke", vt_path)
     if spec is None or spec.loader is None:
         raise AssertionError("could not load intel_virustotal module")
     vt_mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(vt_mod)
+
+    missing = vt_mod.run_virustotal_lookup("example.com", api_key="")
+    if missing.get("status") != "blocked":
+        raise AssertionError("missing API key should return blocked status")
+    if "VirusTotal API key is not configured" not in str(missing.get("errors")):
+        raise AssertionError("missing API key message mismatch")
+
+    private = vt_mod.run_virustotal_lookup("192.168.1.1", api_key="test-key", target_type="ipv4")
+    if not private.get("success") or not private.get("parsed_data", {}).get("private_local_ip"):
+        raise AssertionError("private IP should complete without API query")
 
     mock_payload = {
         "data": {
@@ -1657,6 +1671,10 @@ def _check_virustotal_module() -> None:
                     "undetected": 10,
                 },
                 "reputation": -3,
+                "last_analysis_results": {
+                    "VendorA": {"category": "malicious", "result": "Trojan.Test"},
+                    "VendorB": {"category": "harmless", "result": "clean"},
+                },
             },
         }
     }
@@ -1669,8 +1687,13 @@ def _check_virustotal_module() -> None:
         raise AssertionError("mock VirusTotal lookup should succeed")
     if not lookup.get("parsed_data", {}).get("last_analysis_stats"):
         raise AssertionError("mock VirusTotal lookup missing stats")
+    if not lookup.get("parsed_data", {}).get("engine_results_flagged"):
+        raise AssertionError("mock VirusTotal lookup should parse flagged engines")
     if not lookup.get("evidence"):
         raise AssertionError("mock VirusTotal lookup should declare evidence hints")
+    raw = lookup.get("raw_output") or ""
+    if "smoke-test-key" in raw:
+        raise AssertionError("raw_output must not contain API key")
 
     interpreter = __import__(
         "utils.virustotal_interpreter",
@@ -1679,8 +1702,8 @@ def _check_virustotal_module() -> None:
     findings = interpreter.interpret_virustotal_results(lookup["parsed_data"])
     if not findings:
         raise AssertionError("virustotal interpreter should return findings")
-    if findings[0].get("severity") != "high":
-        raise AssertionError("malicious detections should produce high severity finding")
+    if findings[0].get("severity") not in {"low", "medium"}:
+        raise AssertionError("flagged detections should produce low/medium severity finding")
 
     findings_registry = __import__(
         "utils.findings_registry",
@@ -1694,6 +1717,103 @@ def _check_virustotal_module() -> None:
     )
     if not pipeline_findings:
         raise AssertionError("findings pipeline returned no virustotal findings")
+
+    security = __import__("utils.security", fromlist=["redact_secrets_from_text"])
+    redacted = security.redact_secrets_from_text("api_key=supersecretvalue1234567890")
+    if "supersecretvalue" in redacted:
+        raise AssertionError("security redaction failed in virustotal smoke path")
+
+
+    if "supersecretvalue" in redacted:
+        raise AssertionError("security redaction failed in virustotal smoke path")
+
+
+def _check_api_module_helpers() -> None:
+    helpers = __import__(
+        "utils.api_module_helpers",
+        fromlist=[
+            "classify_provider_http_status",
+            "missing_api_key_blocked_result",
+            "project_user_agent",
+            "request_timeout_seconds",
+        ],
+    )
+    if "ProjectOverwatch/" not in helpers.project_user_agent():
+        raise AssertionError("project_user_agent missing version")
+    if helpers.request_timeout_seconds() <= 0:
+        raise AssertionError("request_timeout_seconds should be positive")
+    status, success, _, _ = helpers.classify_provider_http_status(429)
+    if status != "completed_with_warnings" or not success:
+        raise AssertionError("429 should map to completed_with_warnings")
+    blocked = helpers.missing_api_key_blocked_result(
+        module_id="smoke_api",
+        env_key_name="SMOKE_API_KEY",
+        provider_label="Smoke Provider",
+        target="example.com",
+        target_type="domain",
+    )
+    if blocked.get("status") != "blocked":
+        raise AssertionError("missing_api_key_blocked_result should be blocked")
+
+
+def _check_rdap_cache_backup() -> None:
+    cache = __import__(
+        "utils.rdap_cache",
+        fromlist=[
+            "clear_rdap_cache_for_case",
+            "count_rdap_cache_for_case",
+            "export_rdap_cache_for_case",
+            "list_rdap_cache_for_case",
+        ],
+    )
+    backup = __import__("utils.case_backup", fromlist=["export_case_bundle", "import_case_bundle"])
+    db = __import__("database.db_setup", fromlist=["create_case", "get_db_conn"])
+    conn = db.get_db_conn()
+    try:
+        case = db.create_case("RDAP cache backup smoke", conn=conn)
+        case_id = case["id"]
+        cache.set_rdap_cache_entry(
+            case_id,
+            "domain:backup-smoke.example",
+            "domain",
+            "rdap",
+            '{"ldhName":"backup-smoke.example"}',
+            conn=conn,
+        )
+        if cache.count_rdap_cache_for_case(case_id, conn=conn) != 1:
+            raise AssertionError("rdap cache count mismatch")
+        summaries = cache.list_rdap_cache_for_case(case_id, conn=conn)
+        if not summaries or "response_bytes" not in summaries[0]:
+            raise AssertionError("rdap cache summary missing response_bytes")
+        bundle = backup.export_case_bundle(case_id)
+        if not bundle.get("rdap_lookup_cache"):
+            raise AssertionError("case backup should include rdap_lookup_cache")
+        imported = backup.import_case_bundle(bundle, new_case_name="RDAP cache import smoke")
+        imported_count = cache.count_rdap_cache_for_case(imported["id"], conn=conn)
+        if imported_count != 1:
+            raise AssertionError("imported case should restore rdap cache")
+        cache.clear_rdap_cache_for_case(case_id, conn=conn)
+    finally:
+        conn.close()
+
+
+def _check_crypto_scaffold() -> None:
+    crypto = __import__(
+        "utils.crypto_utils",
+        fromlist=[
+            "calculate_sha256",
+            "cryptography_installed",
+            "encryption_available",
+            "local_encryption_configured",
+        ],
+    )
+    digest = crypto.calculate_sha256("rdap-cache-smoke")
+    if not digest or len(digest) != 64:
+        raise AssertionError("calculate_sha256 failed")
+    if crypto.local_encryption_configured():
+        raise AssertionError("smoke environment should not have encryption key configured")
+    if crypto.encryption_available():
+        raise AssertionError("encryption_available should be false without key")
 
 
 def _check_module_sdk_unit_tests() -> None:
@@ -1827,6 +1947,21 @@ def main() -> int:
     run(
         "virustotal module",
         lambda: _check_virustotal_module(),
+    )
+
+    run(
+        "api module helpers",
+        lambda: _check_api_module_helpers(),
+    )
+
+    run(
+        "rdap cache backup",
+        lambda: _check_rdap_cache_backup(),
+    )
+
+    run(
+        "crypto scaffold",
+        lambda: _check_crypto_scaffold(),
     )
 
     run(

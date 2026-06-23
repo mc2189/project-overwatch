@@ -24,6 +24,12 @@ from database.db_setup import (
 from ui.metrics import render_compact_metrics
 from utils.evidence_model import evidence_type_label, reliability_label
 from utils.case_backup import export_case_bundle_json, import_case_bundle, parse_case_bundle_json
+from utils.rdap_cache import (
+    clear_rdap_cache_for_case,
+    count_rdap_cache_for_case,
+    list_rdap_cache_for_case,
+    rdap_cache_ttl_hours,
+)
 from utils.graph_view import entity_graph_figure
 from utils.report_builder import build_case_report, save_report_markdown
 from utils.report_encryption import is_encryption_available
@@ -772,6 +778,48 @@ def render_backup_page(case_id: int, metrics: dict[str, int]) -> None:
                 st.rerun()
             except Exception as exc:
                 st.error(f"Import failed: {exc}")
+
+    st.divider()
+    st.subheader("WHOIS / RDAP cache")
+    cache_count = count_rdap_cache_for_case(case_id)
+    ttl_hours = rdap_cache_ttl_hours()
+    if ttl_hours > 0:
+        st.caption(
+            f"This case has {cache_count} cached RDAP/WHOIS response(s). "
+            f"Entries expire after {ttl_hours} hour(s) "
+            f"(PROJECT_OVERWATCH_RDAP_CACHE_TTL_HOURS)."
+        )
+    else:
+        st.caption(
+            f"This case has {cache_count} cached RDAP/WHOIS response(s). "
+            "Cache TTL is disabled (entries persist until cleared). "
+            "Set PROJECT_OVERWATCH_RDAP_CACHE_TTL_HOURS in .env to enable expiry."
+        )
+    if cache_count:
+        cache_rows = list_rdap_cache_for_case(case_id)
+        display_rows = [
+            {
+                "Query": row.get("query_key"),
+                "Type": row.get("target_type"),
+                "Source": row.get("source"),
+                "Fetched": row.get("fetched_at"),
+                "Size (bytes)": row.get("response_bytes"),
+                "Expired": "Yes" if row.get("expired") else "No",
+            }
+            for row in cache_rows
+        ]
+        st.dataframe(pd.DataFrame(display_rows), width="stretch", hide_index=True)
+        if st.button("Clear RDAP/WHOIS cache for this case", key=f"clear_rdap_cache_{case_id}"):
+            removed = clear_rdap_cache_for_case(case_id)
+            st.success(f"Cleared {removed} cached response(s).")
+            st.rerun()
+    else:
+        st.info("No RDAP/WHOIS cache entries for this case yet.")
+
+    st.caption(
+        "Case backup JSON export includes `rdap_lookup_cache` when present. "
+        "Import restores cache entries into the new case."
+    )
 
     with st.expander("Legacy (v0.1)"):
         st.caption(

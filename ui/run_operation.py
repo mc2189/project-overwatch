@@ -36,6 +36,7 @@ from utils.run_modes import (
     should_auto_apply_selection,
     sync_run_mode_from_case,
 )
+from utils.settings_manager import has_api_key
 from utils.target_detection import get_target_type, normalize_target_value, target_type_label
 
 RUN_MODE_SESSION_KEY = "operation_run_mode"
@@ -380,6 +381,21 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
                         "URLs (host extracted), and public IPv4 addresses. Private/local IPs return an "
                         "informational result without public lookup."
                     )
+                elif module_id == "intel_virustotal":
+                    st.caption("Passive module — no authorisation required.")
+                    st.write(
+                        "Requires VIRUSTOTAL_API_KEY in .env. The key is masked in Settings and must never "
+                        "be stored in observations, findings, evidence, reports or logs."
+                    )
+                    st.write(
+                        "Queries VirusTotal for passive reputation enrichment. Results are third-party "
+                        "reputation signals and should be treated as reported intelligence, not confirmed fact."
+                    )
+                    if not has_api_key("VIRUSTOTAL_API_KEY"):
+                        st.warning(
+                            "VirusTotal is unavailable — VIRUSTOTAL_API_KEY is not configured in your local "
+                            ".env file. This module will be blocked until a key is set."
+                        )
         st.session_state.nmap_options = nmap_options
 
     st.divider()

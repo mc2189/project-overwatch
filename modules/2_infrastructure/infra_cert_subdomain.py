@@ -9,6 +9,7 @@ from urllib.parse import quote
 import requests
 
 from utils.target_detection import DOMAIN_PATTERN, get_target_type, normalize_target_value
+from utils.display_format import format_crt_sh_user_warning
 from utils.result_status import STATUS_COMPLETED_WITH_WARNINGS, STATUS_PARTIAL, resolve_collection_status
 
 MODULE_ID = "infra_cert_subdomain"
@@ -64,7 +65,7 @@ def process_subdomain_names(raw_names: list[str], domain: str, *, limit: int = M
     return ordered[:limit], saw_wildcard
 
 
-def _fetch_crt_sh_entries(domain: str) -> tuple[list[dict[str, Any]], str | None]:
+def _fetch_crt_sh_entries(domain: str) -> tuple[list[dict[str, Any]], str | None, str | None]:
     """Query crt.sh JSON output for certificate transparency names."""
     query = quote(f"%.{domain}", safe="")
     url = f"{CRT_SH_URL}?q={query}&output=json"
@@ -76,34 +77,54 @@ def _fetch_crt_sh_entries(domain: str) -> tuple[list[dict[str, Any]], str | None
             headers={"User-Agent": "ProjectOverwatch/1.3 (passive certificate intelligence)"},
         )
     except requests.Timeout:
-        return [], "Certificate transparency lookup timed out. crt.sh may be slow or unavailable."
+        user_msg, detail = format_crt_sh_user_warning(
+            technical_message="Certificate transparency lookup timed out. crt.sh may be slow or unavailable."
+        )
+        return [], user_msg, detail
     except requests.RequestException as exc:
-        return [], f"Certificate transparency lookup failed: {exc}"
+        technical = f"Certificate transparency lookup failed: {exc}"
+        user_msg, detail = format_crt_sh_user_warning(technical_message=technical)
+        return [], user_msg, detail
 
     if response.status_code == 429:
-        return [], "crt.sh rate limited the request. Try again later."
-    if response.status_code >= 500:
-        return [], f"crt.sh returned server error {response.status_code}."
-    if response.status_code != 200:
-        return [], f"crt.sh returned unexpected status {response.status_code}."
+        user_msg, detail = format_crt_sh_user_warning(
+            status_code=response.status_code,
+            technical_message=f"HTTP {response.status_code} from crt.sh",
+        )
+        return [], user_msg, detail
+    if response.status_code >= 500 or response.status_code == 404 or response.status_code != 200:
+        user_msg, detail = format_crt_sh_user_warning(
+            status_code=response.status_code,
+            technical_message=f"HTTP {response.status_code} from crt.sh",
+        )
+        return [], user_msg, detail
 
     text = response.text.strip()
     if not text:
-        return [], "crt.sh returned no certificate data for this domain."
+        user_msg, detail = format_crt_sh_user_warning(
+            technical_message="crt.sh returned an empty response body."
+        )
+        return [], user_msg, detail
 
     try:
         payload = response.json()
     except json.JSONDecodeError:
-        return [], "crt.sh returned a non-JSON response. The source may be temporarily unavailable."
+        user_msg, detail = format_crt_sh_user_warning(
+            technical_message="crt.sh returned a non-JSON response."
+        )
+        return [], user_msg, detail
 
     if not isinstance(payload, list):
-        return [], "crt.sh returned an unexpected response format."
+        user_msg, detail = format_crt_sh_user_warning(
+            technical_message="crt.sh returned an unexpected response format."
+        )
+        return [], user_msg, detail
 
     entries: list[dict[str, Any]] = []
     for item in payload:
         if isinstance(item, dict):
             entries.append(item)
-    return entries, None
+    return entries, None, None
 
 
 def _extract_certificates_and_names(
@@ -167,6 +188,9 @@ def _build_raw_output(data: dict[str, Any]) -> str:
     warning = data.get("warning")
     if warning:
         lines.append(f"Warning: {warning}")
+        detail = data.get("warning_detail")
+        if detail:
+            lines.append(f"Technical detail: {detail}")
         lines.append("")
 
     lines.append(f"Subdomains discovered: {len(data.get('subdomains', []))}")
@@ -213,6 +237,7 @@ def run_cert_subdomain_intel(target: str) -> dict[str, Any]:
         "certificates": [],
         "source": SOURCE_NAME,
         "warning": None,
+        "warning_detail": None,
         "wildcard_observed": False,
         "truncated": False,
     }
@@ -229,19 +254,17 @@ def run_cert_subdomain_intel(target: str) -> dict[str, Any]:
             "data": base_data,
         }
 
-    entries, fetch_warning = _fetch_crt_sh_entries(domain)
+    entries, fetch_warning, fetch_warning_detail = _fetch_crt_sh_entries(domain)
     if fetch_warning:
         base_data["warning"] = fetch_warning
+        base_data["warning_detail"] = fetch_warning_detail
         timeout = "timeout" in fetch_warning.lower() or "timed out" in fetch_warning.lower()
         status = STATUS_COMPLETED_WITH_WARNINGS if timeout else STATUS_PARTIAL
         summary = (
             f"Certificate transparency lookup for {domain} did not return names in this run. "
+            f"{fetch_warning} "
+            "No certificate names were returned in this run — this does not prove the domain has no related names."
         )
-        if timeout:
-            summary += f"The {SOURCE_NAME} source timed out. "
-        else:
-            summary += f"{fetch_warning} "
-        summary += "No certificate names were returned in this run — this does not prove the domain has no related names."
         return {
             "module_id": MODULE_ID,
             "success": True,

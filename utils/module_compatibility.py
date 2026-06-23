@@ -118,6 +118,18 @@ def get_module_disable_reason(
         target_type = get_target_type(cleaned)
         if not module_accepts_target(module, target_type):
             return get_incompatible_reason(module, target_type)
+    from utils.settings_manager import module_api_key_status
+
+    if module.requires_api_key:
+        key_status = module_api_key_status(module)
+        if not key_status["configured"]:
+            if module.module_id == "intel_virustotal":
+                return (
+                    "VirusTotal API key is not configured. "
+                    "Add VIRUSTOTAL_API_KEY to your local .env file."
+                )
+            missing = ", ".join(key_status["missing_keys"])
+            return f"Missing required API key(s): {missing}. Add them to your local .env file."
     return None
 
 

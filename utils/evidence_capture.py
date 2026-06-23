@@ -466,6 +466,26 @@ def capture_virustotal_evidence(
     raw_response = parsed_data.get("raw_response")
     api_meta = parsed_data.get("api") or {}
 
+    if parsed_data.get("private_local_ip"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Private/local IP — no VirusTotal lookup",
+                summary="Public reputation lookup is not applicable for private/local addresses.",
+                content_text="Private/local IP address — public reputation lookup is not applicable.",
+                content_type="text/plain",
+                evidence_type=EVIDENCE_SYSTEM_GENERATED,
+                source_name="VirusTotal",
+                collection_method="policy_skip",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+        return items
+
     if raw_response:
         items.append(
             _create_item(
@@ -475,19 +495,19 @@ def capture_virustotal_evidence(
                 observation_id=observation_id,
                 module_id=module_id,
                 title="VirusTotal API response",
-                summary="Third-party threat intelligence response from VirusTotal API v3.",
+                summary="Third-party reputation response from VirusTotal API v3 (redacted summary).",
                 content_text=_text_summary(raw_response),
                 content_type="application/json",
                 evidence_type=EVIDENCE_THIRD_PARTY_SOURCE,
-                source_name="virustotal",
+                source_name="VirusTotal",
                 source_url="https://www.virustotal.com/",
-                collection_method="api_lookup",
+                collection_method="api_reputation_lookup",
                 reliability=RELIABILITY_MEDIUM,
             )
         )
 
     stats = parsed_data.get("last_analysis_stats") or {}
-    if stats:
+    if stats or parsed_data.get("reputation") is not None:
         items.append(
             _create_item(
                 conn,
@@ -495,29 +515,33 @@ def capture_virustotal_evidence(
                 entity_id=entity_id,
                 observation_id=observation_id,
                 module_id=module_id,
-                title="VirusTotal analysis summary",
-                summary="Parsed detection counts and metadata from the VirusTotal lookup.",
+                title="VirusTotal reputation summary",
+                summary="Parsed security vendor analysis counts and reputation metadata.",
                 content_text=_text_summary(
                     {
                         "target": parsed_data.get("target"),
                         "target_type": parsed_data.get("target_type"),
                         "resource_id": parsed_data.get("resource_id"),
                         "last_analysis_stats": stats,
-                        "last_analysis_date": parsed_data.get("last_analysis_date"),
+                        "last_analysis_date_label": parsed_data.get("last_analysis_date_label"),
                         "reputation": parsed_data.get("reputation"),
-                        "api": api_meta,
+                        "flagged_vendor_count": parsed_data.get("flagged_vendor_count"),
+                        "country": parsed_data.get("country"),
+                        "asn": parsed_data.get("asn"),
+                        "as_owner": parsed_data.get("as_owner"),
+                        "registrar": parsed_data.get("registrar"),
                     }
                 ),
                 content_type="application/json",
                 evidence_type=EVIDENCE_THIRD_PARTY_SOURCE,
-                source_name="virustotal",
+                source_name="VirusTotal",
                 source_url="https://www.virustotal.com/",
-                collection_method="parser_inferred",
+                collection_method="api_reputation_lookup",
                 reliability=RELIABILITY_MEDIUM,
             )
         )
 
-    if api_meta.get("error"):
+    if api_meta.get("error") or api_meta.get("status_code") == 429:
         items.append(
             _create_item(
                 conn,
@@ -526,13 +550,13 @@ def capture_virustotal_evidence(
                 observation_id=observation_id,
                 module_id=module_id,
                 title="VirusTotal lookup limitation",
-                summary="VirusTotal source was unavailable or returned an error during this run.",
+                summary="VirusTotal source was unavailable, rate limited, or returned an error during this run.",
                 content_text=_text_summary(api_meta),
                 content_type="application/json",
                 evidence_type=EVIDENCE_UNAVAILABLE_SOURCE,
-                source_name="virustotal",
+                source_name="VirusTotal",
                 source_url="https://www.virustotal.com/",
-                collection_method="api_lookup",
+                collection_method="api_reputation_lookup",
                 reliability=RELIABILITY_UNKNOWN,
             )
         )

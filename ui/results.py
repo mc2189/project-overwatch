@@ -145,6 +145,59 @@ def render_result_summary_tab(result: dict) -> None:
         if parsed_data.get("warning"):
             st.warning(parsed_data["warning"])
 
+    if result["module_id"] == "intel_virustotal" and parsed_data:
+        st.caption(
+            "Results reported by VirusTotal — third-party reputation signals only, not confirmed fact."
+        )
+        st.markdown(f"**Target:** {parsed_data.get('target') or '—'}")
+        st.markdown(f"**Target type:** {parsed_data.get('target_type') or '—'}")
+        if parsed_data.get("private_local_ip"):
+            st.info("Private/local IP — public VirusTotal reputation lookup is not applicable.")
+        else:
+            stats = parsed_data.get("last_analysis_stats") or {}
+            if stats:
+                st.markdown("**Security vendor analysis**")
+                st.write(
+                    f"Malicious: {stats.get('malicious', 0)} · "
+                    f"Suspicious: {stats.get('suspicious', 0)} · "
+                    f"Harmless: {stats.get('harmless', 0)} · "
+                    f"Undetected: {stats.get('undetected', 0)} · "
+                    f"Timeout: {stats.get('timeout', 0)}"
+                )
+            if parsed_data.get("reputation") is not None:
+                st.markdown(f"**Reputation score:** {parsed_data['reputation']}")
+            if parsed_data.get("last_analysis_date_label"):
+                st.markdown(f"**Last analysis:** {parsed_data['last_analysis_date_label']}")
+            if parsed_data.get("country"):
+                st.markdown(f"**Country:** {parsed_data['country']}")
+            if parsed_data.get("as_owner"):
+                st.markdown(f"**AS owner:** {parsed_data['as_owner']}")
+            if parsed_data.get("registrar"):
+                st.markdown(f"**Registrar:** {parsed_data['registrar']}")
+            tags = parsed_data.get("tags") or []
+            if tags:
+                st.markdown(f"**Tags:** {', '.join(str(tag) for tag in tags[:8])}")
+            flagged_engines = parsed_data.get("engine_results_flagged") or []
+            all_engines = parsed_data.get("engine_results") or []
+            if flagged_engines:
+                with st.expander(
+                    f"Flagged security vendors ({len(flagged_engines)})",
+                    expanded=True,
+                ):
+                    st.dataframe(
+                        pd.DataFrame(flagged_engines),
+                        width="stretch",
+                        hide_index=True,
+                    )
+            if all_engines and len(all_engines) > len(flagged_engines):
+                with st.expander(f"All vendor results ({len(all_engines)})", expanded=False):
+                    st.dataframe(pd.DataFrame(all_engines), width="stretch", hide_index=True)
+        api = parsed_data.get("api") or {}
+        if api.get("status_code") == 429:
+            st.warning("VirusTotal rate limit reached — retry later.")
+        if api.get("error") and not parsed_data.get("private_local_ip"):
+            st.caption(f"VirusTotal note: {api['error']}")
+
     if result["module_id"] == "infra_website_metadata" and parsed_data:
         homepage = parsed_data.get("homepage") or {}
         if homepage.get("page_title"):
@@ -204,6 +257,20 @@ def render_result_module_output_tab(result: dict) -> None:
         st.caption("No additional module notes.")
 
     parsed_data = result.get("parsed_data") or {}
+    if result["module_id"] == "intel_virustotal" and parsed_data:
+        flagged = parsed_data.get("engine_results_flagged") or []
+        if flagged:
+            st.markdown("**Flagged vendor results**")
+            st.dataframe(pd.DataFrame(flagged), width="stretch", hide_index=True)
+        elif parsed_data.get("engine_results"):
+            st.caption("No malicious or suspicious vendor flags in the last analysis.")
+        raw_response = parsed_data.get("raw_response")
+        if raw_response:
+            from utils.security import redact_secrets_from_dict
+
+            with st.expander("Raw VirusTotal API response", expanded=False):
+                st.json(redact_secrets_from_dict(raw_response))
+
     if result["module_id"] == "infra_cert_subdomain":
         subdomains = parsed_data.get("subdomains") or []
         if subdomains:
@@ -316,9 +383,12 @@ def render_result_raw_tab(result: dict) -> None:
 
 
 def render_result_structured_tab(result: dict) -> None:
+    parsed_data = result.get("parsed_data")
+    if result["module_id"] == "intel_virustotal" and isinstance(parsed_data, dict):
+        parsed_data = {key: value for key, value in parsed_data.items() if key != "raw_response"}
     payload = {
         "selected_options": result.get("selected_options"),
-        "parsed_data": result.get("parsed_data"),
+        "parsed_data": parsed_data,
         "warnings": result.get("warnings"),
         "errors": result.get("errors"),
     }

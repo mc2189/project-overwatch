@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 
-# TODO(v2.2+): optional local evidence/database encryption using a user-supplied key
-# from environment — not enabled in v2.1. Hashing provides integrity, not confidentiality.
+# Optional local encryption uses a user-supplied key from environment only.
+# Hashing provides integrity, not confidentiality. Full database encryption is future work.
+LOCAL_ENCRYPTION_ENV = "PROJECT_OVERWATCH_LOCAL_ENCRYPTION_KEY"
 
 
 def calculate_sha256(data: bytes | str | None) -> str | None:
@@ -60,3 +62,42 @@ def decrypt_text(token: bytes, key: bytes) -> str | None:
         return Fernet(key).decrypt(token).decode("utf-8")
     except Exception:
         return None
+
+
+def cryptography_installed() -> bool:
+    """Return True when the optional cryptography package is available."""
+    try:
+        import cryptography  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+def load_local_encryption_key() -> bytes | None:
+    """
+    Load a Fernet-compatible key from PROJECT_OVERWATCH_LOCAL_ENCRYPTION_KEY.
+
+    Never log or persist the returned value. Not used for database encryption yet.
+    """
+    raw = os.environ.get(LOCAL_ENCRYPTION_ENV)
+    if not raw or not str(raw).strip():
+        try:
+            from utils.settings_manager import get_env
+
+            raw = get_env(LOCAL_ENCRYPTION_ENV)
+        except Exception:
+            raw = None
+    if not raw or not str(raw).strip():
+        return None
+    return str(raw).strip().encode("utf-8")
+
+
+def local_encryption_configured() -> bool:
+    """Return True when a local encryption key is set in the environment."""
+    return load_local_encryption_key() is not None
+
+
+def encryption_available() -> bool:
+    """Return True when cryptography is installed and a local encryption key is configured."""
+    return cryptography_installed() and local_encryption_configured()

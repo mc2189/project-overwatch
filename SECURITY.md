@@ -38,7 +38,8 @@ Project Overwatch is a **local-only** defensive intelligence dashboard. This doc
 
 - Evidence items store **SHA-256 content hashes** for integrity verification.
 - Hashing proves content has not changed; it does **not** provide confidentiality.
-- Full database or evidence encryption is a **future item** (see `utils/crypto_utils.py` TODO).
+- Full database or evidence encryption is a **future item**.
+- Optional scaffold: set `PROJECT_OVERWATCH_LOCAL_ENCRYPTION_KEY` and install `cryptography` for Fernet helpers in `utils/crypto_utils.py` (not applied to the database yet).
 - Do not treat hashes as encryption.
 
 ## Redaction behaviour

@@ -24,8 +24,10 @@ from utils.nmap_options import SCRIPT_VULN, build_nmap_flags, normalize_options
 from utils.nmap_parser import build_service_entity_label, build_service_entity_value
 from utils.nmap_xml_parser import parse_nmap_results
 from utils.result_status import (
+    STATUS_BLOCKED,
     STATUS_COMPLETED,
     STATUS_COMPLETED_WITH_WARNINGS,
+    STATUS_ERROR,
     should_persist_observation,
 )
 from utils.evidence_model import observation_evidence_for_module
@@ -38,7 +40,7 @@ DOMAIN_INTEL_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infr
 CERT_SUBDOMAIN_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_cert_subdomain.py"
 WEBSITE_METADATA_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_website_metadata.py"
 WHOIS_RDAP_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_whois_rdap.py"
-VIRUSTOTAL_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intel" / "intel_virustotal.py"
+VIRUSTOTAL_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_virustotal.py"
 
 _nmap_handlers: tuple[Any, Any] | None = None
 _nmap_load_error: str | None = None
@@ -1138,6 +1140,93 @@ def _persist_virustotal_records(
             interpreter_findings=interpreter_findings,
         )
 
+    _persist_virustotal_entities(
+        conn,
+        case_id=case_id,
+        source_entity_id=entity_id,
+        module_id=module_id,
+        parsed_data=parsed_data,
+    )
+
+
+def _persist_virustotal_entities(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    source_entity_id: int,
+    module_id: str,
+    parsed_data: dict[str, Any],
+) -> None:
+    """Create organisation/ASN entities and relationships from VirusTotal metadata."""
+    if parsed_data.get("private_local_ip"):
+        return
+
+    target_type = parsed_data.get("target_type")
+    if target_type == "ipv4":
+        org_value = parsed_data.get("as_owner") or parsed_data.get("network")
+        if org_value:
+            org_entity = create_or_get_entity(
+                case_id,
+                "organization",
+                str(org_value),
+                label=str(org_value),
+                source=module_id,
+                confidence=70,
+                conn=conn,
+            )
+            create_relationship(
+                case_id,
+                source_entity_id,
+                "associated_with",
+                org_entity["id"],
+                source_module=module_id,
+                confidence=70,
+                conn=conn,
+            )
+        asn = parsed_data.get("asn")
+        if asn not in (None, ""):
+            asn_label = f"AS{asn}"
+            asn_entity = create_or_get_entity(
+                case_id,
+                "asn",
+                asn_label,
+                label=asn_label,
+                source=module_id,
+                confidence=70,
+                conn=conn,
+            )
+            create_relationship(
+                case_id,
+                source_entity_id,
+                "associated_with",
+                asn_entity["id"],
+                source_module=module_id,
+                confidence=70,
+                conn=conn,
+            )
+
+    if target_type in {"domain", "url"}:
+        registrar = parsed_data.get("registrar")
+        if registrar:
+            registrar_entity = create_or_get_entity(
+                case_id,
+                "organization",
+                str(registrar),
+                label=str(registrar),
+                source=module_id,
+                confidence=70,
+                conn=conn,
+            )
+            create_relationship(
+                case_id,
+                source_entity_id,
+                "associated_with",
+                registrar_entity["id"],
+                source_module=module_id,
+                confidence=70,
+                conn=conn,
+            )
+
 
 def _scan_output_text(scan_data: dict[str, Any]) -> str:
     parts = [
@@ -1680,25 +1769,45 @@ def _execute_virustotal(
         target_type=target_type,
         options=options,
     )
-    if not intel_data.get("success") and intel_data.get("errors"):
-        errors = intel_data.get("errors") or ["VirusTotal lookup failed."]
-        return make_result(
-            module_id,
-            success=False,
-            status="error",
-            summary=errors[0],
-            raw_output=intel_data.get("raw_output", ""),
-            errors=errors,
-            parsed_data=intel_data.get("parsed_data"),
-            warnings=intel_data.get("warnings", []),
-            evidence=intel_data.get("evidence", []),
-        )
-
+    status = intel_data.get("status") or STATUS_ERROR
     parsed_data = intel_data.get("parsed_data") or {}
     lookup_target = parsed_data.get("target") or target
     interpreter_findings = interpret_module_findings(module_id, parsed_data)
-    summary = f"VirusTotal lookup completed for {lookup_target}."
     warnings = list(intel_data.get("warnings") or [])
+    errors = list(intel_data.get("errors") or [])
+
+    if not intel_data.get("success"):
+        summary = errors[0] if errors else "VirusTotal lookup failed."
+        result = make_result(
+            module_id,
+            success=False,
+            status=status,
+            summary=summary,
+            raw_output=intel_data.get("raw_output", ""),
+            errors=errors,
+            parsed_data=parsed_data,
+            warnings=warnings,
+            evidence=intel_data.get("evidence", []),
+            interpreter_findings=interpreter_findings,
+        )
+        if db_context is not None and case_id is not None:
+            create_operation_log(
+                case_id,
+                module_id,
+                lookup_target,
+                result["status"],
+                authorisation_confirmed=authorisation_confirmed,
+                summary=summary,
+                run_mode_id=run_mode_id,
+                run_mode_label=run_mode_label,
+                conn=db_context,
+            )
+        return result
+
+    if parsed_data.get("private_local_ip"):
+        summary = "Private/local IP address — public reputation lookup is not applicable."
+    else:
+        summary = f"VirusTotal reputation lookup completed for {lookup_target}."
     status = intel_data.get("status") or STATUS_COMPLETED
     result = make_result(
         module_id,

@@ -26,5 +26,8 @@ jobs:
       - name: Run smoke check
         run: python scripts/smoke_check.py
 
+      - name: Run security audit
+        run: python scripts/security_audit.py
+
       - name: Run module SDK unit tests
         run: python -m unittest tests.test_module_sdk -v

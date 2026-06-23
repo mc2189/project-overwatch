@@ -2,6 +2,39 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.2.0 — VirusTotal Reputation Intelligence, platform scaffold and passive-source polish
+
+### VirusTotal Reputation Intelligence
+
+- **`intel_virustotal`** — passive reputation enrichment for domains, URLs, and public IPv4 via VirusTotal API v3
+- Module path: `modules/4_threat_intelligence/intel_virustotal.py`
+- Requires `VIRUSTOTAL_API_KEY` in local `.env` — blocked cleanly when missing (not a target risk finding)
+- Run Operation Step 3 configuration text explains passive use, key masking, and cautious interpretation
+- Private/local IPv4 addresses complete with informational result — no API query
+- HTTP handling for 200/400/404/401/403/429/5xx, timeouts, and connection errors
+- Cautious findings interpreter — “reported by VirusTotal”, not “confirmed”
+- Entities/relationships for ASN/organisation (IP) and registrar (domain/URL)
+- Evidence capture with `api_reputation_lookup` collection method; API keys redacted
+- Run mode recommendations include VirusTotal when API key is configured
+- Settings, Batch Queue, Entity Workspace, Evidence Locker, and reports integration
+- UI summary tab for vendor analysis counts, reputation, and warnings; raw API JSON in collapsed expander
+
+### Platform scaffold and CI
+
+- **`utils/api_module_helpers.py`** — shared timeout, User-Agent, HTTP status classification, missing-key blocked results, redaction
+- **`modules/TEMPLATE_api_module.py`** — copy-paste skeleton for upcoming API-backed modules (AbuseIPDB, GreyNoise, etc.)
+- **RDAP cache management** — Backup page lists/clears per-case cache; export/import includes `rdap_lookup_cache`
+- **Optional cache TTL** — `PROJECT_OVERWATCH_RDAP_CACHE_TTL_HOURS` (0 = no expiry)
+- **Encryption scaffold** — `PROJECT_OVERWATCH_LOCAL_ENCRYPTION_KEY` + `encryption_available()` helpers (DB encryption not enabled)
+- **CI** — `scripts/security_audit.py` runs in GitHub Actions workflow
+- Security posture panel shows encryption library/key scaffold status
+
+### Passive-source result wording (v2.2 polish)
+
+- **Wayback** — user-friendly unavailable messages without raw archive.org URLs in summary/findings; technical detail in Raw/Structured output only
+- **crt.sh** — softer wording when no certificate transparency rows are returned (including HTTP 404); technical HTTP detail in raw/structured output
+- **`utils/display_format.py`** — shared `format_wayback_user_error()` and `format_crt_sh_user_warning()` helpers
+
 ## v2.1.0 — Secure-by-design baseline
 
 - **`utils/security.py`** — secret masking, redaction, env parsing, target validation, private IP checks
