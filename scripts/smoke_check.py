@@ -909,6 +909,7 @@ def _check_target_compatibility() -> None:
     if (
         "infra_nmap" not in module_ids
         or "infra_tls_review" not in module_ids
+        or "infra_http_security" not in module_ids
         or "infra_domain_intel" not in module_ids
         or "infra_cert_subdomain" not in module_ids
         or "infra_website_metadata" not in module_ids
@@ -1340,6 +1341,155 @@ def _check_tls_review_module() -> None:
     source = module_path.read_text(encoding="utf-8")
     if "subprocess" in source or "shell=True" in source:
         raise AssertionError("infra_tls_review must not use subprocess/shell=True")
+
+
+def _check_http_security_module() -> None:
+    import importlib.util
+
+    registry = __import__("modules.module_registry", fromlist=["get_module"])
+    module = registry.get_module("infra_http_security")
+    if module is None or not module.implemented:
+        raise AssertionError("infra_http_security registry entry missing or not implemented")
+    if not module.requires_authorisation:
+        raise AssertionError("infra_http_security must require authorisation")
+    if module.requires_api_key:
+        raise AssertionError("infra_http_security should not require API key")
+    if module.accepted_target_types != ("domain", "url", "ipv4"):
+        raise AssertionError("infra_http_security accepted_target_types mismatch")
+    for field in ("short_help", "detailed_help", "caution_notes", "config_notes"):
+        if not getattr(module, field, None):
+            raise AssertionError(f"infra_http_security missing registry metadata: {field}")
+
+    module_path = Path(PROJECT_ROOT) / "modules" / "2_infrastructure" / "infra_http_security.py"
+    spec = importlib.util.spec_from_file_location("infra_http_security", module_path)
+    if spec is None or spec.loader is None:
+        raise AssertionError("could not load infra_http_security module spec")
+    http_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(http_mod)
+
+    parsed = http_mod.parse_http_target("https://example.com/login")
+    if parsed.get("host") != "example.com" or parsed.get("requested_url") != "https://example.com/login":
+        raise AssertionError("HTTP target URL parser failed")
+    domain_parsed = http_mod.parse_http_target("example.com")
+    if domain_parsed.get("requested_url") != "https://example.com/":
+        raise AssertionError("HTTP target domain parser failed")
+
+    cookie = http_mod.parse_set_cookie_header("sessionid=supersecret; Secure; HttpOnly; SameSite=Lax")
+    if "supersecret" in str(cookie.values()):
+        raise AssertionError("cookie parser must not store cookie values")
+    if cookie.get("name") != "sessionid" or not cookie.get("secure") or not cookie.get("httponly"):
+        raise AssertionError("cookie flag parser failed")
+
+    mock_data = {
+        "target": "example.com",
+        "host": "example.com",
+        "scheme": "https",
+        "port": 443,
+        "requested_url": "https://example.com/",
+        "target_type": "domain",
+        "response": {
+            "success": True,
+            "status_code": 200,
+            "final_url": "https://example.com/",
+            "redirect_chain": [{"url": "https://example.com/", "status_code": 200}],
+            "content_type": "text/html",
+            "content_length": 1234,
+            "error": None,
+        },
+        "headers": {
+            "server": "nginx",
+            "x_powered_by": None,
+            "cache_control": "no-store",
+            "raw": {"server": "nginx", "set-cookie": "[redacted]"},
+        },
+        "security_headers": {
+            "hsts": {"present": True, "value": "max-age=31536000"},
+            "csp": {"present": False, "value": None},
+            "x_frame_options": {"present": True, "value": "DENY"},
+            "x_content_type_options": {"present": True, "value": "nosniff"},
+            "referrer_policy": {"present": False, "value": None},
+            "permissions_policy": {"present": False, "value": None},
+            "coop": {"present": False, "value": None},
+            "coep": {"present": False, "value": None},
+            "corp": {"present": False, "value": None},
+            "x_xss_protection": {"present": False, "value": None},
+        },
+        "cookies": [
+            {
+                "name": "sessionid",
+                "secure": False,
+                "httponly": False,
+                "samesite": None,
+                "session_like": True,
+            }
+        ],
+        "well_known": {
+            "security_txt": {"observed": False, "status_code": 404, "url": None, "attempts": []},
+            "robots_txt": {"observed": True, "status_code": 200, "url": "https://example.com/robots.txt"},
+        },
+    }
+    result = http_mod.run_http_security_review("example.com", options={"mock_data": mock_data})
+    if not result.get("success") or result.get("module_id") != "infra_http_security":
+        raise AssertionError("mock HTTP security review should succeed")
+    for field in ("findings", "warnings", "errors", "data"):
+        if field not in result:
+            raise AssertionError(f"HTTP security result missing field: {field}")
+    if "supersecret" in result.get("raw_output", ""):
+        raise AssertionError("raw output must not contain cookie values")
+
+    blocked_target = http_mod.run_http_security_review("not a valid domain !!!")
+    if blocked_target.get("success"):
+        raise AssertionError("invalid HTTP target should be blocked")
+
+    interpreter = __import__(
+        "utils.http_security_interpreter",
+        fromlist=["interpret_http_security_results"],
+    )
+    findings = interpreter.interpret_http_security_results(mock_data)
+    if not findings:
+        raise AssertionError("HTTP security interpreter should return findings")
+
+    registry_pipeline = __import__(
+        "utils.findings_registry",
+        fromlist=["module_has_findings_pipeline", "interpret_module_findings"],
+    )
+    if not registry_pipeline.module_has_findings_pipeline("infra_http_security"):
+        raise AssertionError("findings pipeline not registered for infra_http_security")
+
+    executor = __import__("modules.executor", fromlist=["is_runtime_ready", "execute_module"])
+    if not executor.is_runtime_ready("infra_http_security"):
+        raise AssertionError("executor cannot load infra_http_security backend")
+
+    guardrail_blocked = executor.execute_module(
+        "infra_http_security",
+        "https://example.com",
+        authorisation_confirmed=False,
+        options={"mock_data": mock_data},
+    )
+    if guardrail_blocked.get("status") != "blocked":
+        raise AssertionError("HTTP security review should be blocked without engagement/authorisation")
+
+    evidence = __import__(
+        "utils.evidence_model",
+        fromlist=["default_evidence_for_module", "default_relationship_evidence"],
+    )
+    defaults = evidence.default_evidence_for_module("infra_http_security")
+    if defaults.get("collection_method") != "controlled_http_header_review":
+        raise AssertionError("HTTP security evidence defaults unexpected")
+    rel = evidence.default_relationship_evidence("infra_http_security", "exposes_web_service")
+    if rel.get("reliability") != "high":
+        raise AssertionError("HTTP exposes_web_service relationship evidence unexpected")
+
+    testing_levels = __import__(
+        "utils.module_testing_levels",
+        fromlist=["get_module_testing_level"],
+    )
+    if testing_levels.get_module_testing_level("infra_http_security") != "safe_active_check":
+        raise AssertionError("infra_http_security testing level should be safe_active_check")
+
+    source = module_path.read_text(encoding="utf-8")
+    if "subprocess" in source or "shell=True" in source:
+        raise AssertionError("infra_http_security must not use subprocess/shell=True")
 
 
 def _check_evidence_model() -> None:
@@ -1860,6 +2010,7 @@ def _check_module_sdk() -> None:
     for module_id in (
         "infra_nmap",
         "infra_tls_review",
+        "infra_http_security",
         "infra_domain_intel",
         "infra_cert_subdomain",
         "infra_website_metadata",
@@ -2742,6 +2893,11 @@ def main() -> int:
     run(
         "tls review module",
         lambda: _check_tls_review_module(),
+    )
+
+    run(
+        "http security module",
+        lambda: _check_http_security_module(),
     )
 
     run(

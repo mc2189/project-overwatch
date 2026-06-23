@@ -22,7 +22,7 @@ Project Overwatch is a **local-only** defensive intelligence dashboard. This doc
 ## Active module authorisation
 
 - **Passive** modules perform read-only public lookups and do not require authorisation.
-- **Active** modules (e.g. Nmap, SSL / TLS Configuration Review) require:
+- **Active** modules (e.g. Nmap, SSL / TLS Configuration Review, HTTP Security Header Review) require:
   - global enablement (`PROJECT_OVERWATCH_ENABLE_ACTIVE_MODULES=true`), and
   - per-run authorisation confirmation in the UI.
 - Disabled/quarantined modules are not importable for execution through the registry and executor.
@@ -83,6 +83,15 @@ The **Domain Email Security Posture** module (`infra_email_security`) is **passi
 - Results are point-in-time observations — not proof of ongoing posture
 - No API keys or secrets are used by this module
 
+## HTTP Security Header Review (v2.10)
+
+- **Module ID:** `infra_http_security` — controlled active assessment (`safe_active_check`)
+- Allowed: single-target GET/HEAD HTTP(S) request, security header review, cookie flag metadata (no values), optional `security.txt` and `robots.txt` at standard paths
+- **Not allowed:** form submission, login interaction, crawling beyond supplied URL and exact well-known paths, full body storage, cookie value persistence
+- Requires authorisation and engagement/scope/ROE guardrails before connecting
+- Uses `requests` with short timeout and redirect limit — no subprocess, no `shell=True`
+- Cookie and token values are redacted and not stored in observations, evidence, or reports
+
 ## Authorised assessment model (v2.8)
 
 Project Overwatch is designed for **authorised client assessments**, not unconstrained scanning.
@@ -95,7 +104,7 @@ Project Overwatch is designed for **authorised client assessments**, not unconst
 - **Active/intrusive modules** require: authorisation confirmation, in-scope target (or standalone authorised testing), active engagement status, ROE permission, and no emergency stop
 - **Prohibited by default:** unauthorised testing, DoS, credential attacks, social engineering automation, malware deployment, evasion/persistence, destructive testing, exfiltration
 
-v2.9 enables **SSL / TLS Configuration Review** as the first controlled active assessment module under this framework. Intrusive modules (e.g. Nuclei, ffuf) remain planned and disabled.
+v2.9 enables **SSL / TLS Configuration Review** and v2.10 enables **HTTP Security Header Review** as controlled active assessment modules under this framework. Intrusive modules (e.g. Nuclei, ffuf) remain planned and disabled.
 
 ## Security audit
 

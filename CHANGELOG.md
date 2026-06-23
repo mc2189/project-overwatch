@@ -2,6 +2,19 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.10.0 — HTTP Security Header Review
+
+- **`infra_http_security`** — controlled active HTTP response and security header review for domain, URL, or IPv4 targets
+- Module path: `modules/2_infrastructure/infra_http_security.py`
+- GET/HEAD requests with short timeout and limited redirects — no API key required
+- Reviews security headers, cookie flags (names only), server banners, and optional security.txt / robots.txt
+- Does not submit forms, interact with login flows, crawl beyond standard well-known paths, or store full page bodies
+- Requires authorisation; respects engagement scope, ROE, and emergency stop before connecting
+- Web service entities with `exposes_web_service` relationships
+- Evidence capture with `controlled_http_header_review` collection method
+- Available in Custom Module Selection and Website / Domain Footprint (not selected by default)
+- Batch Queue treats HTTP Security Header Review as an active module (not queued by default)
+
 ## v2.9.0 — SSL / TLS Configuration Review
 
 - **`infra_tls_review`** — controlled active TLS certificate and configuration review for domain, URL, or IPv4 targets

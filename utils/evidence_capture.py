@@ -452,6 +452,117 @@ def capture_website_metadata_evidence(
     return items
 
 
+def capture_http_security_evidence(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    observation_id: int,
+    module_id: str,
+    result: dict[str, Any],
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    parsed_data = result.get("parsed_data") or {}
+    response = parsed_data.get("response") or {}
+    headers = parsed_data.get("headers") or {}
+    security = parsed_data.get("security_headers") or {}
+    cookies = parsed_data.get("cookies") or []
+    well_known = parsed_data.get("well_known") or {}
+
+    items.append(
+        _create_item(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            title="HTTP response summary",
+            summary="Controlled HTTP security header review response summary.",
+            content_text=_text_summary(
+                {
+                    "requested_url": parsed_data.get("requested_url"),
+                    "final_url": response.get("final_url"),
+                    "status_code": response.get("status_code"),
+                    "redirect_chain": response.get("redirect_chain"),
+                    "content_type": response.get("content_type"),
+                    "content_length": response.get("content_length"),
+                    "error": response.get("error"),
+                }
+            ),
+            content_type="application/json",
+            evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+            source_name="http_response",
+            collection_method="controlled_http_header_review",
+            reliability=RELIABILITY_HIGH if response.get("success") else RELIABILITY_MEDIUM,
+        )
+    )
+
+    items.append(
+        _create_item(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            title="Security header summary",
+            summary="Security header presence summary from authorised HTTP review.",
+            content_text=_text_summary(
+                {
+                    "security_headers": security,
+                    "server": headers.get("server"),
+                    "x_powered_by": headers.get("x_powered_by"),
+                    "cache_control": headers.get("cache_control"),
+                }
+            ),
+            content_type="application/json",
+            evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+            source_name="http_response",
+            collection_method="controlled_http_header_review",
+            reliability=RELIABILITY_HIGH if response.get("success") else RELIABILITY_MEDIUM,
+        )
+    )
+
+    if cookies:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Cookie flag summary",
+                summary="Observed cookie names and flags only — values not stored.",
+                content_text=_text_summary({"cookies": cookies}),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="http_response",
+                collection_method="controlled_http_header_review",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    if well_known:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Well-known file check summary",
+                summary="security.txt and robots.txt check summary.",
+                content_text=_text_summary(well_known),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="http_response",
+                collection_method="controlled_http_header_review",
+                reliability=RELIABILITY_MEDIUM,
+            )
+        )
+
+    return items
+
+
 def capture_tls_review_evidence(
     conn: sqlite3.Connection,
     *,
@@ -1597,6 +1708,15 @@ def capture_module_evidence(
         )
     if module_id == "infra_tls_review":
         return capture_tls_review_evidence(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            result=result,
+        )
+    if module_id == "infra_http_security":
+        return capture_http_security_evidence(
             conn,
             case_id=case_id,
             entity_id=entity_id,

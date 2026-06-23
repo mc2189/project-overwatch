@@ -41,6 +41,7 @@ CERT_SUBDOMAIN_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "in
 WEBSITE_METADATA_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_website_metadata.py"
 EMAIL_SECURITY_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_email_security.py"
 TLS_REVIEW_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_tls_review.py"
+HTTP_SECURITY_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_http_security.py"
 WHOIS_RDAP_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_whois_rdap.py"
 VIRUSTOTAL_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_virustotal.py"
 ABUSEIPDB_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_abuseipdb.py"
@@ -66,6 +67,9 @@ _email_security_load_attempted = False
 _tls_review_handler: Any | None = None
 _tls_review_load_error: str | None = None
 _tls_review_load_attempted = False
+_http_security_handler: Any | None = None
+_http_security_load_error: str | None = None
+_http_security_load_attempted = False
 _whois_rdap_handler: Any | None = None
 _whois_rdap_load_error: str | None = None
 _whois_rdap_load_attempted = False
@@ -298,6 +302,29 @@ def _load_tls_review_handler() -> None:
         _tls_review_load_error = str(exc)
 
 
+def _load_http_security_handler() -> None:
+    global _http_security_handler, _http_security_load_error, _http_security_load_attempted
+
+    if _http_security_load_attempted:
+        return
+
+    _http_security_load_attempted = True
+
+    if not HTTP_SECURITY_MODULE_PATH.is_file():
+        _http_security_load_error = f"Module file not found: {HTTP_SECURITY_MODULE_PATH}"
+        return
+
+    try:
+        spec = importlib.util.spec_from_file_location("infra_http_security", HTTP_SECURITY_MODULE_PATH)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load module spec from {HTTP_SECURITY_MODULE_PATH}")
+        infra_http_security = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(infra_http_security)
+        _http_security_handler = infra_http_security.run_http_security_review
+    except Exception as exc:
+        _http_security_load_error = str(exc)
+
+
 def _load_whois_rdap_handler() -> None:
     global _whois_rdap_handler, _whois_rdap_load_error, _whois_rdap_load_attempted
 
@@ -460,6 +487,9 @@ def is_runtime_ready(module_id: str) -> bool:
     if module_id == "infra_tls_review":
         _load_tls_review_handler()
         return _tls_review_handler is not None
+    if module_id == "infra_http_security":
+        _load_http_security_handler()
+        return _http_security_handler is not None
     if module_id == "infra_whois_rdap":
         _load_whois_rdap_handler()
         return _whois_rdap_handler is not None
@@ -506,6 +536,9 @@ def get_runtime_error(module_id: str) -> str | None:
     if module_id == "infra_tls_review":
         _load_tls_review_handler()
         return _tls_review_load_error
+    if module_id == "infra_http_security":
+        _load_http_security_handler()
+        return _http_security_load_error
     if module_id == "infra_whois_rdap":
         _load_whois_rdap_handler()
         return _whois_rdap_load_error
@@ -1330,6 +1363,128 @@ def _persist_tls_review_records(
                         "fingerprint_sha256",
                     )
                 },
+            }
+        ),
+        raw_output=result["raw_output"],
+        **_observation_evidence_kwargs(module_id, result),
+        conn=conn,
+    )
+
+    _persist_observation_evidence(
+        conn,
+        case_id=case_id,
+        entity_id=host_entity_id,
+        observation_id=observation["id"],
+        module_id=module_id,
+        result=result,
+    )
+
+    interpreter_findings = result.get("interpreter_findings") or []
+    if interpreter_findings:
+        _persist_module_findings(
+            conn,
+            case_id=case_id,
+            entity_id=host_entity_id,
+            observation_id=observation["id"],
+            module_id=module_id,
+            interpreter_findings=interpreter_findings,
+        )
+
+
+def _persist_http_security_records(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    host_entity_id: int,
+    module_id: str,
+    target: str,
+    result: dict[str, Any],
+    authorisation_confirmed: bool,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> None:
+    """Save HTTP security review operations, observations, entities, and relationships."""
+    result = _prepare_module_result(result)
+    create_operation_log(
+        case_id,
+        module_id,
+        target,
+        result["status"],
+        authorisation_confirmed=authorisation_confirmed,
+        summary=result["summary"],
+        run_mode_id=run_mode_id,
+        run_mode_label=run_mode_label,
+        conn=conn,
+    )
+
+    if not should_persist_observation(result["status"]):
+        return
+
+    parsed_data = result.get("parsed_data") or {}
+    host = parsed_data.get("host") or target
+    scheme = (parsed_data.get("scheme") or "https").lower()
+    port = int(parsed_data.get("port") or (443 if scheme == "https" else 80))
+    response = parsed_data.get("response") or {}
+
+    if response.get("success"):
+        service_value = f"{host}:{port}/{scheme}"
+        service_label = f"{port}/{scheme} web"
+        service_entity = create_or_get_entity(
+            case_id,
+            "service",
+            service_value,
+            label=service_label,
+            source=module_id,
+            confidence=85,
+            conn=conn,
+        )
+        create_relationship(
+            case_id,
+            host_entity_id,
+            "exposes_web_service",
+            service_entity["id"],
+            source_module=module_id,
+            confidence=85,
+            conn=conn,
+        )
+
+    observation = create_observation(
+        case_id,
+        host_entity_id,
+        module_id,
+        "http_security_header_review",
+        "HTTP security header review result",
+        summary=result["summary"],
+        data_json=json.dumps(
+            {
+                "module_id": module_id,
+                "success": result["success"],
+                "status": result["status"],
+                "findings": result.get("findings", []),
+                "interpreter_findings": result.get("interpreter_findings", []),
+                "warnings": result.get("warnings", []),
+                "target": parsed_data.get("target"),
+                "host": host,
+                "scheme": scheme,
+                "port": port,
+                "requested_url": parsed_data.get("requested_url"),
+                "response": {
+                    "success": response.get("success"),
+                    "status_code": response.get("status_code"),
+                    "final_url": response.get("final_url"),
+                    "redirect_chain": response.get("redirect_chain"),
+                    "content_type": response.get("content_type"),
+                    "content_length": response.get("content_length"),
+                    "error": response.get("error"),
+                },
+                "headers": {
+                    "server": (parsed_data.get("headers") or {}).get("server"),
+                    "x_powered_by": (parsed_data.get("headers") or {}).get("x_powered_by"),
+                    "cache_control": (parsed_data.get("headers") or {}).get("cache_control"),
+                },
+                "security_headers": parsed_data.get("security_headers"),
+                "cookies": parsed_data.get("cookies"),
+                "well_known": parsed_data.get("well_known"),
             }
         ),
         raw_output=result["raw_output"],
@@ -2964,6 +3119,102 @@ def _execute_tls_review(
     return result
 
 
+def _execute_http_security(
+    module_id: str,
+    target: str,
+    options: dict[str, Any],
+    db_context: sqlite3.Connection | None,
+    authorisation_confirmed: bool,
+    case_id: int | None,
+    entity_id: int | None,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> dict[str, Any]:
+    _load_http_security_handler()
+    if _http_security_handler is None:
+        error_message = _http_security_load_error or "HTTP Security Header Review module is not available."
+        return make_result(
+            module_id,
+            success=False,
+            status="error",
+            summary="HTTP Security Header Review module is not available.",
+            errors=[error_message],
+        )
+
+    http_data = _http_security_handler(target, options=options)
+    status = http_data.get("status", "error")
+    if status == "blocked":
+        errors = http_data.get("errors") or [http_data.get("summary") or "HTTP security review blocked."]
+        return make_result(
+            module_id,
+            success=False,
+            status="blocked",
+            summary=errors[0],
+            raw_output=http_data.get("raw_output", ""),
+            errors=errors,
+            parsed_data=http_data.get("data"),
+            warnings=http_data.get("warnings", []),
+        )
+
+    if not http_data.get("success"):
+        errors = http_data.get("errors") or http_data.get("warnings") or ["HTTP security review failed."]
+        return make_result(
+            module_id,
+            success=False,
+            status=status,
+            summary=errors[0] if errors else "HTTP security review failed.",
+            raw_output=http_data.get("raw_output", ""),
+            errors=errors if isinstance(errors, list) else [str(errors)],
+            parsed_data=http_data.get("data"),
+            warnings=http_data.get("warnings", []),
+        )
+
+    parsed_data = http_data.get("data") or {}
+    host = parsed_data.get("host") or target
+    interpreter_findings = interpret_module_findings(module_id, parsed_data, options)
+    result = make_result(
+        module_id,
+        success=True,
+        status=http_data.get("status", "completed"),
+        summary=http_data.get("summary", f"HTTP security review completed for {host}."),
+        raw_output=http_data.get("raw_output", ""),
+        findings=http_data.get("findings", []),
+        warnings=http_data.get("warnings", []),
+        parsed_data=parsed_data,
+        interpreter_findings=interpreter_findings,
+    )
+
+    if db_context is not None and case_id is not None:
+        target_type = parsed_data.get("target_type") or get_target_type(target)
+        host_entity_type = ENTITY_TYPE_BY_TARGET.get(target_type, "domain")
+        if target_type in {"domain", "url"}:
+            host_entity_type = "domain"
+        elif target_type == "ipv4":
+            host_entity_type = "ipv4"
+
+        host_entity = create_or_get_entity(
+            case_id,
+            host_entity_type,
+            host,
+            label=host,
+            source=module_id,
+            conn=db_context,
+        )
+        _persist_http_security_records(
+            db_context,
+            case_id=case_id,
+            host_entity_id=host_entity["id"],
+            module_id=module_id,
+            target=target,
+            result=result,
+            authorisation_confirmed=authorisation_confirmed,
+            run_mode_id=run_mode_id,
+            run_mode_label=run_mode_label,
+        )
+
+    return result
+
+
 def _execute_whois_rdap(
     module_id: str,
     target: str,
@@ -3882,6 +4133,28 @@ def execute_module(
                 errors=[error_message],
             )
         return _execute_tls_review(
+            module_id,
+            target,
+            options,
+            db_context,
+            authorisation_confirmed,
+            case_id,
+            entity_id,
+            run_mode_id,
+            run_mode_label,
+        )
+
+    if module_id == "infra_http_security":
+        if not is_runtime_ready(module_id):
+            error_message = get_runtime_error(module_id) or "HTTP Security Header Review runtime is not ready."
+            return make_result(
+                module_id,
+                success=False,
+                status="error",
+                summary="HTTP Security Header Review module is not available.",
+                errors=[error_message],
+            )
+        return _execute_http_security(
             module_id,
             target,
             options,

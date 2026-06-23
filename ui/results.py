@@ -479,6 +479,57 @@ def render_result_summary_tab(result: dict) -> None:
                     )
             st.markdown(f"**Protocol probes:** {'; '.join(probe_bits)}")
 
+    if result["module_id"] == "infra_http_security" and parsed_data:
+        response = parsed_data.get("response") or {}
+        security = parsed_data.get("security_headers") or {}
+        headers = parsed_data.get("headers") or {}
+        cookies = parsed_data.get("cookies") or []
+        well_known = parsed_data.get("well_known") or {}
+        st.markdown(f"**Requested URL:** {parsed_data.get('requested_url')}")
+        st.markdown(f"**Final URL:** {response.get('final_url')}")
+        st.markdown(f"**Status code:** {response.get('status_code')}")
+        chain = response.get("redirect_chain") or []
+        if chain:
+            st.markdown(f"**Redirects:** {len(chain)} hop(s)")
+        key_headers = [
+            ("hsts", "HSTS"),
+            ("csp", "CSP"),
+            ("x_frame_options", "X-Frame-Options"),
+            ("x_content_type_options", "X-Content-Type-Options"),
+            ("referrer_policy", "Referrer-Policy"),
+            ("permissions_policy", "Permissions-Policy"),
+        ]
+        for field, label in key_headers:
+            present = (security.get(field) or {}).get("present")
+            st.markdown(f"**{label}:** {'present' if present else 'not observed'}")
+        if headers.get("server"):
+            st.markdown(f"**Server:** {headers['server']}")
+        if headers.get("x_powered_by"):
+            st.markdown(f"**X-Powered-By:** {headers['x_powered_by']}")
+        if cookies:
+            st.markdown(f"**Cookies (flags only):** {len(cookies)} observed")
+            for cookie in cookies[:8]:
+                flags = []
+                if cookie.get("secure"):
+                    flags.append("Secure")
+                if cookie.get("httponly"):
+                    flags.append("HttpOnly")
+                if cookie.get("samesite"):
+                    flags.append(f"SameSite={cookie['samesite']}")
+                st.markdown(
+                    f"- `{cookie.get('name')}`: {', '.join(flags) if flags else 'no Secure/HttpOnly/SameSite observed'}"
+                )
+        sec_txt = well_known.get("security_txt") or {}
+        robots = well_known.get("robots_txt") or {}
+        st.markdown(
+            f"**security.txt:** {'observed' if sec_txt.get('observed') else 'not observed'} "
+            f"(status {sec_txt.get('status_code')})"
+        )
+        st.markdown(
+            f"**robots.txt:** {'observed' if robots.get('observed') else 'not observed'} "
+            f"(status {robots.get('status_code')})"
+        )
+
 
 def render_result_interpretation_tab(result: dict) -> None:
     interpreter_findings = result.get("interpreter_findings") or []
@@ -715,6 +766,18 @@ def render_result_module_output_tab(result: dict) -> None:
                     "raw_certificate": parsed_data.get("raw_certificate"),
                 }
             )
+
+    if result["module_id"] == "infra_http_security" and parsed_data:
+        cookies = parsed_data.get("cookies") or []
+        if cookies:
+            st.markdown("**Cookie flag summary**")
+            st.dataframe(pd.DataFrame(cookies), width="stretch", hide_index=True)
+        chain = (parsed_data.get("response") or {}).get("redirect_chain") or []
+        if chain:
+            st.markdown("**Redirect chain**")
+            st.dataframe(pd.DataFrame(chain), width="stretch", hide_index=True)
+        with st.expander("Raw response headers", expanded=False):
+            st.json((parsed_data.get("headers") or {}).get("raw") or {})
 
 
 def render_result_raw_tab(result: dict) -> None:

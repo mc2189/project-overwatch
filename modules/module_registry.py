@@ -163,6 +163,41 @@ MODULES: list[ModuleEntry] = [
         ),
     ),
     ModuleEntry(
+        module_id="infra_http_security",
+        display_name="HTTP Security Header Review",
+        category="Infrastructure",
+        description="Controlled active HTTP response and security header review for a single authorised URL.",
+        status="active",
+        mode="active",
+        risk_level="medium",
+        requires_authorisation=True,
+        requires_api_key=False,
+        implemented=True,
+        accepted_target_types=("domain", "url", "ipv4"),
+        config_notes=(
+            "No API key required. Performs GET/HEAD requests with a short timeout and limited redirects. "
+            "Requires authorisation and engagement/scope alignment for active testing."
+        ),
+        rate_limit_notes="Active HTTP request — single target URL per run; optional security.txt and robots.txt checks only.",
+        short_help="Controlled HTTP security header, cookie flag, and well-known file review for domain, URL, or IPv4.",
+        detailed_help=(
+            "Reviews a single authorised HTTP(S) response for security headers, cookie flags (names only), "
+            "server banners, and optional security.txt / robots.txt at standard paths. Uses GET or HEAD only — "
+            "does not submit forms, browse beyond the supplied URL except exact well-known paths, or store full page bodies."
+        ),
+        example_inputs=("example.com", "https://example.com/login", "8.8.8.8"),
+        output_summary=(
+            "HTTP status, redirects, security header presence, cookie flag summary, banners, and cautious findings."
+        ),
+        caution_notes=(
+            "This module performs live HTTP requests to the target — use only on owned or authorised assets.",
+            "Authorisation and engagement/scope controls apply before execution.",
+            "Cookie values and page bodies are not stored; only names, flags, and small redacted previews.",
+            "Missing headers are advisory review points, not confirmed misconfigurations.",
+            "Results reflect the point in time tested.",
+        ),
+    ),
+    ModuleEntry(
         module_id="infra_domain_intel",
         display_name="Domain Intelligence",
         category="Infrastructure",

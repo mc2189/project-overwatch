@@ -175,6 +175,25 @@ def collect_health_checks() -> list[HealthCheck]:
             )
         )
 
+    http_ready = is_runtime_ready("infra_http_security")
+    http_error = get_runtime_error("infra_http_security")
+    if http_ready:
+        checks.append(
+            HealthCheck(
+                "HTTP Security Header Review",
+                True,
+                "No API key required — controlled HTTP header review module",
+            )
+        )
+    else:
+        checks.append(
+            HealthCheck(
+                "HTTP Security Header Review",
+                False,
+                http_error or "Backend failed to load — run pip install -r requirements.txt",
+            )
+        )
+
     whois_ready = is_runtime_ready("infra_whois_rdap")
     whois_error = get_runtime_error("infra_whois_rdap")
     if whois_ready:

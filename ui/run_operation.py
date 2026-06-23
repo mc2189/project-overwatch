@@ -333,6 +333,7 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
     else:
         nmap_options: dict = {}
         tls_review_options: dict = {}
+        http_security_options: dict = {}
         conservative_nmap = mode_uses_conservative_nmap(run_mode) or (
             run_mode == QUICK_CHECK and "infra_nmap" in selected_ids
         )
@@ -397,6 +398,48 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
                     st.markdown(f"**Derived host:** `{derived_host}`")
                     st.markdown(f"**Derived port:** `{port_override}`")
                     st.markdown(f"**Default port:** 443 (unless URL or override specifies otherwise)")
+                    testing_level = get_module_testing_level(module_id)
+                    st.markdown(f"**Testing level:** {testing_level_label(testing_level)}")
+                    if current_case:
+                        scope = assess_target_scope(target, case_id=current_case["id"])
+                        st.markdown(
+                            f"**Engagement scope status:** {scope.get('scope_status', 'unknown')}"
+                        )
+                        if scope.get("permitted_testing_level"):
+                            st.markdown(
+                                f"**Permitted testing level (asset):** "
+                                f"{scope['permitted_testing_level'].replace('_', ' ')}"
+                            )
+                        for warning in scope.get("warnings") or []:
+                            st.caption(warning)
+                elif module_id == "infra_http_security":
+                    st.caption("Active module — authorisation required.")
+                    st.warning(
+                        "This performs a live HTTP request to the target. "
+                        "GET/HEAD only — no form submission, login interaction, or crawling beyond security.txt/robots.txt."
+                    )
+                    target_type = get_target_type(target)
+                    derived_url = target.strip()
+                    if target_type == "url":
+                        from urllib.parse import urlparse
+
+                        derived_url = target if "://" in target else f"https://{target.lstrip('/')}"
+                        parsed = urlparse(derived_url)
+                        if parsed.hostname:
+                            derived_url = derived_url
+                    elif target_type == "domain":
+                        derived_url = f"https://{normalize_target_value(target, 'domain')}/"
+                    elif target_type == "ipv4":
+                        derived_url = f"https://{normalize_target_value(target, 'ipv4')}/"
+                    request_method = st.selectbox(
+                        "Request method",
+                        options=["GET", "HEAD"],
+                        index=0,
+                        key="http_security_request_method",
+                        help="HEAD avoids body download; GET allows a small capped preview only.",
+                    )
+                    http_security_options = {"request_method": request_method}
+                    st.markdown(f"**Derived request URL:** `{derived_url}`")
                     testing_level = get_module_testing_level(module_id)
                     st.markdown(f"**Testing level:** {testing_level_label(testing_level)}")
                     if current_case:
@@ -525,6 +568,7 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
                         )
         st.session_state.nmap_options = nmap_options
         st.session_state.tls_review_options = tls_review_options
+        st.session_state.http_security_options = http_security_options
 
     st.divider()
 
@@ -719,6 +763,11 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
                         options = {
                             "port_override": tls_opts.get("port_override"),
                             "protocol_probes": tls_opts.get("protocol_probes", True),
+                        }
+                    elif module_id == "infra_http_security":
+                        http_opts = st.session_state.get("http_security_options", {})
+                        options = {
+                            "request_method": http_opts.get("request_method", "GET"),
                         }
                     options["standalone_authorised_testing"] = st.session_state.get(
                         "standalone_authorised_testing", False

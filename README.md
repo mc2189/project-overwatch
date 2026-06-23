@@ -1,10 +1,10 @@
-# Project Overwatch v2.9
+# Project Overwatch v2.10
 
 Project Overwatch is a **local** Python/Streamlit intelligence, OSINT, security testing and resilience advisory dashboard for **private internal use** supporting future client assessments.
 
-**v2.9** adds **SSL / TLS Configuration Review** — a controlled active TLS certificate and configuration module that respects the v2.8 engagement/scope framework.
+**v2.10** adds **HTTP Security Header Review** — a controlled active HTTP response and security header module for authorised websites.
 
-**v2.8** added client engagements, scoped assets, rules of engagement, and executor guardrails. **v2.7** added Domain Email Security Posture. **v2.6** added URLhaus. **v2.5** added Shodan. Earlier releases added GreyNoise, AbuseIPDB, VirusTotal, and the secure-by-design baseline.
+**v2.9** added SSL / TLS Configuration Review. **v2.8** added client engagements, scoped assets, rules of engagement, and executor guardrails. Earlier releases added passive OSINT modules and the secure-by-design baseline.
 
 Use only on systems you own, lab environments, or targets with **written permission**.
 
@@ -83,6 +83,7 @@ Results appear automatically in Operations, Observations, Findings, Relationship
 
 - **Network Service Check, powered by Nmap** — active; IPv4 or domain only (not URL — enter hostname separately for port scans).
 - **SSL / TLS Configuration Review** — active; domain, URL, or IPv4; single host:port TLS handshake (default 443); authorisation and engagement/scope required.
+- **HTTP Security Header Review** — active; domain, URL, or IPv4; GET/HEAD response review with security header and cookie flag analysis; authorisation required.
 - **WHOIS / RDAP Intelligence** — passive registration/allocation metadata for domain, URL (host extracted), or public IPv4 via public RDAP.
 - **VirusTotal Reputation Intelligence** — passive API reputation enrichment for domain, URL, or public IPv4 (`VIRUSTOTAL_API_KEY` required; private IPs skipped).
 - **AbuseIPDB Reputation Intelligence** — passive abuse-confidence lookup for public IPv4 only (`ABUSEIPDB_API_KEY` required; lookup-only, no report submission).
@@ -476,6 +477,23 @@ Controlled **active** TLS review for a single authorised host:port (default 443)
 3. Confirm emergency stop blocks the module; confirm passive modules still run without engagement.
 4. Review TLS summary, findings, evidence, entities (`exposes_tls_service`, `presents_certificate`), and report sections.
 
+### HTTP Security Header Review (v2.10)
+
+Controlled **active** HTTP response review for a single authorised URL.
+
+- **Module ID:** `infra_http_security`
+- **Targets:** domain (defaults to `https://`), URL (preserves scheme/host/port/path), or IPv4 (`https://` default)
+- **Checks:** status, redirects, security headers (HSTS, CSP, X-Frame-Options, etc.), cookie flags only, Server/X-Powered-By, security.txt, robots.txt
+- **Not included:** form submission, login interaction, crawling, full body storage, cookie value storage
+- **Guardrails:** authorisation required; engagement scope and ROE enforced before request; emergency stop blocks execution
+
+**How to test:**
+
+1. Use the same engagement setup as TLS Review with an in-scope domain/URL.
+2. Select **HTTP Security Header Review** → confirm authorisation → run against `https://example.com`.
+3. Verify cookie values are not present in observations, evidence, or structured output.
+4. Confirm scope/emergency stop blocks; passive modules unaffected.
+
 ### Client engagements and authorised testing (v2.8)
 
 Project Overwatch is intended to support a future **security testing / OSINT / resilience advisory** business. Intrusive modules are on the roadmap but must only run inside a documented **client engagement** with scope and rules of engagement (ROE).
@@ -491,7 +509,7 @@ Project Overwatch is intended to support a future **security testing / OSINT / r
 **Run Operation guardrails:**
 
 - Passive OSINT modules continue to work as today (scope warnings shown when an engagement is linked)
-- **Nmap** and **SSL / TLS Configuration Review** (and future active modules) require authorisation confirmation **and** engagement/scope checks (or explicit standalone authorised testing when no engagement is linked)
+- **Nmap**, **SSL / TLS Configuration Review**, and **HTTP Security Header Review** (and future active modules) require authorisation confirmation **and** engagement/scope checks (or explicit standalone authorised testing when no engagement is linked)
 - Out-of-scope and unknown targets block active/intrusive runs
 
 **Module testing levels:** passive lookup · safe active check · intrusive active check · high-risk manual only · prohibited

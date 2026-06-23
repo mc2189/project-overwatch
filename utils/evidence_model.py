@@ -117,6 +117,13 @@ MODULE_EVIDENCE_DEFAULTS: dict[str, dict[str, Any]] = {
         "reliability": RELIABILITY_HIGH,
         "collection_method": "controlled_tls_review",
     },
+    "infra_http_security": {
+        "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
+        "source_name": "http_response",
+        "source_url": None,
+        "reliability": RELIABILITY_HIGH,
+        "collection_method": "controlled_http_header_review",
+    },
     "infra_whois_rdap": {
         "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
         "source_name": "rdap.org",
@@ -177,6 +184,10 @@ RELATIONSHIP_EVIDENCE_DEFAULTS: dict[tuple[str, str], dict[str, Any]] = {
     ("infra_tls_review", "issued_by"): {
         "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
         "reliability": RELIABILITY_MEDIUM,
+    },
+    ("infra_http_security", "exposes_web_service"): {
+        "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
+        "reliability": RELIABILITY_HIGH,
     },
     ("infra_domain_intel", "resolves_to"): {
         "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
@@ -355,6 +366,13 @@ def observation_evidence_for_module(
         if not conn.get("success"):
             meta["reliability"] = RELIABILITY_MEDIUM
             if conn.get("error"):
+                meta["evidence_type"] = EVIDENCE_UNAVAILABLE_SOURCE
+    if module_id == "infra_http_security" and result is not None:
+        parsed = result.get("parsed_data") or {}
+        response = parsed.get("response") or {}
+        if not response.get("success"):
+            meta["reliability"] = RELIABILITY_MEDIUM
+            if response.get("error"):
                 meta["evidence_type"] = EVIDENCE_UNAVAILABLE_SOURCE
     if module_id == "infra_domain_intel" and result is not None:
         parsed = result.get("parsed_data") or {}
