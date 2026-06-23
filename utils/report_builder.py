@@ -43,6 +43,7 @@ from utils.report_redaction import (
     apply_redactions,
     parse_custom_regex_patterns,
 )
+from utils.security import redact_secrets_from_text
 from utils.report_settings import ReportBranding, branding_footer_lines, branding_header_lines, load_report_branding
 
 SEVERITY_SECTION_ORDER = ("critical", "high", "medium", "low", "info")
@@ -284,6 +285,7 @@ def build_case_report(
     )
 
     def finalize_report(body: str) -> str:
+        body = redact_secrets_from_text(body)
         footer = branding_footer_lines(branding)
         if footer:
             body = body.rstrip() + "\n\n" + "\n".join(footer)

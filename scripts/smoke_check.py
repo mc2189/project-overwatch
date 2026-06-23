@@ -224,6 +224,68 @@ def _check_settings_manager() -> None:
         raise AssertionError("rate_limit_seconds should be positive")
 
 
+def _check_security_baseline() -> None:
+    security = __import__(
+        "utils.security",
+        fromlist=[
+            "mask_secret",
+            "redact_secrets_from_text",
+            "redact_secrets_from_dict",
+            "looks_like_secret",
+            "is_safe_target_string",
+        ],
+    )
+    masked = security.mask_secret("ghp_abcdefghijklmnopqrstuvwxyz123456")
+    if "abcdefghijklmnopqrst" in masked:
+        raise AssertionError("mask_secret exposed too much of the value")
+    if masked.count("*") < 4:
+        raise AssertionError("mask_secret did not mask sufficiently")
+
+    redacted = security.redact_secrets_from_text("api_key=supersecretvalue1234567890")
+    if "supersecretvalue" in redacted:
+        raise AssertionError("redact_secrets_from_text did not redact assignment")
+
+    payload = security.redact_secrets_from_dict({"token": "ghp_abcdefghijklmnopqrstuvwxyz123456"})
+    if "ghp_" in str(payload.get("token", "")):
+        raise AssertionError("redact_secrets_from_dict did not redact token value")
+
+    if not security.is_safe_target_string("example.com"):
+        raise AssertionError("is_safe_target_string rejected a normal domain")
+    if security.is_safe_target_string("example.com; rm -rf /"):
+        raise AssertionError("is_safe_target_string accepted shell metacharacters")
+
+    settings = __import__(
+        "utils.settings_manager",
+        fromlist=["env_example_exists", "env_ignored_by_git", "list_api_provider_status"],
+    )
+    if not settings.env_example_exists():
+        raise AssertionError(".env.example is missing")
+    if not settings.env_ignored_by_git():
+        raise AssertionError(".env is not ignored by Git")
+
+    for provider in settings.list_api_provider_status():
+        for item in provider["key_status"]:
+            masked_value = item["masked"]
+            if item["configured"] and masked_value != "not configured" and masked_value.count("*") < 4:
+                raise AssertionError(f"provider {provider['provider_id']} may expose full secret")
+
+    registry = __import__(
+        "modules.module_registry",
+        fromlist=["QUARANTINED_MODULE_IDS", "get_module", "is_executable"],
+    )
+    for module_id in registry.QUARANTINED_MODULE_IDS:
+        module = registry.get_module(module_id)
+        if module is None:
+            raise AssertionError(f"missing quarantined module: {module_id}")
+        if registry.is_executable(module):
+            raise AssertionError(f"quarantined module must not be executable: {module_id}")
+
+    crypto = __import__("utils.crypto_utils", fromlist=["calculate_sha256"])
+    digest = crypto.calculate_sha256("smoke-check")
+    if not digest or len(digest) != 64:
+        raise AssertionError("calculate_sha256 returned unexpected digest")
+
+
 def _check_batch_queue_helpers() -> None:
     bq = __import__(
         "utils.batch_queue",
@@ -1663,6 +1725,11 @@ def main() -> int:
     run(
         "settings manager",
         lambda: _check_settings_manager(),
+    )
+
+    run(
+        "security baseline",
+        lambda: _check_security_baseline(),
     )
 
     run("database setup", lambda: __import__("database.db_setup", fromlist=["get_db_conn"]).get_db_conn().close())

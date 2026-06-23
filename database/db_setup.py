@@ -1033,6 +1033,16 @@ def create_observation(
         if data_json is not None and not isinstance(data_json, str):
             data_json = json.dumps(data_json)
 
+        from utils.security import redact_secrets_from_text, sanitize_json_for_storage
+
+        title = redact_secrets_from_text(title)
+        if summary is not None:
+            summary = redact_secrets_from_text(summary)
+        if raw_output is not None:
+            raw_output = redact_secrets_from_text(raw_output)
+        if data_json is not None:
+            data_json = sanitize_json_for_storage(data_json)
+
         evidence = attach_evidence_metadata({}, module_id, source_name, source_url)
         if evidence_type is not None:
             evidence["evidence_type"] = normalise_evidence_type(evidence_type)
@@ -1130,6 +1140,11 @@ def create_operation_log(
     if own_conn:
         conn = get_db_conn()
     try:
+        from utils.security import redact_secrets_from_text
+
+        if summary is not None:
+            summary = redact_secrets_from_text(summary)
+
         completed_at = datetime.now(timezone.utc).isoformat()
         cursor = conn.cursor()
         cursor.execute(
@@ -1351,7 +1366,11 @@ def create_finding(
         resolved_source_name = source_name or finding_evidence.get("source_name")
         resolved_reliability = normalise_reliability(reliability) or finding_evidence.get("reliability")
 
-        actions_json = json.dumps(suggested_actions or [])
+        from utils.security import redact_secrets_from_dict, redact_secrets_from_text
+
+        title = redact_secrets_from_text(title)
+        explanation = redact_secrets_from_text(explanation)
+        actions_json = json.dumps(redact_secrets_from_dict(suggested_actions or []))
         now = datetime.now(timezone.utc).isoformat()
         cursor = conn.cursor()
         cursor.execute(
@@ -1659,6 +1678,11 @@ def update_finding(
         fields: list[str] = ["updated_at = ?"]
         params: list[Any] = [now]
 
+        if analyst_notes is not None:
+            from utils.security import redact_secrets_from_text
+
+            analyst_notes = redact_secrets_from_text(analyst_notes)
+
         if status is not None:
             normalized = normalize_finding_status(status)
             fields.append("status = ?")
@@ -1745,15 +1769,10 @@ def update_finding_status(
     return update_finding(finding_id, status=status, conn=conn)
 
 
-_SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*\S+"),
-    re.compile(r"(?i)(vt_[a-z0-9]{20,})"),
-    re.compile(r"(?i)(sk_[a-z0-9]{20,})"),
-)
-
-
 def _content_looks_like_secret(content_text: str) -> bool:
-    return any(pattern.search(content_text) for pattern in _SECRET_PATTERNS)
+    from utils.security import looks_like_secret
+
+    return looks_like_secret(content_text)
 
 
 def calculate_content_hash(content_text: str | None) -> str | None:
@@ -1811,7 +1830,13 @@ def create_evidence_item(
     if own_conn:
         conn = get_db_conn()
     try:
-        raw_content = None if content_text and _content_looks_like_secret(content_text) else content_text
+        from utils.security import redact_secrets_from_text
+
+        raw_content = redact_secrets_from_text(content_text) if content_text else None
+        if summary is not None:
+            summary = redact_secrets_from_text(summary)
+        if title is not None:
+            title = redact_secrets_from_text(title)
         raw_bytes = content_bytes if content_bytes else None
         spill = storage_path is None and (
             should_spill_bytes(raw_bytes) if raw_bytes else should_spill_content(raw_content)

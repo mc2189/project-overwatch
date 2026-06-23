@@ -6,8 +6,10 @@ import json
 import os
 import sys
 from dataclasses import dataclass
+from typing import Any
 
 from database.db_setup import PROJECT_ROOT
+from utils.security import mask_secret, safe_bool_env, safe_int_env
 
 DEFAULTS_PATH = PROJECT_ROOT / "config" / "overwatch.defaults.json"
 ENV_EXAMPLE_PATH = PROJECT_ROOT / ".env.example"
@@ -125,8 +127,8 @@ def get_bool_env(name: str, default: bool = True) -> bool:
         file_defaults = _load_defaults_file()
         if name in file_defaults:
             return bool(file_defaults[name])
-        return GENERAL_SETTING_DEFAULTS.get(name, default)
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+        return safe_bool_env(None, GENERAL_SETTING_DEFAULTS.get(name, default))
+    return safe_bool_env(raw, default)
 
 
 def get_float_env(name: str, default: float) -> float:
@@ -154,11 +156,8 @@ def get_int_env(name: str, default: int) -> int:
                 return int(file_defaults[name])
             except (TypeError, ValueError):
                 pass
-        return int(GENERAL_SETTING_DEFAULTS.get(name, default))
-    try:
-        return int(raw)
-    except ValueError:
-        return default
+        return safe_int_env(None, int(GENERAL_SETTING_DEFAULTS.get(name, default)))
+    return safe_int_env(raw, default)
 
 
 def rate_limit_seconds() -> float:
@@ -184,14 +183,7 @@ def has_api_key(env_key: str) -> bool:
 
 def mask_api_key(value: str | None, *, visible_prefix: int = 3, visible_suffix: int = 4) -> str:
     """Return a masked display value such as vt_****abcd. Never use for logging secrets."""
-    if not value:
-        return "not configured"
-    cleaned = value.strip()
-    if len(cleaned) <= visible_prefix + visible_suffix:
-        return "****"
-    prefix = cleaned[:visible_prefix]
-    suffix = cleaned[-visible_suffix:]
-    return f"{prefix}****{suffix}"
+    return mask_secret(value, visible_prefix=visible_prefix, visible_suffix=visible_suffix)
 
 
 def provider_configured(provider: ApiProviderSpec) -> bool:
@@ -317,6 +309,7 @@ def list_module_config_status() -> list[dict[str, Any]]:
             {
                 "module_id": module.module_id,
                 "display_name": module.display_name,
+                "status": module.status,
                 "implemented": module.implemented,
                 "executable": is_executable(module),
                 "requires_api_key": module.requires_api_key,

@@ -7,6 +7,7 @@ import streamlit as st
 
 from ui.metrics import render_compact_metrics
 from utils.runtime_health import collect_health_checks, render_runtime_health_panel
+from utils.security_posture import collect_security_posture
 from utils.settings_manager import (
     ENV_EXAMPLE_PATH,
     general_settings_summary,
@@ -27,6 +28,19 @@ def render_settings_page(metrics: dict) -> None:
 
     st.subheader("Runtime health")
     render_runtime_health_panel(collect_health_checks())
+    st.divider()
+
+    st.subheader("Security posture")
+    for item in collect_security_posture():
+        if item.ok is True:
+            icon = "✅"
+        elif item.ok is False:
+            icon = "❌"
+        else:
+            icon = "ℹ️"
+        st.write(f"{icon} **{item.label}:** {item.value}")
+        if item.detail:
+            st.caption(item.detail)
     st.divider()
 
     st.subheader("General settings")
@@ -84,6 +98,8 @@ def render_settings_page(metrics: dict) -> None:
     for row in list_module_config_status():
         if row["implemented"]:
             readiness = "Ready" if row["ready"] else "Blocked by settings"
+        elif row.get("status") == "disabled":
+            readiness = "Disabled"
         else:
             readiness = "Planned"
         api_keys = (
@@ -91,10 +107,11 @@ def render_settings_page(metrics: dict) -> None:
             if not row["requires_api_key"]
             else ("Configured" if row["api_keys_configured"] else f"Missing: {', '.join(row['missing_keys'])}")
         )
+        implemented_label = "Yes" if row["implemented"] else ("Disabled" if row.get("status") == "disabled" else "Planned")
         module_rows.append(
             {
                 "Module": row["display_name"],
-                "Implemented": "Yes" if row["implemented"] else "Planned",
+                "Implemented": implemented_label,
                 "API keys": api_keys,
                 "Readiness": readiness,
             }

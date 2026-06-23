@@ -2,7 +2,20 @@
 
 All notable changes to Project Overwatch are documented here.
 
-## v2.1.0 — RDAP bootstrap, WHOIS fallback and case cache
+## v2.1.0 — Secure-by-design baseline
+
+- **`utils/security.py`** — secret masking, redaction, env parsing, target validation, private IP checks
+- **`utils/crypto_utils.py`** — SHA-256 hashing scaffold; optional Fernet helpers when `cryptography` is installed
+- **Centralised masking** — Settings/API key display uses `mask_secret()`; no full keys in UI, logs, DB, reports, or evidence
+- **Redaction before persistence** — observations, findings, operations, evidence content, and reports
+- **`scripts/security_audit.py`** — local scan for embedded secrets and risky patterns (subprocess, TLS, eval/exec)
+- **Smoke check** — security baseline assertions (imports, redaction, `.env` hygiene, quarantined modules)
+- **Settings → Security posture** — non-secret safety indicators and manual audit command
+- **Quarantined placeholders** — SQLMap, FFUF, Nuclei, HIBP, dark-web, and cloud enum marked `disabled` and blocked from execution
+- **`SECURITY.md`** — project security principles, secret rules, hashing vs encryption, audit guidance
+- **Command safety** — Nmap remains list-based subprocess with allowlisted profiles (reviewed; no `shell=True`)
+
+### WHOIS/RDAP enhancements (also v2.1)
 
 - **IANA bootstrap RDAP** — queries registry-specific RDAP servers before `rdap.org` redirector
 - **Retry/backoff** — automatic retry on HTTP 429/503 from RDAP endpoints

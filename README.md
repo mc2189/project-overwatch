@@ -1,10 +1,14 @@
-# Project Overwatch v1.14
+# Project Overwatch v2.1
 
 Project Overwatch is a **local** Python/Streamlit dashboard for defensive security intelligence. It helps analysts organise investigations into **cases**, collect data with authorised **active** scans and **passive** lookups, interpret results as advisory **findings**, and export **reports** — all stored in a local SQLite database on your machine.
 
-**v1.4** reorganises the interface around an investigation workflow: **Run Operation** for collection, dedicated pages for findings/archive/reporting, and a **Roadmap** page for planned modules.
+**v2.1** adds a **secure-by-design baseline**: secret hygiene, redaction before persistence, a security audit script, and a Security Posture panel in Settings.
+
+**v2.0** introduced WHOIS/RDAP Intelligence; **v1.4** reorganised the interface around an investigation workflow.
 
 Use only on systems you own, lab environments, or targets with **written permission**.
+
+See [SECURITY.md](SECURITY.md) for secret handling, active module rules, and audit guidance.
 
 ## Navigation
 
@@ -120,14 +124,30 @@ Optional extras (graph PNG and native PDF):
 pip install -r requirements-optional.txt
 ```
 
-### Environment and API keys (v1.10)
+### Environment and API keys (v1.10+)
 
 Project Overwatch loads local settings from `.env` (never committed) and optional defaults in `config/overwatch.defaults.json`.
 
 1. Copy the placeholder file: `cp .env.example .env`
 2. Edit `.env` locally with your API keys and optional general settings.
-3. Open **Settings** in the sidebar to see **masked** key status and module readiness.
+3. Open **Settings** in the sidebar to see **masked** key status, **Security posture**, and module readiness.
 4. **Never commit `.env`** — it is listed in `.gitignore`.
+
+### Secure-by-design baseline (v2.1)
+
+- **`utils/security.py`** — `mask_secret()`, `redact_secrets_from_text()`, target validation, env parsing helpers.
+- **Redaction before persistence** — observations, findings, operations, evidence, and reports redact obvious secrets.
+- **`scripts/security_audit.py`** — scans source for hard-coded credentials and risky patterns.
+- **Settings → Security posture** — Git ignore status, active module toggle, Nmap safety, hashing/redaction status.
+- **Quarantined modules** — SQLMap, FFUF, Nuclei, HIBP breach lookup, dark-web, and cloud enum placeholders are `disabled` and not executable.
+- **Hashing ≠ encryption** — evidence SHA-256 hashes support integrity only; see [SECURITY.md](SECURITY.md).
+
+Run locally:
+
+```bash
+python scripts/security_audit.py
+python scripts/smoke_check.py
+```
 
 Supported future API keys (optional until modules are implemented): VirusTotal, AbuseIPDB, GreyNoise, Shodan, Censys (ID + secret), SecurityTrails, Hunter.io, Have I Been Pwned.
 

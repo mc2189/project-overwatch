@@ -1794,6 +1794,31 @@ def execute_module(
             errors=["not_executable"],
         )
 
+    from utils.security import is_safe_target_string
+
+    if not is_safe_target_string(target):
+        reason = "Target contains unsafe characters for module execution."
+        result = make_result(
+            module_id,
+            success=False,
+            status="blocked",
+            summary=reason,
+            errors=["unsafe_target"],
+        )
+        if db_context is not None and case_id is not None:
+            create_operation_log(
+                case_id,
+                module_id,
+                target,
+                "blocked",
+                authorisation_confirmed=authorisation_confirmed,
+                summary=reason,
+                run_mode_id=run_mode_id,
+                run_mode_label=run_mode_label,
+                conn=db_context,
+            )
+        return result
+
     target_type = get_target_type(target)
     if not module_accepts_target(module, target_type):
         reason = get_incompatible_reason(module, target_type)

@@ -9,6 +9,19 @@ ModuleStatus = Literal["active", "planned", "disabled"]
 ModuleMode = Literal["passive", "active", "analysis"]
 RiskLevel = Literal["low", "medium", "high"]
 
+# High-risk placeholders quarantined from execution even if accidentally marked implemented.
+QUARANTINED_MODULE_IDS: frozenset[str] = frozenset(
+    {
+        "vuln_nuclei",
+        "vuln_ffuf",
+        "vuln_sqlmap",
+        "intel_hibp",
+        "dark_ahmia",
+        "dark_dehashed",
+        "cloud_enum",
+    }
+)
+
 
 @dataclass(frozen=True)
 class ModuleEntry:
@@ -271,36 +284,39 @@ MODULES: list[ModuleEntry] = [
         display_name="Nuclei",
         category="Vulnerability",
         description="Template-based vulnerability scanning.",
-        status="planned",
+        status="disabled",
         mode="active",
         risk_level="high",
         requires_authorisation=True,
         requires_api_key=False,
         implemented=False,
+        caution_notes=("Disabled — high-risk active scanning; not available in this release.",),
     ),
     ModuleEntry(
         module_id="vuln_ffuf",
         display_name="FFUF",
         category="Vulnerability",
         description="Web fuzzing for hidden paths and parameters.",
-        status="planned",
+        status="disabled",
         mode="active",
         risk_level="high",
         requires_authorisation=True,
         requires_api_key=False,
         implemented=False,
+        caution_notes=("Disabled — high-risk fuzzing; not available in this release.",),
     ),
     ModuleEntry(
         module_id="vuln_sqlmap",
         display_name="SQLMap",
         category="Vulnerability",
         description="SQL injection testing (planned; not enabled).",
-        status="planned",
+        status="disabled",
         mode="active",
         risk_level="high",
         requires_authorisation=True,
         requires_api_key=False,
         implemented=False,
+        caution_notes=("Disabled — exploit-like capability; not available in this release.",),
     ),
     ModuleEntry(
         module_id="vuln_pyshark",
@@ -439,16 +455,17 @@ MODULES: list[ModuleEntry] = [
         display_name="Have I Been Pwned",
         category="Threat Intel",
         description="Check emails and domains against known breach data.",
-        status="planned",
+        status="disabled",
         mode="passive",
-        risk_level="low",
+        risk_level="medium",
         requires_authorisation=False,
         requires_api_key=True,
         implemented=False,
         accepted_target_types=("email", "domain"),
         api_key_names=("HAVEIBEENPWNED_API_KEY",),
-        config_notes="Requires HAVEIBEENPWNED_API_KEY in local .env. Planned — not available in this release.",
+        config_notes="Disabled — credential/breach lookup module; not available in this release.",
         rate_limit_notes="HIBP API rate limits apply per key tier.",
+        caution_notes=("Disabled — breach/credential intelligence requires explicit guardrails.",),
     ),
     # Dark Web
     ModuleEntry(
@@ -456,24 +473,26 @@ MODULES: list[ModuleEntry] = [
         display_name="Ahmia",
         category="Dark Web",
         description="Search public Tor hidden-service indexes.",
-        status="planned",
+        status="disabled",
         mode="passive",
-        risk_level="low",
-        requires_authorisation=False,
+        risk_level="medium",
+        requires_authorisation=True,
         requires_api_key=False,
         implemented=False,
+        caution_notes=("Disabled — Tor/dark-web collection not available in this release.",),
     ),
     ModuleEntry(
         module_id="dark_dehashed",
         display_name="Dehashed",
         category="Dark Web",
         description="Breach data lookup for compromised credentials.",
-        status="planned",
+        status="disabled",
         mode="passive",
-        risk_level="medium",
+        risk_level="high",
         requires_authorisation=True,
         requires_api_key=True,
         implemented=False,
+        caution_notes=("Disabled — credential breach lookup; not available in this release.",),
     ),
     # Financial
     ModuleEntry(
@@ -544,12 +563,13 @@ MODULES: list[ModuleEntry] = [
         display_name="Cloud Enum",
         category="Cloud Recon",
         description="Enumerate public cloud storage and service exposure.",
-        status="planned",
+        status="disabled",
         mode="passive",
         risk_level="medium",
         requires_authorisation=True,
         requires_api_key=False,
         implemented=False,
+        caution_notes=("Disabled — cloud enumeration requires explicit guardrails.",),
     ),
     # Document Forensics
     ModuleEntry(
@@ -634,11 +654,15 @@ def get_modules_by_category() -> dict[str, list[ModuleEntry]]:
 
 def is_executable(module: ModuleEntry) -> bool:
     """Return True only for modules that are implemented and marked active."""
+    if module.module_id in QUARANTINED_MODULE_IDS:
+        return False
     return module.implemented and module.status == "active"
 
 
 def module_ui_label(module: ModuleEntry) -> str:
     """Build a sidebar label with mode and status for clarity."""
+    if module.status == "disabled":
+        return f"{module.display_name} (disabled)"
     if is_executable(module):
         mode_label = {"active": "Active", "passive": "Passive", "analysis": "Analysis"}.get(
             module.mode, module.mode.title()
