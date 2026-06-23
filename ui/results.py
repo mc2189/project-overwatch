@@ -404,6 +404,36 @@ def render_result_summary_tab(result: dict) -> None:
         if parsed_data.get("warning"):
             st.warning(parsed_data["warning"])
 
+    if result["module_id"] == "infra_email_security" and parsed_data:
+        domain = parsed_data.get("domain") or parsed_data.get("target")
+        spf = parsed_data.get("spf") or {}
+        dmarc = parsed_data.get("dmarc") or {}
+        mta_sts = parsed_data.get("mta_sts") or {}
+        tls_rpt = parsed_data.get("tls_rpt") or {}
+        bimi = parsed_data.get("bimi") or {}
+        st.markdown(f"**Domain:** {domain}")
+        st.markdown(
+            f"**SPF:** {'present' if spf.get('present') else 'not observed'} "
+            f"({spf.get('policy') or 'n/a'})"
+        )
+        st.markdown(
+            f"**DMARC:** {'present' if dmarc.get('present') else 'not observed'} "
+            f"(p={dmarc.get('policy') or 'n/a'})"
+        )
+        st.markdown(f"**MX records:** {len(parsed_data.get('mx') or [])}")
+        st.markdown(f"**CAA records:** {len(parsed_data.get('caa') or [])}")
+        st.markdown(
+            f"**MTA-STS:** TXT {'present' if mta_sts.get('txt_present') else 'not observed'}; "
+            f"policy {'reachable' if mta_sts.get('policy_reachable') else 'not retrieved'}; "
+            f"mode={mta_sts.get('mode') or 'n/a'}"
+        )
+        st.markdown(
+            f"**TLS-RPT:** {'present' if tls_rpt.get('present') else 'not observed'}"
+        )
+        st.markdown(f"**BIMI:** {'present' if bimi.get('present') else 'not observed'}")
+        if parsed_data.get("warning"):
+            st.warning(parsed_data["warning"])
+
 
 def render_result_interpretation_tab(result: dict) -> None:
     interpreter_findings = result.get("interpreter_findings") or []
@@ -602,6 +632,26 @@ def render_result_module_output_tab(result: dict) -> None:
         if entries:
             st.markdown("**Sitemap hints**")
             st.dataframe(pd.DataFrame(entries), width="stretch", hide_index=True)
+
+    if result["module_id"] == "infra_email_security" and parsed_data:
+        mx = parsed_data.get("mx") or []
+        if mx:
+            st.markdown("**MX records**")
+            st.dataframe(pd.DataFrame(mx), width="stretch", hide_index=True)
+        caa = parsed_data.get("caa") or []
+        if caa:
+            st.markdown("**CAA records**")
+            st.dataframe(pd.DataFrame(caa), width="stretch", hide_index=True)
+        with st.expander("SPF / DMARC / MTA-STS / TLS-RPT / BIMI record details", expanded=False):
+            st.json(
+                {
+                    "spf": parsed_data.get("spf"),
+                    "dmarc": parsed_data.get("dmarc"),
+                    "mta_sts": parsed_data.get("mta_sts"),
+                    "tls_rpt": parsed_data.get("tls_rpt"),
+                    "bimi": parsed_data.get("bimi"),
+                }
+            )
 
 
 def render_result_raw_tab(result: dict) -> None:

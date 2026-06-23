@@ -452,6 +452,213 @@ def capture_website_metadata_evidence(
     return items
 
 
+def capture_email_security_evidence(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    observation_id: int,
+    module_id: str,
+    result: dict[str, Any],
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    parsed_data = result.get("parsed_data") or {}
+    domain = parsed_data.get("domain") or "target"
+
+    summary_payload = {
+        "domain": domain,
+        "spf": parsed_data.get("spf"),
+        "dmarc": parsed_data.get("dmarc"),
+        "mx_count": len(parsed_data.get("mx") or []),
+        "caa_count": len(parsed_data.get("caa") or []),
+        "mta_sts": {
+            "txt_present": (parsed_data.get("mta_sts") or {}).get("txt_present"),
+            "policy_reachable": (parsed_data.get("mta_sts") or {}).get("policy_reachable"),
+            "mode": (parsed_data.get("mta_sts") or {}).get("mode"),
+        },
+        "tls_rpt_present": (parsed_data.get("tls_rpt") or {}).get("present"),
+        "bimi_present": (parsed_data.get("bimi") or {}).get("present"),
+        "warning": parsed_data.get("warning"),
+    }
+    items.append(
+        _create_item(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            title="Email security DNS summary",
+            summary="Passive SPF, DMARC, MX, CAA, MTA-STS, TLS-RPT and BIMI posture summary.",
+            content_text=_text_summary(summary_payload),
+            content_type="application/json",
+            evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+            source_name="dns_lookup",
+            collection_method="passive_dns_email_security_lookup",
+            reliability=RELIABILITY_HIGH,
+        )
+    )
+
+    spf = parsed_data.get("spf") or {}
+    if spf.get("present") or spf.get("record"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="SPF record",
+                summary=f"SPF TXT record observed for {domain}.",
+                content_text=_text_summary(spf),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="dns_lookup",
+                collection_method="passive_dns_email_security_lookup",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    dmarc = parsed_data.get("dmarc") or {}
+    if dmarc.get("present") or dmarc.get("record"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="DMARC record",
+                summary=f"DMARC TXT record observed for {domain}.",
+                content_text=_text_summary(dmarc),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="dns_lookup",
+                collection_method="passive_dns_email_security_lookup",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    mx = parsed_data.get("mx") or []
+    if mx:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="MX records",
+                summary=f"{len(mx)} MX record(s) observed for {domain}.",
+                content_text=_text_summary(mx),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="dns_lookup",
+                collection_method="passive_dns_email_security_lookup",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    caa = parsed_data.get("caa") or []
+    if caa:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="CAA records",
+                summary=f"{len(caa)} CAA record(s) observed for {domain}.",
+                content_text=_text_summary(caa),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="dns_lookup",
+                collection_method="passive_dns_email_security_lookup",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    mta_sts = parsed_data.get("mta_sts") or {}
+    if mta_sts.get("txt_present") or mta_sts.get("policy_fetch"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="MTA-STS summary",
+                summary="MTA-STS TXT and optional HTTPS policy fetch summary.",
+                content_text=_text_summary(mta_sts),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="dns_lookup / https_mta_sts_policy",
+                collection_method="passive_dns_email_security_lookup",
+                reliability=RELIABILITY_HIGH if mta_sts.get("policy_reachable") else RELIABILITY_MEDIUM,
+            )
+        )
+
+    tls_rpt = parsed_data.get("tls_rpt") or {}
+    if tls_rpt.get("present") or tls_rpt.get("record"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="TLS-RPT record",
+                summary=f"TLS-RPT TXT record summary for {domain}.",
+                content_text=_text_summary(tls_rpt),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="dns_lookup",
+                collection_method="passive_dns_email_security_lookup",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    bimi = parsed_data.get("bimi") or {}
+    if bimi.get("present") or bimi.get("record"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="BIMI record",
+                summary=f"BIMI TXT record summary for {domain}.",
+                content_text=_text_summary(bimi),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="dns_lookup",
+                collection_method="passive_dns_email_security_lookup",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    if parsed_data.get("warning"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Email security lookup notice",
+                summary=parsed_data["warning"],
+                content_text=parsed_data["warning"],
+                content_type="text/plain",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="dns_lookup",
+                collection_method="passive_dns_email_security_lookup",
+                reliability=RELIABILITY_MEDIUM,
+            )
+        )
+    return items
+
+
 def capture_virustotal_evidence(
     conn: sqlite3.Connection,
     *,
@@ -1236,6 +1443,15 @@ def capture_module_evidence(
         )
     if module_id == "infra_website_metadata":
         return capture_website_metadata_evidence(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            result=result,
+        )
+    if module_id == "infra_email_security":
+        return capture_email_security_evidence(
             conn,
             case_id=case_id,
             entity_id=entity_id,

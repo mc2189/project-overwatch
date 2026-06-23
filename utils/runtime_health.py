@@ -137,6 +137,25 @@ def collect_health_checks() -> list[HealthCheck]:
             )
         )
 
+    email_security_ready = is_runtime_ready("infra_email_security")
+    email_security_error = get_runtime_error("infra_email_security")
+    if email_security_ready:
+        checks.append(
+            HealthCheck(
+                "Domain Email Security Posture",
+                True,
+                "No API key required — passive DNS lookups only",
+            )
+        )
+    else:
+        checks.append(
+            HealthCheck(
+                "Domain Email Security Posture",
+                False,
+                email_security_error or "Backend failed to load — run pip install -r requirements.txt",
+            )
+        )
+
     whois_ready = is_runtime_ready("infra_whois_rdap")
     whois_error = get_runtime_error("infra_whois_rdap")
     if whois_ready:

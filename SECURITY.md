@@ -64,6 +64,15 @@ The **URLhaus Malware URL Intelligence** module (`intel_urlhaus`) is **lookup-on
 - `ABUSECH_AUTH_KEY` (or `URLHAUS_AUTH_KEY` alias) must remain in `.env` only — never persisted in observations, findings, evidence, or reports
 - Malware download links (`urlhaus_download`) are stripped from summaries; raw JSON remains collapsed in the UI
 
+## Domain Email Security Posture boundary (v2.7)
+
+The **Domain Email Security Posture** module (`infra_email_security`) is **passive DNS/policy review only**:
+
+- Allowed: public DNS lookups (SPF, DMARC, MX, CAA, TLS-RPT, BIMI, MTA-STS TXT) and optional HTTPS fetch of the standard MTA-STS policy file at `/.well-known/mta-sts.txt`
+- **Not allowed** in this module: sending email, SMTP connections, inbox testing, selector brute-forcing, credential validation, or breach lookups
+- Findings are advisory — absence of a record in this lookup does not prove misconfiguration
+- No API keys or secrets are used by this module
+
 ## Security audit
 
 Run the local audit before releases or after changing configuration handling:

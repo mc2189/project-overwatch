@@ -103,6 +103,13 @@ MODULE_EVIDENCE_DEFAULTS: dict[str, dict[str, Any]] = {
         "reliability": RELIABILITY_HIGH,
         "collection_method": "http_request",
     },
+    "infra_email_security": {
+        "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
+        "source_name": "dns_lookup",
+        "source_url": None,
+        "reliability": RELIABILITY_HIGH,
+        "collection_method": "passive_dns_email_security_lookup",
+    },
     "infra_whois_rdap": {
         "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
         "source_name": "rdap.org",
@@ -175,6 +182,10 @@ RELATIONSHIP_EVIDENCE_DEFAULTS: dict[tuple[str, str], dict[str, Any]] = {
     ("infra_website_metadata", "references_sitemap"): {
         "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
         "reliability": RELIABILITY_MEDIUM,
+    },
+    ("infra_email_security", "uses_mail_server"): {
+        "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
+        "reliability": RELIABILITY_HIGH,
     },
     ("infra_whois_rdap", "uses_nameserver"): {
         "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
@@ -315,6 +326,10 @@ def observation_evidence_for_module(
                 meta["reliability"] = RELIABILITY_LOW
         elif reachable:
             meta["reliability"] = RELIABILITY_HIGH
+    if module_id == "infra_email_security" and result is not None:
+        status = result.get("status", "")
+        if status in {"partial", "error"}:
+            meta["reliability"] = RELIABILITY_MEDIUM
     if module_id == "infra_domain_intel" and result is not None:
         parsed = result.get("parsed_data") or {}
         http = parsed.get("http") or {}

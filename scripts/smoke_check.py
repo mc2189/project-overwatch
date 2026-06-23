@@ -149,7 +149,7 @@ def _check_entity_helpers() -> None:
     domain_entity = {"entity_type": "domain", "value": "example.com"}
     rec = pivot.build_pivot_recommendations(domain_entity)
     module_ids = {row["module_id"] for row in rec.get("module_rows", []) if row.get("compatible")}
-    expected = {"infra_domain_intel", "infra_cert_subdomain", "infra_website_metadata"}
+    expected = {"infra_domain_intel", "infra_cert_subdomain", "infra_website_metadata", "infra_email_security"}
     if not expected.issubset(module_ids):
         raise AssertionError(f"domain pivot missing modules: {module_ids}")
 
@@ -911,6 +911,7 @@ def _check_target_compatibility() -> None:
         or "infra_domain_intel" not in module_ids
         or "infra_cert_subdomain" not in module_ids
         or "infra_website_metadata" not in module_ids
+        or "infra_email_security" not in module_ids
     ):
         raise AssertionError("example.com should be compatible with all implemented domain modules")
 
@@ -964,6 +965,7 @@ def _check_run_modes() -> None:
     expected_domain_modules = {
         "infra_whois_rdap",
         "infra_domain_intel",
+        "infra_email_security",
         "infra_cert_subdomain",
         "infra_website_metadata",
     }
@@ -1137,6 +1139,87 @@ def _check_website_metadata_module() -> None:
     executor = __import__("modules.executor", fromlist=["is_runtime_ready", "get_module"])
     if not executor.is_runtime_ready("infra_website_metadata"):
         raise AssertionError("executor cannot load infra_website_metadata backend")
+
+
+def _check_email_security_module() -> None:
+    import importlib.util
+
+    registry = __import__("modules.module_registry", fromlist=["get_module"])
+    module = registry.get_module("infra_email_security")
+    if module is None or not module.implemented:
+        raise AssertionError("infra_email_security registry entry missing or not implemented")
+    if module.requires_api_key:
+        raise AssertionError("infra_email_security should not require API key")
+    if module.accepted_target_types != ("domain", "url"):
+        raise AssertionError("infra_email_security accepted_target_types mismatch")
+    for field in ("short_help", "detailed_help", "caution_notes", "config_notes"):
+        if not getattr(module, field, None):
+            raise AssertionError(f"infra_email_security missing registry metadata: {field}")
+
+    module_path = Path(PROJECT_ROOT) / "modules" / "2_infrastructure" / "infra_email_security.py"
+    spec = importlib.util.spec_from_file_location("infra_email_security", module_path)
+    if spec is None or spec.loader is None:
+        raise AssertionError("could not load infra_email_security module spec")
+    email_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(email_mod)
+
+    spf = email_mod.parse_spf_record("v=spf1 include:spf.example.com -all")
+    if not spf.get("present") or spf.get("policy") != "-all":
+        raise AssertionError("SPF parser failed")
+    dmarc = email_mod.parse_dmarc_record("v=DMARC1; p=reject; rua=mailto:dmarc@example.com; pct=50")
+    if dmarc.get("policy") != "reject" or not dmarc.get("rua_present") or dmarc.get("pct") != 50:
+        raise AssertionError("DMARC parser failed")
+    mta_policy = email_mod.parse_mta_sts_policy_file("version: STSv1\nmode: enforce\nmx: mail.example.com\nmax_age: 86400\n")
+    if mta_policy.get("mode") != "enforce" or mta_policy.get("mx") != ["mail.example.com"]:
+        raise AssertionError("MTA-STS policy parser failed")
+
+    mock_data = {
+        "domain": "example.com",
+        "target": "example.com",
+        "spf": spf,
+        "dmarc": dmarc,
+        "mx": [{"priority": 10, "hostname": "mail.example.com"}],
+        "caa": [{"flags": 0, "tag": "issue", "value": "letsencrypt.org"}],
+        "mta_sts": {"txt_present": True, "policy_reachable": False, "mode": None, "max_age": None, "mx": []},
+        "tls_rpt": email_mod.parse_tls_rpt_record("v=TLSRPTv1; rua=mailto:tls@example.com"),
+        "bimi": email_mod.parse_bimi_record(None),
+    }
+    result = email_mod.run_email_security_review(
+        "example.com",
+        options={"mock_data": mock_data, "skip_mta_sts_policy_fetch": True},
+    )
+    if not result.get("success") or result.get("module_id") != "infra_email_security":
+        raise AssertionError("mock email security review should succeed")
+
+    blocked = email_mod.run_email_security_review("not a valid domain !!!")
+    if blocked.get("success"):
+        raise AssertionError("invalid domain should fail email security review")
+
+    interpreter = __import__(
+        "utils.email_security_interpreter",
+        fromlist=["interpret_email_security_results"],
+    )
+    findings = interpreter.interpret_email_security_results(mock_data)
+    if not findings:
+        raise AssertionError("email security interpreter should return findings")
+
+    registry_pipeline = __import__(
+        "utils.findings_registry",
+        fromlist=["module_has_findings_pipeline", "interpret_module_findings"],
+    )
+    if not registry_pipeline.module_has_findings_pipeline("infra_email_security"):
+        raise AssertionError("findings pipeline not registered for infra_email_security")
+    pipeline_findings = registry_pipeline.interpret_module_findings("infra_email_security", mock_data)
+    if not pipeline_findings:
+        raise AssertionError("findings pipeline returned no email security findings")
+
+    executor = __import__("modules.executor", fromlist=["is_runtime_ready"])
+    if not executor.is_runtime_ready("infra_email_security"):
+        raise AssertionError("executor cannot load infra_email_security backend")
+
+    source = module_path.read_text(encoding="utf-8")
+    if "smtplib" in source:
+        raise AssertionError("infra_email_security must not import smtplib")
 
 
 def _check_evidence_model() -> None:
@@ -1659,6 +1742,7 @@ def _check_module_sdk() -> None:
         "infra_domain_intel",
         "infra_cert_subdomain",
         "infra_website_metadata",
+        "infra_email_security",
         "infra_whois_rdap",
         "intel_virustotal",
         "intel_abuseipdb",
@@ -2457,6 +2541,11 @@ def main() -> int:
     run(
         "website metadata module",
         lambda: _check_website_metadata_module(),
+    )
+
+    run(
+        "email security module",
+        lambda: _check_email_security_module(),
     )
 
     run(

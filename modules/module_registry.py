@@ -213,6 +213,36 @@ MODULES: list[ModuleEntry] = [
         ),
     ),
     ModuleEntry(
+        module_id="infra_email_security",
+        display_name="Domain Email Security Posture",
+        category="Infrastructure",
+        description="Passive DNS-based review of SPF, DMARC, MX, CAA, MTA-STS, TLS-RPT and BIMI posture.",
+        status="active",
+        mode="passive",
+        risk_level="low",
+        requires_authorisation=False,
+        requires_api_key=False,
+        implemented=True,
+        accepted_target_types=("domain", "url"),
+        config_notes="No API key required. Passive DNS lookups and optional MTA-STS HTTPS policy fetch only.",
+        rate_limit_notes="Uses PROJECT_OVERWATCH_RATE_LIMIT_SECONDS between batch queue passive runs.",
+        short_help="Passive SPF, DMARC, MX, CAA, MTA-STS, TLS-RPT and BIMI review from public DNS.",
+        detailed_help=(
+            "Reviews public DNS records for email security controls: SPF and DMARC TXT records, MX routing, "
+            "CAA certificate authority restrictions, MTA-STS TXT and optional HTTPS policy file, TLS-RPT "
+            "reporting, and BIMI branding metadata. This module does not send email, connect via SMTP, "
+            "test inboxes, brute-force selectors, or validate credentials."
+        ),
+        example_inputs=("example.com", "https://www.example.com/path"),
+        output_summary="SPF/DMARC/MX/CAA/MTA-STS/TLS-RPT/BIMI summaries with cautious advisory findings.",
+        caution_notes=(
+            "DNS and public policy review only — no email is sent and no inboxes are tested.",
+            "Findings are advisory and do not prove messages cannot be spoofed.",
+            "Absence of a record in this lookup does not prove it is not configured elsewhere.",
+            "MTA-STS policy fetch failures are lookup limitations, not confirmed target misconfigurations.",
+        ),
+    ),
+    ModuleEntry(
         module_id="infra_whois_rdap",
         display_name="WHOIS / RDAP Intelligence",
         category="Infrastructure",

@@ -2,6 +2,18 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.7.0 — Domain Email Security Posture
+
+- **`infra_email_security`** — passive DNS-based review of SPF, DMARC, MX, CAA, MTA-STS, TLS-RPT and BIMI for domain/URL targets
+- Module path: `modules/2_infrastructure/infra_email_security.py`
+- No API key required — passive DNS lookups and optional MTA-STS HTTPS policy fetch only
+- Does not send email, connect via SMTP, test inboxes, brute-force selectors, or validate credentials
+- Cautious advisory findings — “public DNS record not observed” rather than definitive “not configured”
+- MX mail-server entities with `uses_mail_server` relationships
+- Evidence capture with `passive_dns_email_security_lookup` collection method
+- Run mode recommendations in Quick Check and Website / Domain Footprint for domain/URL targets
+- Settings runtime health shows no key required; Batch Queue, Entity Workspace, Evidence Locker, and reports integration
+
 ## v2.6.0 — URLhaus Malware URL Intelligence
 
 - **`intel_urlhaus`** — passive abuse.ch URLhaus lookup for URLs, domains, and public IPv4

@@ -1,10 +1,10 @@
-# Project Overwatch v2.6
+# Project Overwatch v2.7
 
 Project Overwatch is a **local** Python/Streamlit dashboard for defensive security intelligence.
 
-**v2.6** adds URLhaus Malware URL Intelligence for passive abuse.ch malware URL and host lookups.
+**v2.7** adds Domain Email Security Posture for passive SPF, DMARC, MX, CAA, MTA-STS, TLS-RPT and BIMI review.
 
-**v2.5** added Shodan Internet Exposure Intelligence. **v2.4** added GreyNoise. **v2.3** added AbuseIPDB. **v2.2** added VirusTotal and platform scaffold polish.
+**v2.6** added URLhaus Malware URL Intelligence. **v2.5** added Shodan. **v2.4** added GreyNoise. **v2.3** added AbuseIPDB. **v2.2** added VirusTotal and platform scaffold polish.
 
 **v2.1** established the secure-by-design baseline.
 
@@ -51,8 +51,8 @@ After collection populates entities, open **Entity Workspace** to pivot between 
 1. **Select an entity** from the active case (type, value, label, source, confidence, timestamps).
 2. Review **Related intelligence** — findings (with status/notes), observations (raw output collapsed), relationships from/to, and matching operations.
 3. Use **Pivot actions** — compatible modules are recommended from existing target compatibility rules:
-   - **Domain** → WHOIS/RDAP Intelligence, Domain Intelligence, Certificate & Subdomain Intelligence, Website Metadata Review
-   - **URL** → WHOIS/RDAP Intelligence, Domain Intelligence, Website Metadata Review (hostname normalised)
+   - **Domain** → WHOIS/RDAP Intelligence, Domain Intelligence, Domain Email Security Posture, Certificate & Subdomain Intelligence, Website Metadata Review
+   - **URL** → WHOIS/RDAP Intelligence, Domain Intelligence, Domain Email Security Posture, Website Metadata Review (hostname normalised)
    - **IPv4** → Network Service Check (authorisation required); public IPs may also use WHOIS/RDAP, AbuseIPDB, VirusTotal, GreyNoise, or Shodan as passive context
    - **Service** → no direct module; review the parent host entity
    - **Email / username** → no implemented modules yet
@@ -69,7 +69,7 @@ Entity notes appear in generated reports where entities are listed.
 The **Batch Queue** page runs compatible follow-up modules for multiple entities in a controlled, visible way:
 
 1. **Select entities** (filter by type) and review compatible module suggestions.
-2. **Add passive modules for selection** — queues WHOIS/RDAP Intelligence, Domain Intelligence, Certificate & Subdomain Intelligence, and Website Metadata Review where compatible.
+2. **Add passive modules for selection** — queues WHOIS/RDAP Intelligence, Domain Intelligence, Domain Email Security Posture, Certificate & Subdomain Intelligence, and Website Metadata Review where compatible.
 3. **Duplicate protection** — the same entity/module pair cannot be queued twice while still queued.
 4. **Recent-run warning** — warns if the same module ran against that target within 24 hours.
 5. **Run passive queue** — one item at a time via the normal executor, with a configurable courtesy delay (default 1.5 s) between passive lookups.
@@ -90,6 +90,7 @@ Results appear automatically in Operations, Observations, Findings, Relationship
 - **Shodan Internet Exposure Intelligence** — passive Shodan host lookup for public IPv4 (`SHODAN_API_KEY` required; host lookup only, no Shodan scans).
 - **URLhaus Malware URL Intelligence** — passive abuse.ch URLhaus lookup for URL, domain, and public IPv4 (`ABUSECH_AUTH_KEY` required; lookup-only, no submission or payload download).
 - **Domain Intelligence** — passive DNS/HTTP/TLS/Wayback for domain or URL.
+- **Domain Email Security Posture** — passive SPF, DMARC, MX, CAA, MTA-STS, TLS-RPT and BIMI DNS review for domain or URL (no email sent).
 - **Certificate & Subdomain Intelligence** — passive certificate transparency names for domain or URL.
 - **Website Metadata Review** — passive homepage title, meta tags, headers, robots.txt, and sitemap hints for domain or URL.
 
@@ -100,7 +101,7 @@ After entering a target, choose **What do you want to do?** on Run Operation:
 | Run mode | Purpose | Typical recommendations |
 |----------|---------|-------------------------|
 | **Quick Check** | Simple default | IPv4 → Network Service Check (+ WHOIS/RDAP; optional AbuseIPDB/VirusTotal/Shodan/URLhaus when keyed; GreyNoise for public IPv4); domain/URL → passive domain modules (+ optional VirusTotal/URLhaus); email/username/unknown → none |
-| **Website / Domain Footprint** | Passive domain footprint | WHOIS/RDAP + Domain Intelligence + Certificate & Subdomain + Website Metadata (+ VirusTotal/URLhaus if key configured; no Nmap, AbuseIPDB, GreyNoise or Shodan by default) |
+| **Website / Domain Footprint** | Passive domain footprint | WHOIS/RDAP + Domain Intelligence + Email Security Posture + Certificate & Subdomain + Website Metadata (+ VirusTotal/URLhaus if key configured; no Nmap, AbuseIPDB, GreyNoise or Shodan by default) |
 | **Local Device / IP Check** | Conservative active IP scan | Network Service Check; public IPv4 may recommend WHOIS/RDAP, GreyNoise, and optional AbuseIPDB/VirusTotal/Shodan/URLhaus; private/local IPs skip API reputation modules; authorisation required |
 | **Custom Module Selection** | Power-user manual pick | All compatible modules shown; no automatic preselection when you change target |
 
@@ -295,7 +296,7 @@ General settings:
 | `PROJECT_OVERWATCH_RDAP_CACHE_TTL_HOURS` | RDAP/WHOIS cache expiry (0 = never) | `0` |
 | `PROJECT_OVERWATCH_LOCAL_ENCRYPTION_KEY` | Optional Fernet key scaffold (not applied to DB yet) | unset |
 
-Future API-backed modules are blocked cleanly when keys are missing. Current passive modules (WHOIS/RDAP Intelligence, Domain Intelligence, Certificate & Subdomain Intelligence, Website Metadata Review) and Nmap do **not** require API keys.
+Future API-backed modules are blocked cleanly when keys are missing. Current passive modules (WHOIS/RDAP Intelligence, Domain Intelligence, Domain Email Security Posture, Certificate & Subdomain Intelligence, Website Metadata Review) and Nmap do **not** require API keys.
 
 ### Optional local password
 
@@ -432,6 +433,30 @@ Included in **Quick Check** and **Website / Domain Footprint** run modes for dom
 5. Run selected modules (passive only — no authorisation checkbox).
 6. Review **Latest Results** → Summary / Module Output tabs for title, robots.txt, sitemap hints.
 7. Check **Findings**, **Observations**, **Graph** (`has_canonical_url`, `references_sitemap` relationships), and **Report**.
+
+### Domain Email Security Posture (v2.7)
+
+Passive module `infra_email_security` for **domain** and **URL** targets. It reviews public DNS and well-known email security controls:
+
+- **SPF** — sender policy framework TXT at the apex (`v=spf1`), terminal policy (`-all`, `~all`, `?all`, `+all`), includes and redirect
+- **DMARC** — `_dmarc.<domain>` TXT (`p=`, `sp=`, `rua`/`ruf`, `pct`, alignment tags)
+- **MX** — mail exchanger priority and hostnames
+- **CAA** — certificate authority authorization records
+- **MTA-STS** — `_mta-sts.<domain>` TXT and optional HTTPS fetch of `https://mta-sts.<domain>/.well-known/mta-sts.txt` when TXT is present
+- **TLS-RPT** — `_smtp._tls.<domain>` reporting TXT
+- **BIMI** — `default._bimi.<domain>` branding TXT (logo/VMC locations not fetched in v2.7)
+
+Included in **Quick Check** and **Website / Domain Footprint** for domain/URL targets. No API key or authorisation required.
+
+**Safety boundary:** DNS/public policy review only — does **not** send email, connect via SMTP, test inboxes, brute-force selectors, or validate credentials. Findings are **advisory** and do not prove messages cannot be spoofed.
+
+**Test with example.com:**
+
+1. `python scripts/smoke_check.py` — offline parser/interpreter checks (no live network required).
+2. `streamlit run main.py` → **Run Operation** → target `example.com` → **Website / Domain Footprint**.
+3. Ensure **Domain Email Security Posture** is selected → run (passive only).
+4. Review SPF/DMARC/MX summary in **Latest Results**; expand record details in the Structured tab.
+5. Check **Findings**, **Evidence Locker**, and **Report** for advisory email security observations.
 
 ## Investigation model
 
@@ -704,7 +729,7 @@ Run `validate_module_registry()` or check **Settings → System status** for met
 python scripts/smoke_check.py
 ```
 
-Smoke checks verify SDK helpers, registry metadata for implemented modules, executor imports, evidence locker integration, and VirusTotal/AbuseIPDB/GreyNoise/Shodan/URLhaus mock lookups — no live network required.
+Smoke checks verify SDK helpers, registry metadata for implemented modules, executor imports, evidence locker integration, Domain Email Security Posture parser/interpreter checks, and VirusTotal/AbuseIPDB/GreyNoise/Shodan/URLhaus mock lookups — no live network required.
 
 Unit tests live in `tests/test_module_sdk.py`. CI runs both smoke check and unit tests (see `.github/workflows/smoke_check.yml`).
 

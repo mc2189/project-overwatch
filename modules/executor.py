@@ -39,6 +39,7 @@ NMAP_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_nmap.p
 DOMAIN_INTEL_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_domain_intel.py"
 CERT_SUBDOMAIN_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_cert_subdomain.py"
 WEBSITE_METADATA_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_website_metadata.py"
+EMAIL_SECURITY_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_email_security.py"
 WHOIS_RDAP_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_whois_rdap.py"
 VIRUSTOTAL_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_virustotal.py"
 ABUSEIPDB_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_abuseipdb.py"
@@ -58,6 +59,9 @@ _cert_subdomain_load_attempted = False
 _website_metadata_handler: Any | None = None
 _website_metadata_load_error: str | None = None
 _website_metadata_load_attempted = False
+_email_security_handler: Any | None = None
+_email_security_load_error: str | None = None
+_email_security_load_attempted = False
 _whois_rdap_handler: Any | None = None
 _whois_rdap_load_error: str | None = None
 _whois_rdap_load_attempted = False
@@ -244,6 +248,29 @@ def _load_website_metadata_handler() -> None:
         _website_metadata_load_error = str(exc)
 
 
+def _load_email_security_handler() -> None:
+    global _email_security_handler, _email_security_load_error, _email_security_load_attempted
+
+    if _email_security_load_attempted:
+        return
+
+    _email_security_load_attempted = True
+
+    if not EMAIL_SECURITY_MODULE_PATH.is_file():
+        _email_security_load_error = f"Module file not found: {EMAIL_SECURITY_MODULE_PATH}"
+        return
+
+    try:
+        spec = importlib.util.spec_from_file_location("infra_email_security", EMAIL_SECURITY_MODULE_PATH)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load module spec from {EMAIL_SECURITY_MODULE_PATH}")
+        infra_email_security = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(infra_email_security)
+        _email_security_handler = infra_email_security.run_email_security_review
+    except Exception as exc:
+        _email_security_load_error = str(exc)
+
+
 def _load_whois_rdap_handler() -> None:
     global _whois_rdap_handler, _whois_rdap_load_error, _whois_rdap_load_attempted
 
@@ -400,6 +427,9 @@ def is_runtime_ready(module_id: str) -> bool:
     if module_id == "infra_website_metadata":
         _load_website_metadata_handler()
         return _website_metadata_handler is not None
+    if module_id == "infra_email_security":
+        _load_email_security_handler()
+        return _email_security_handler is not None
     if module_id == "infra_whois_rdap":
         _load_whois_rdap_handler()
         return _whois_rdap_handler is not None
@@ -440,6 +470,9 @@ def get_runtime_error(module_id: str) -> str | None:
     if module_id == "infra_website_metadata":
         _load_website_metadata_handler()
         return _website_metadata_load_error
+    if module_id == "infra_email_security":
+        _load_email_security_handler()
+        return _email_security_load_error
     if module_id == "infra_whois_rdap":
         _load_whois_rdap_handler()
         return _whois_rdap_load_error
@@ -984,6 +1017,114 @@ def _persist_website_metadata_records(
                 "homepage": homepage,
                 "robots_txt": parsed_data.get("robots_txt", {}),
                 "sitemap_hints": parsed_data.get("sitemap_hints", {}),
+                "warning": parsed_data.get("warning"),
+            }
+        ),
+        raw_output=result["raw_output"],
+        **_observation_evidence_kwargs(module_id, result),
+        conn=conn,
+    )
+
+    _persist_observation_evidence(
+        conn,
+        case_id=case_id,
+        entity_id=domain_entity_id,
+        observation_id=observation["id"],
+        module_id=module_id,
+        result=result,
+    )
+
+    interpreter_findings = result.get("interpreter_findings") or []
+    if interpreter_findings:
+        _persist_module_findings(
+            conn,
+            case_id=case_id,
+            entity_id=domain_entity_id,
+            observation_id=observation["id"],
+            module_id=module_id,
+            interpreter_findings=interpreter_findings,
+        )
+
+
+def _persist_email_security_records(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    domain_entity_id: int,
+    module_id: str,
+    target: str,
+    result: dict[str, Any],
+    authorisation_confirmed: bool,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> None:
+    """Save email security operations, observations, entities, and relationships."""
+    result = _prepare_module_result(result)
+    create_operation_log(
+        case_id,
+        module_id,
+        target,
+        result["status"],
+        authorisation_confirmed=authorisation_confirmed,
+        summary=result["summary"],
+        run_mode_id=run_mode_id,
+        run_mode_label=run_mode_label,
+        conn=conn,
+    )
+
+    if not should_persist_observation(result["status"]):
+        return
+
+    parsed_data = result.get("parsed_data") or {}
+    domain = parsed_data.get("domain") or target
+
+    for mx_record in parsed_data.get("mx") or []:
+        mail_host = mx_record.get("hostname")
+        if not mail_host:
+            continue
+        mail_entity = create_or_get_entity(
+            case_id,
+            "domain",
+            mail_host,
+            label=mail_host,
+            source=module_id,
+            confidence=80,
+            conn=conn,
+        )
+        create_relationship(
+            case_id,
+            domain_entity_id,
+            "uses_mail_server",
+            mail_entity["id"],
+            source_module=module_id,
+            confidence=80,
+            conn=conn,
+        )
+
+    observation = create_observation(
+        case_id,
+        domain_entity_id,
+        module_id,
+        "email_security_posture",
+        "Domain email security posture result",
+        summary=result["summary"],
+        data_json=json.dumps(
+            {
+                "module_id": module_id,
+                "success": result["success"],
+                "status": result["status"],
+                "findings": result.get("findings", []),
+                "interpreter_findings": result.get("interpreter_findings", []),
+                "warnings": result.get("warnings", []),
+                "original_target": parsed_data.get("original_target"),
+                "domain": domain,
+                "spf": parsed_data.get("spf", {}),
+                "dmarc": parsed_data.get("dmarc", {}),
+                "mx": parsed_data.get("mx", []),
+                "caa": parsed_data.get("caa", []),
+                "mta_sts": parsed_data.get("mta_sts", {}),
+                "tls_rpt": parsed_data.get("tls_rpt", {}),
+                "bimi": parsed_data.get("bimi", {}),
                 "warning": parsed_data.get("warning"),
             }
         ),
@@ -2448,6 +2589,81 @@ def _execute_website_metadata(
     return result
 
 
+def _execute_email_security(
+    module_id: str,
+    target: str,
+    options: dict[str, Any],
+    db_context: sqlite3.Connection | None,
+    authorisation_confirmed: bool,
+    case_id: int | None,
+    entity_id: int | None,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> dict[str, Any]:
+    _load_email_security_handler()
+    if _email_security_handler is None:
+        error_message = _email_security_load_error or "Domain Email Security Posture module is not available."
+        return make_result(
+            module_id,
+            success=False,
+            status="error",
+            summary="Domain Email Security Posture module is not available.",
+            errors=[error_message],
+        )
+
+    intel_data = _email_security_handler(target, options=options)
+    if not intel_data.get("success"):
+        errors = intel_data.get("errors") or ["Domain email security review failed."]
+        return make_result(
+            module_id,
+            success=False,
+            status=intel_data.get("status", "error"),
+            summary=errors[0],
+            raw_output=intel_data.get("raw_output", ""),
+            errors=errors,
+            parsed_data=intel_data.get("data"),
+            warnings=intel_data.get("warnings", []),
+        )
+
+    parsed_data = intel_data.get("data") or {}
+    domain = parsed_data.get("domain") or target
+    interpreter_findings = interpret_module_findings(module_id, parsed_data)
+    result = make_result(
+        module_id,
+        success=True,
+        status=intel_data.get("status", "completed"),
+        summary=intel_data.get("summary", f"Email security posture reviewed for {domain}."),
+        raw_output=intel_data.get("raw_output", ""),
+        findings=intel_data.get("findings", []),
+        warnings=intel_data.get("warnings", []),
+        parsed_data=parsed_data,
+        interpreter_findings=interpreter_findings,
+    )
+
+    if db_context is not None and case_id is not None:
+        domain_entity = create_or_get_entity(
+            case_id,
+            "domain",
+            domain,
+            label=domain,
+            source=module_id,
+            conn=db_context,
+        )
+        _persist_email_security_records(
+            db_context,
+            case_id=case_id,
+            domain_entity_id=domain_entity["id"],
+            module_id=module_id,
+            target=domain,
+            result=result,
+            authorisation_confirmed=authorisation_confirmed,
+            run_mode_id=run_mode_id,
+            run_mode_label=run_mode_label,
+        )
+
+    return result
+
+
 def _execute_whois_rdap(
     module_id: str,
     target: str,
@@ -3289,6 +3505,28 @@ def execute_module(
         return _execute_website_metadata(
             module_id,
             target,
+            db_context,
+            authorisation_confirmed,
+            case_id,
+            entity_id,
+            run_mode_id,
+            run_mode_label,
+        )
+
+    if module_id == "infra_email_security":
+        if not is_runtime_ready(module_id):
+            error_message = get_runtime_error(module_id) or "Domain Email Security Posture runtime is not ready."
+            return make_result(
+                module_id,
+                success=False,
+                status="error",
+                summary="Domain Email Security Posture module is not available.",
+                errors=[error_message],
+            )
+        return _execute_email_security(
+            module_id,
+            target,
+            options,
             db_context,
             authorisation_confirmed,
             case_id,

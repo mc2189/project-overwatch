@@ -374,6 +374,12 @@ def render_run_operation_page(current_case: dict, metrics: dict) -> None:
                         "Fetches the public homepage and reviews title, meta tags, headers, "
                         "link/form counts, robots.txt, and sitemap hints. Does not submit forms."
                     )
+                elif module_id == "infra_email_security":
+                    st.caption("Passive module — no API key or authorisation required.")
+                    st.write(
+                        "Reviews public DNS for SPF, DMARC, MX, CAA, MTA-STS, TLS-RPT and BIMI posture. "
+                        "Does not send email, connect via SMTP, or test inboxes."
+                    )
                 elif module_id == "infra_whois_rdap":
                     st.caption("Passive module — no authorisation required.")
                     st.write(

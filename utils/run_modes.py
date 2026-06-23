@@ -43,7 +43,7 @@ MODE_DESCRIPTIONS: dict[str, str] = {
         "Simple default mode. Recommends the safest useful modules for the detected target type."
     ),
     WEBSITE_FOOTPRINT: (
-        "Passive domain footprinting for domains and URLs using DNS, HTTP/TLS, and certificate transparency."
+        "Passive domain footprinting for domains and URLs using DNS, email security posture, HTTP/TLS, and certificate transparency."
     ),
     LOCAL_IP_CHECK: (
         "Conservative active network service check for a single IPv4 address. Authorisation required."
@@ -60,12 +60,14 @@ _MODE_TARGET_RECOMMENDATIONS: dict[str, dict[str, tuple[str, ...]]] = {
         "domain": (
             "infra_whois_rdap",
             "infra_domain_intel",
+            "infra_email_security",
             "infra_cert_subdomain",
             "infra_website_metadata",
         ),
         "url": (
             "infra_whois_rdap",
             "infra_domain_intel",
+            "infra_email_security",
             "infra_cert_subdomain",
             "infra_website_metadata",
         ),
@@ -77,12 +79,14 @@ _MODE_TARGET_RECOMMENDATIONS: dict[str, dict[str, tuple[str, ...]]] = {
         "domain": (
             "infra_whois_rdap",
             "infra_domain_intel",
+            "infra_email_security",
             "infra_cert_subdomain",
             "infra_website_metadata",
         ),
         "url": (
             "infra_whois_rdap",
             "infra_domain_intel",
+            "infra_email_security",
             "infra_cert_subdomain",
             "infra_website_metadata",
         ),
@@ -323,12 +327,12 @@ def get_recommendation_reason(
             )
         if _virustotal_configured():
             return (
-                "Website / Domain Footprint recommends passive registration metadata (RDAP), DNS, HTTP/TLS, "
-                "certificate transparency, and optional VirusTotal reputation enrichment. Nmap is not included by default."
+                "Website / Domain Footprint recommends passive registration metadata (RDAP), DNS, email security posture, "
+                "HTTP/TLS, certificate transparency, and optional VirusTotal reputation enrichment. Nmap is not included by default."
             )
         return (
-            "Website / Domain Footprint recommends passive registration metadata (RDAP), DNS, HTTP/TLS, "
-            "and certificate transparency lookups. Nmap is not included by default."
+            "Website / Domain Footprint recommends passive registration metadata (RDAP), DNS, email security posture, "
+            "HTTP/TLS, and certificate transparency lookups. Nmap is not included by default."
         )
 
     if mode_id == LOCAL_IP_CHECK:
