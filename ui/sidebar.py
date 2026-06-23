@@ -13,7 +13,14 @@ from version import PROJECT_VERSION
 
 def render_sidebar() -> str:
     st.title("Project Overwatch")
-    st.caption(f"v{PROJECT_VERSION} · Local intelligence dashboard")
+    st.caption(f"v{PROJECT_VERSION} · Guided assessment workspace")
+
+    if st.session_state.get("operation_target", "").strip():
+        st.caption(f"Target: `{st.session_state.operation_target.strip()}`")
+    if st.session_state.get("operating_context"):
+        from utils.operating_context import operating_context_label
+
+        st.caption(f"Context: {operating_context_label(st.session_state.operating_context)}")
 
     from utils.local_auth import local_auth_enabled
 

@@ -1,10 +1,10 @@
-# Project Overwatch v2.11
+# Project Overwatch v2.12
 
 Project Overwatch is a **local** Python/Streamlit intelligence, OSINT, security testing and resilience advisory dashboard for **private internal use** supporting future client assessments.
 
-**v2.11** adds **operating contexts** on Run Operation — Passive Research, Personal Lab, and Client Engagement — with clearer preflight guardrails for active modules.
+**v2.12** redesigns **Run Operation** as a **guided assessment workspace** — target profile, goal selector, recommended journey, concise run panel, result cards, and next-best-action suggestions.
 
-**v2.10** adds **HTTP Security Header Review**. **v2.9** added SSL / TLS Configuration Review. **v2.8** added client engagements, scoped assets, rules of engagement, and executor guardrails.
+**v2.11** added operating contexts (Passive Research, Personal Lab, Client Engagement). **v2.10** adds HTTP Security Header Review.
 
 Use only on systems you own, lab environments, or targets with **written permission**.
 
@@ -16,7 +16,7 @@ The sidebar provides case selection and main navigation:
 
 | Page | Purpose |
 |------|---------|
-| **Run Operation** | Target entry, module cards, configuration, operation plan, launch |
+| **Run Operation** | Guided assessment workspace — target profile, goals, journey, run, results |
 | **Client Engagements** | Client engagement records, scope assets, rules of engagement, emergency stop |
 | **Findings** | Triage advisory findings |
 | **Entity Workspace** | Inspect entities, pivot to compatible modules, edit analyst notes |
@@ -106,6 +106,20 @@ Before running modules, choose **Operating context** on Run Operation:
 | **Client Engagement** | Formal client assessments | Full engagement, scope, ROE, and authorisation checks |
 
 Personal Lab uses a separate scope table (not a fake client engagement). A preflight panel shows Ready / Needs action / Blocked with fix hints. Private/local IPs can be quick-added to Personal Lab scope.
+
+### Guided assessment workspace (v2.12)
+
+**Run Operation** is now a workspace-style flow:
+
+1. **Target profile** — detected type, case history, open findings, compatible module families, suggested goals
+2. **Goal selector** — choose what you want to achieve (quick safety check, website posture, email spoofing review, exposure, reputation, local network, evidence review, full client-style assessment, or custom)
+3. **Recommended journey** — recommended, optional, blocked, and not-relevant checks in compact lists
+4. **Run panel** — selected/passive/active counts, operating context, compact preflight, and **Run selected checks** near the top
+5. **Concise result cards** — one-line summary, severity, suggested action; details in expanders
+6. **Next best actions** — side panel suggestions (run follow-up module, queue pivot, generate report, triage findings)
+7. **Advanced / Custom module selection** — full manual module picker for power users
+
+Raw module output and long configuration text are collapsed into expanders by default.
 
 ### Guided run modes (v1.5)
 
@@ -633,7 +647,7 @@ Saved reports go to `reports/` (gitignored). Encrypted exports go to `exports/`.
 ```
 main.py                    Streamlit entry point and navigation router
 ui/                        Run Operation, archive pages, findings, metrics
-version.py                 PROJECT_VERSION = "2.11.0"
+version.py                 PROJECT_VERSION = "2.12.0"
 scripts/smoke_check.py     Local sanity checks
 requirements-optional.txt  kaleido, weasyprint (optional)
 database/db_setup.py       SQLite schema and helpers

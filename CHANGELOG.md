@@ -2,6 +2,19 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.12.0 — Guided Assessment Workspace
+
+- **Assessment Workspace** replaces the long Run Operation scroll with a guided layout: target profile → goal → journey → run → results
+- **Goal selector** — Quick safety check, website/domain posture, email spoofing review, external exposure, threat reputation, local network, evidence review, full client-style assessment, and custom module selection
+- **`utils/target_profile.py`** — compact case history, findings count, compatible families, and suggested goals
+- **`utils/journey_planner.py`** — recommended, optional, blocked, and not-relevant check groupings
+- **`utils/next_actions.py`** — next-best-action suggestions after runs (run module, queue pivot, report, scope, triage)
+- **`utils/pivot_discovery.py`** — surface subdomains, IPs, services, and URLs from latest results
+- **Concise result cards** with collapsed raw output, pivot actions, and report journey shortcuts
+- **Run status panel** — current and recent session runs in the side column
+- **Compact preflight** — active-check status near the run button
+- Custom module selection moved behind **Advanced / Custom module selection**
+
 ## v2.11.0 — Lab Mode and Guardrail UX Refactor
 
 - **Operating contexts** on Run Operation: Passive Research, Personal Lab, and Client Engagement

@@ -2906,6 +2906,61 @@ def _check_operating_context_framework() -> None:
         conn.close()
 
 
+def _check_guided_workspace_helpers() -> None:
+    from utils.assessment_goals import GOAL_QUICK_SAFETY, get_modules_for_goal, list_assessment_goals
+    from utils.journey_planner import build_assessment_journey
+    from utils.next_actions import suggest_next_actions
+    from utils.pivot_discovery import discover_pivots_from_results
+    from utils.target_profile import build_target_profile
+    from database.db_setup import create_case, get_db_conn
+
+    if not list_assessment_goals():
+        raise AssertionError("assessment goals should be defined")
+    modules = get_modules_for_goal(GOAL_QUICK_SAFETY, "domain", target="example.com")
+    if not modules:
+        raise AssertionError("quick safety goal should recommend domain modules")
+
+    conn = get_db_conn()
+    try:
+        case = create_case("Workspace Smoke", conn=conn)
+        profile = build_target_profile(case["id"], "example.com", conn=conn)
+        if profile.get("target_type") != "domain":
+            raise AssertionError("target profile type detection failed")
+        journey = build_assessment_journey(
+            case_id=case["id"],
+            target="example.com",
+            goal_id=GOAL_QUICK_SAFETY,
+            operating_context="passive_research",
+            conn=conn,
+        )
+        if not journey.get("recommended") and not journey.get("optional"):
+            raise AssertionError("journey should classify modules")
+        actions = suggest_next_actions(
+            case_id=case["id"],
+            target="example.com",
+            goal_id=GOAL_QUICK_SAFETY,
+            target_profile=profile,
+            latest_results=[],
+            conn=conn,
+        )
+        if not actions:
+            raise AssertionError("next actions should return suggestions")
+    finally:
+        conn.close()
+
+    pivots = discover_pivots_from_results(
+        [
+            {
+                "success": True,
+                "module_id": "infra_cert_subdomain",
+                "parsed_data": {"subdomains": ["api.example.com"]},
+            }
+        ]
+    )
+    if not pivots:
+        raise AssertionError("pivot discovery should find subdomains")
+
+
 def main() -> int:
     print(f"Project Overwatch smoke check (root: {PROJECT_ROOT})")
     errors = 0
@@ -3090,6 +3145,11 @@ def main() -> int:
     run(
         "operating context framework",
         lambda: _check_operating_context_framework(),
+    )
+
+    run(
+        "guided workspace helpers",
+        lambda: _check_guided_workspace_helpers(),
     )
 
     run(
