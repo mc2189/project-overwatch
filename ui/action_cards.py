@@ -6,6 +6,7 @@ from typing import Any
 
 import streamlit as st
 
+from ui.styles import render_empty_state
 from ui.workspace_actions import apply_workspace_action
 
 _PRIORITY_BADGE = {
@@ -28,7 +29,7 @@ def render_action_card(
 
     with st.container(border=True):
         st.markdown(f"{badge} **{action.get('title', 'Action')}**")
-        st.caption(action.get("reason", ""))
+        st.caption((action.get("reason") or "")[:120])
         if action.get("why_detail") and action.get("why_detail") != action.get("reason"):
             with st.expander("Why am I seeing this?", expanded=False):
                 st.caption(action["why_detail"])
@@ -56,12 +57,12 @@ def render_action_cards(
     actions: list[dict[str, Any]],
     *,
     case_id: int,
-    title: str = "Suggested next actions",
-    limit: int = 8,
+    title: str = "Next steps",
+    limit: int = 3,
     key_prefix: str = "ws",
 ) -> None:
-    """Render a list of action cards."""
-    st.markdown(f"**{title}**")
+    """Render top action cards with optional show-more expander."""
+    st.markdown(f"#### {title}")
     if st.session_state.get("workspace_action_message"):
         st.success(st.session_state.workspace_action_message)
         if st.button("Dismiss", key=f"{key_prefix}_dismiss_msg"):
@@ -69,11 +70,16 @@ def render_action_cards(
             st.rerun()
 
     if not actions:
-        st.caption("Run checks to receive tailored suggestions.")
+        render_empty_state("No recommended next actions yet.")
         return
 
     for action in actions[:limit]:
         render_action_card(action, case_id=case_id, key_prefix=key_prefix)
+
+    if len(actions) > limit:
+        with st.expander(f"Show more suggestions ({len(actions) - limit})", expanded=False):
+            for action in actions[limit:]:
+                render_action_card(action, case_id=case_id, key_prefix=f"{key_prefix}_more")
 
 
 def render_pivot_cards(
@@ -83,11 +89,12 @@ def render_pivot_cards(
     key_prefix: str = "pivot",
 ) -> None:
     """Render discovered pivot cards with queue and entity actions."""
+    st.markdown("**New pivots**")
     if not pivots:
+        render_empty_state("No new pivots found from this run.")
         return
 
-    st.markdown("**New pivots discovered**")
-    from utils.next_actions import make_action, enrich_action_readiness
+    from utils.next_actions import enrich_action_readiness, make_action
 
     for index, pivot in enumerate(pivots[:6]):
         module_id = (pivot.get("suggested_checks") or [None])[0]
@@ -121,11 +128,6 @@ def render_pivot_cards(
         with st.container(border=True):
             st.markdown(f"**{entity_type}** — `{pivot['value']}`")
             st.caption(f"Source: {pivot.get('source_module', '—')}")
-            if pivot.get("suggested_checks"):
-                st.caption(
-                    "Suggested: "
-                    + ", ".join(pivot["suggested_checks"][:3])
-                )
             c1, c2 = st.columns(2)
             with c1:
                 if queue_action.get("enabled"):

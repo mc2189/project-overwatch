@@ -3165,6 +3165,21 @@ def _check_local_ip_triage() -> None:
         conn.close()
 
 
+def _check_workspace_ui_helpers() -> None:
+    from ui.styles import STATUS_CHIPS, status_chip
+    import ui.action_cards
+    import ui.workspace_cards
+
+    if not STATUS_CHIPS.get("ready"):
+        raise AssertionError("status chips should define ready")
+    if "Ready" not in status_chip("ready"):
+        raise AssertionError("status_chip should format ready label")
+    if not hasattr(ui.workspace_cards, "render_target_profile_card"):
+        raise AssertionError("workspace_cards should expose card helpers")
+    if not hasattr(ui.action_cards, "render_action_cards"):
+        raise AssertionError("action_cards should expose render_action_cards")
+
+
 def _check_guided_workspace_helpers() -> None:
     from utils.assessment_goals import GOAL_QUICK_SAFETY, get_modules_for_goal, list_assessment_goals
     from utils.journey_planner import build_assessment_journey
@@ -3427,6 +3442,11 @@ def main() -> int:
     run(
         "operating context framework",
         lambda: _check_operating_context_framework(),
+    )
+
+    run(
+        "workspace UI helpers",
+        lambda: _check_workspace_ui_helpers(),
     )
 
     run(

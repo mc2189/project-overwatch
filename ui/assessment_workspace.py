@@ -8,31 +8,37 @@ from database.db_setup import create_or_get_entity, get_db_conn, infer_entity_ty
 from database.engagements import get_engagement_for_case
 from modules.executor import execute_module
 from modules.module_registry import get_module, is_executable
+from ui.action_cards import render_action_cards
 from ui.compact_preflight import render_compact_preflight
 from ui.concise_results import render_workspace_results
 from ui.constants import IMPLEMENTED_MODULE_IDS, MODULE_CARD_TITLES
-from ui.metrics import render_compact_metrics
 from ui.module_config_compact import render_advanced_module_settings, render_module_info_expanders
 from ui.module_runtime import module_disable_reason, module_enabled_for_ui
-from ui.action_cards import render_action_cards
 from ui.run_status_panel import record_workspace_run, render_run_status_panel
+from ui.styles import apply_workspace_styles, section_heading
+from ui.workspace_cards import (
+    render_goal_card,
+    render_mode_explainer,
+    render_module_check_card,
+    render_readiness_summary,
+    render_target_profile_card,
+)
 from utils.assessment_goals import (
     GOAL_CUSTOM,
     GOAL_EVIDENCE_REVIEW,
     GOAL_QUICK_SAFETY,
     get_modules_for_goal,
-    goal_description,
     goal_label,
     goal_to_run_mode_id,
     list_assessment_goals,
     suggested_goals_for_target,
 )
+from utils.engagement_guardrails import assess_target_scope
 from utils.journey_planner import build_assessment_journey
 from utils.module_compatibility import build_operation_plan
 from utils.next_actions import suggest_next_actions
 from utils.operating_context import (
     CLIENT_ENGAGEMENT,
-    OPERATING_CONTEXT_DESCRIPTIONS,
     PASSIVE_RESEARCH,
     PERSONAL_LAB,
     PERSONAL_LAB_CONFIRMATION_TEXT,
@@ -49,15 +55,13 @@ from utils.run_modes import (
     quick_check_supports_port_scan_option,
     sync_run_mode_from_case,
 )
-from utils.target_detection import get_target_type, normalize_target_value, target_type_label
+from utils.target_detection import get_target_type
 from utils.target_profile import build_target_profile
 from utils.web_port_planner import (
     filter_modules_without_service_data,
     is_private_ipv4_target,
     parse_custom_web_port_list,
 )
-
-from utils.engagement_guardrails import assess_target_scope
 
 PREV_GOAL_KEY = "workspace_prev_goal"
 RUN_GOAL_SESSION_KEY = "assessment_goal"
@@ -170,87 +174,6 @@ def _execute_modules(
     return run_results
 
 
-def _render_target_profile(profile: dict) -> None:
-    with st.container(border=True):
-        st.markdown("**Target profile**")
-        if not profile.get("target"):
-            st.caption("Enter a target to see type, case history, and suggested goals.")
-            return
-        cols = st.columns(4)
-        cols[0].metric("Type", profile.get("target_type_label", "—"))
-        cols[1].metric("In case", "Yes" if profile.get("known_in_case") else "No")
-        cols[2].metric("Prior runs", profile.get("operations_count", 0))
-        cols[3].metric("Open findings", profile.get("open_findings_count", 0))
-        if profile.get("normalized") and profile["normalized"] != profile["target"]:
-            st.caption(f"Normalised: `{profile['normalized']}`")
-        elif profile.get("normalized"):
-            st.caption(f"Value: `{profile['normalized']}`")
-        if profile.get("triage_message"):
-            st.info(profile["triage_message"])
-        if profile.get("is_private_ipv4") and not profile.get("has_service_data"):
-            st.caption(
-                "Start with service discovery unless you already know the service and port."
-            )
-        families = profile.get("compatible_module_families") or []
-        if families:
-            st.caption("Compatible families: " + ", ".join(families))
-        if profile.get("known_in_case"):
-            st.success("This target already exists in the current case.")
-        if profile.get("discovered_service_count"):
-            st.caption(f"Discovered services in case: {profile['discovered_service_count']}")
-        if suggested:
-            st.caption(
-                "Suggested goals: "
-                + ", ".join(goal_label(goal_id) for goal_id in suggested[:4])
-            )
-
-
-def _render_journey_section(journey: dict) -> None:
-    st.markdown("**Recommended journey**")
-    if journey.get("triage_message"):
-        st.info(journey["triage_message"])
-    for line in journey.get("triage_guidance") or []:
-        st.caption(line)
-
-    service_table = journey.get("service_table") or []
-    if service_table:
-        st.caption("Discovered services and recommended checks")
-        st.dataframe(
-            [
-                {
-                    "Port": row["port"],
-                    "Detected service": row["detected_service"],
-                    "Classification": row["classification"],
-                    "Recommended check": row["recommended_check"],
-                    "Reason": row["reason"],
-                }
-                for row in service_table[:12]
-            ],
-            width="stretch",
-            hide_index=True,
-        )
-
-    def _list_rows(rows: list[dict], label: str, icon: str) -> None:
-        if not rows:
-            return
-        st.caption(f"{icon} {label} ({len(rows)})")
-        for row in rows[:12]:
-            extra = ""
-            if row.get("blocked_reason"):
-                extra = f" — {row['blocked_reason']}"
-            elif row.get("reason"):
-                extra = f" — {row['reason']}"
-            st.markdown(f"- {row['display_name']}{extra}")
-
-    _list_rows(journey.get("recommended") or [], "Recommended checks", "✅")
-    _list_rows(journey.get("active_needs_confirmation") or [], "Active — needs confirmation", "⚠️")
-    _list_rows(journey.get("blocked") or [], "Blocked", "🚫")
-    with st.expander("Optional checks", expanded=False):
-        _list_rows(journey.get("optional") or [], "Optional", "○")
-    with st.expander("Not relevant for this target", expanded=False):
-        _list_rows(journey.get("not_relevant") or [], "Not relevant", "—")
-
-
 def _render_custom_module_picker(target: str) -> None:
     with st.expander("Advanced / Custom module selection", expanded=False):
         st.caption("Power-user mode — pick any compatible module manually.")
@@ -269,22 +192,49 @@ def _render_custom_module_picker(target: str) -> None:
                 st.caption(reason)
 
 
-def _render_next_actions(actions: list[dict], case_id: int) -> None:
-    render_action_cards(actions, case_id=case_id, key_prefix="ws_side")
+def _render_journey_details(journey: dict, target: str) -> None:
+    """Full journey details inside an expander."""
+    service_table = journey.get("service_table") or []
+    if service_table:
+        st.caption("Discovered services")
+        st.dataframe(
+            [
+                {
+                    "Port": row["port"],
+                    "Service": row["detected_service"],
+                    "Type": row["classification"],
+                    "Check": row["recommended_check"],
+                }
+                for row in service_table[:12]
+            ],
+            width="stretch",
+            hide_index=True,
+        )
+
+    for label, key, icon in (
+        ("Blocked", "blocked", "⛔"),
+        ("Optional", "optional", "○"),
+        ("Not relevant", "not_relevant", "—"),
+    ):
+        rows = journey.get(key) or []
+        if not rows:
+            continue
+        st.caption(f"{icon} {label} ({len(rows)})")
+        for row in rows[:8]:
+            extra = row.get("blocked_reason") or row.get("reason") or ""
+            st.markdown(f"- {row['display_name']}" + (f" — {extra}" if extra else ""))
 
 
 def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
+    del metrics  # workspace uses case-scoped inline metrics only
+    apply_workspace_styles()
     _init_module_selection()
     st.session_state.setdefault("operation_target", "")
     st.session_state.setdefault(RUN_GOAL_SESSION_KEY, GOAL_QUICK_SAFETY)
     sync_run_mode_from_case(current_case, session_key="operation_run_mode")
 
     st.title("Assessment Workspace")
-    st.caption(
-        f"Case: **{current_case['name']}** (#{current_case['id']}) · "
-        "Enter a target, choose a goal, review the journey, and run."
-    )
-    render_compact_metrics(metrics, minimal=True)
+    st.caption(f"Case: **{current_case['name']}** (#{current_case['id']})")
 
     if st.session_state.get("startup_notice") and not st.session_state.get("startup_notice_dismissed"):
         st.info(st.session_state.startup_notice)
@@ -293,13 +243,12 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
             st.rerun()
 
     if st.session_state.get("workspace_focus_run_panel"):
-        st.markdown("### Run")
         st.session_state.workspace_focus_run_panel = False
 
     main_col, side_col = st.columns([3, 2], gap="large")
 
     with main_col:
-        st.markdown("### Target")
+        section_heading("Target")
         target = st.text_input(
             "Investigation target",
             value=st.session_state.operation_target,
@@ -308,44 +257,36 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
             label_visibility="collapsed",
         )
         st.session_state.operation_target = target
-
         target_type = get_target_type(target or "")
+
         conn = get_db_conn()
         try:
             profile = build_target_profile(current_case["id"], target.strip(), conn=conn)
         finally:
             conn.close()
-        _render_target_profile(profile)
+        suggested = suggested_goals_for_target(target_type, target)
+        render_target_profile_card(profile, suggested_goals=suggested)
 
-        st.markdown("### What do you want to achieve?")
+        section_heading("Goal")
         goal_ids = [goal_id for goal_id, _ in list_assessment_goals()]
         current_goal = st.session_state.get(RUN_GOAL_SESSION_KEY, GOAL_QUICK_SAFETY)
         if current_goal not in goal_ids:
             current_goal = GOAL_QUICK_SAFETY
-        suggested = suggested_goals_for_target(target_type, target)
-        default_index = goal_ids.index(current_goal) if current_goal in goal_ids else 0
-
         goal_id = st.selectbox(
             "Assessment goal",
             options=goal_ids,
-            index=default_index,
+            index=goal_ids.index(current_goal) if current_goal in goal_ids else 0,
             format_func=goal_label,
             key="assessment_goal_select",
             label_visibility="collapsed",
         )
         st.session_state[RUN_GOAL_SESSION_KEY] = goal_id
-        st.caption(goal_description(goal_id))
-        if suggested and goal_id not in suggested[:3]:
-            st.caption(
-                "Tip: "
-                + ", ".join(goal_label(g) for g in suggested[:3])
-                + " are commonly used for this target type."
-            )
+        render_goal_card(goal_id)
 
         include_port_scan = False
         if goal_id == GOAL_QUICK_SAFETY and quick_check_supports_port_scan_option(target_type):
             include_port_scan = st.checkbox(
-                "Include light port scan (active — requires authorisation)",
+                "Include light port scan (active)",
                 value=st.session_state.get("quick_check_include_port_scan", False),
                 key="quick_check_include_port_scan",
             )
@@ -361,8 +302,9 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
         if operating_context not in context_choices:
             operating_context = PASSIVE_RESEARCH
 
-        selected_ids = _selected_module_ids() if goal_id == GOAL_CUSTOM else []
-        if goal_id != GOAL_CUSTOM:
+        if goal_id == GOAL_CUSTOM:
+            selected_ids = _selected_module_ids()
+        else:
             selected_ids = [
                 module_id
                 for module_id in get_modules_for_goal(
@@ -376,11 +318,10 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
             if is_private_ipv4_target(target.strip()) and not profile.get("has_service_data"):
                 selected_ids = filter_modules_without_service_data(selected_ids)
             apply_recommended_selection(selected_ids)
-        else:
-            selected_ids = _selected_module_ids()
 
         personal_lab_confirmed = st.session_state.get("personal_lab_confirmed", False)
         authorisation_confirmed = st.session_state.get("authorisation_confirmed", False)
+        run_mode_id = goal_to_run_mode_id(goal_id)
 
         plan_conn = get_db_conn()
         try:
@@ -395,58 +336,6 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
                 quick_check_include_port_scan=include_port_scan,
                 conn=plan_conn,
             )
-        finally:
-            plan_conn.close()
-
-        _render_journey_section(journey)
-        if is_private_ipv4_target(target.strip()):
-            with st.expander("Local IP web port options", expanded=False):
-                st.caption(
-                    "Try common web ports sequentially (80, 443, 8080, 8443, 8000, 8888) "
-                    "or specify up to 10 custom ports for HTTP/TLS checks."
-                )
-                custom_ports_text = st.text_input(
-                    "Custom web port list",
-                    value=st.session_state.get("custom_web_ports_text", ""),
-                    placeholder="e.g. 8080, 8443",
-                    key="custom_web_ports_input",
-                )
-                st.session_state.custom_web_ports_text = custom_ports_text
-                ports, port_error = parse_custom_web_port_list(custom_ports_text)
-                if port_error and custom_ports_text.strip():
-                    st.caption(port_error)
-                custom_confirmed = st.checkbox(
-                    "I confirm these ports are intended for HTTP/TLS checking",
-                    value=st.session_state.get("custom_web_ports_confirmed", False),
-                    key="custom_web_ports_confirmed",
-                )
-                if custom_confirmed and ports:
-                    st.session_state.pending_custom_web_ports = ports
-        if goal_id == GOAL_CUSTOM:
-            _render_custom_module_picker(target)
-        else:
-            with st.expander("Module details (why / what / safety)", expanded=False):
-                for module_id in selected_ids:
-                    render_module_info_expanders(module_id, target)
-
-        run_mode_id = goal_to_run_mode_id(goal_id)
-        conservative_nmap = run_mode_id in {QUICK_CHECK, LOCAL_IP_CHECK}
-        render_advanced_module_settings(
-            selected_ids,
-            target,
-            conservative_nmap=conservative_nmap,
-        )
-
-        auth_required = _selection_requires_authorisation(selected_ids)
-        passive_count = sum(
-            1
-            for module_id in selected_ids
-            if (module := get_module(module_id)) and module.mode == "passive"
-        )
-        active_count = len(selected_ids) - passive_count
-
-        plan_conn = get_db_conn()
-        try:
             plan = enrich_operation_plan_with_preflight(
                 build_operation_plan(
                     case_name=current_case["name"],
@@ -455,7 +344,7 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
                     selected_module_ids=selected_ids,
                     authorisation_confirmed=(
                         (personal_lab_confirmed if operating_context == PERSONAL_LAB else authorisation_confirmed)
-                        if auth_required
+                        if _selection_requires_authorisation(selected_ids)
                         else True
                     ),
                     run_mode_id=run_mode_id,
@@ -473,26 +362,26 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
         finally:
             plan_conn.close()
 
-        st.markdown("### Run")
+        auth_required = _selection_requires_authorisation(selected_ids)
+        passive_count = sum(
+            1
+            for module_id in selected_ids
+            if (module := get_module(module_id)) and module.mode == "passive"
+        )
+        active_count = len(selected_ids) - passive_count
+
+        section_heading("Readiness")
         with st.container(border=True):
-            oc_col, metrics_col = st.columns([2, 3])
-            with oc_col:
-                operating_context = st.radio(
-                    "Operating context",
-                    options=context_choices,
-                    index=context_choices.index(operating_context),
-                    format_func=operating_context_label,
-                    key="workspace_operating_context",
-                    horizontal=True,
-                )
-                st.session_state.operating_context = operating_context
-            with metrics_col:
-                m1, m2, m3, m4 = st.columns(4)
-                m1.metric("Selected", len(selected_ids))
-                m2.metric("Passive", passive_count)
-                m3.metric("Active", active_count)
-                m4.metric("Auth", "Yes" if auth_required else "No")
-            st.caption(OPERATING_CONTEXT_DESCRIPTIONS.get(operating_context, ""))
+            operating_context = st.radio(
+                "Operating context",
+                options=context_choices,
+                index=context_choices.index(operating_context),
+                format_func=operating_context_label,
+                key="workspace_operating_context",
+                horizontal=True,
+            )
+            st.session_state.operating_context = operating_context
+            render_mode_explainer(operating_context)
 
             if auth_required and operating_context == PERSONAL_LAB:
                 personal_lab_confirmed = st.checkbox(
@@ -504,8 +393,6 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
                 from utils.personal_lab_readiness import classify_personal_lab_target
 
                 target_class = classify_personal_lab_target(target.strip())
-                if target_class.get("hint"):
-                    st.info(target_class["hint"])
                 if target_class.get("warning"):
                     st.warning(target_class["warning"])
             elif auth_required and operating_context == CLIENT_ENGAGEMENT:
@@ -541,22 +428,13 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
                 finally:
                     plan_conn.close()
 
-            if plan.get("expected_outputs"):
-                st.caption(
-                    "Expected: "
-                    + "; ".join(plan["expected_outputs"][:3])
-                    + ("…" if len(plan["expected_outputs"]) > 3 else "")
-                )
-
             preflight_status = render_compact_preflight(
                 operating_context=operating_context,
                 module_preflights=plan.get("module_preflights") or [],
                 selected_module_ids=selected_ids,
+                passive_count=passive_count,
+                active_count=active_count,
             )
-            scope_ready = not plan.get("engagement_blocked_modules")
-            if operating_context == PERSONAL_LAB and auth_required:
-                scope_ready = preflight_status.get("ready", False)
-            st.caption(f"Scope ready: **{'Yes' if scope_ready else 'No'}**")
 
             launch_blocked = None
             if goal_id == GOAL_EVIDENCE_REVIEW:
@@ -576,14 +454,21 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
             elif preflight_status.get("has_active") and not preflight_status.get("ready"):
                 launch_blocked = "Complete active check preflight before running."
 
+            render_readiness_summary(
+                selected_count=len(selected_ids),
+                passive_count=passive_count,
+                active_count=active_count,
+                preflight_result=preflight_status.get("result", "ready"),
+                operating_context=operating_context,
+                one_line_warning=launch_blocked,
+            )
+
             run_clicked = st.button(
                 "Run selected checks",
                 type="primary",
                 disabled=launch_blocked is not None,
                 width="stretch",
             )
-            if launch_blocked:
-                st.caption(launch_blocked)
 
             if run_clicked and not launch_blocked:
                 with st.spinner("Running checks…"):
@@ -606,6 +491,44 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
                 )
                 st.rerun()
 
+        section_heading("Recommended checks")
+        check_rows = (journey.get("recommended") or []) + (journey.get("active_needs_confirmation") or [])
+        if not check_rows:
+            st.caption("Select a goal and target to see recommended checks.")
+        else:
+            for row in check_rows[:8]:
+                render_module_check_card(row, target=target)
+
+        with st.expander("Journey details", expanded=False):
+            _render_journey_details(journey, target)
+
+        if is_private_ipv4_target(target.strip()):
+            with st.expander("Local IP web port options", expanded=False):
+                custom_ports_text = st.text_input(
+                    "Custom web port list (max 10)",
+                    value=st.session_state.get("custom_web_ports_text", ""),
+                    placeholder="e.g. 8080, 8443",
+                    key="custom_web_ports_input",
+                )
+                ports, port_error = parse_custom_web_port_list(custom_ports_text)
+                if port_error and custom_ports_text.strip():
+                    st.caption(port_error)
+                if st.checkbox(
+                    "Confirm ports for HTTP/TLS checking",
+                    key="custom_web_ports_confirmed",
+                ) and ports:
+                    st.session_state.pending_custom_web_ports = ports
+
+        if goal_id == GOAL_CUSTOM:
+            _render_custom_module_picker(target)
+
+        conservative_nmap = run_mode_id in {QUICK_CHECK, LOCAL_IP_CHECK}
+        render_advanced_module_settings(
+            selected_ids,
+            target,
+            conservative_nmap=conservative_nmap,
+        )
+
         latest_results = st.session_state.get("latest_run_results") or []
         latest_target = st.session_state.get("latest_run_target", target)
         if latest_results and latest_target.strip():
@@ -616,26 +539,13 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
             )
 
     with side_col:
-        st.markdown("### Workspace")
-        st.caption(f"Target: `{target.strip() or '—'}`")
-        st.caption(f"Context: {operating_context_label(st.session_state.get('operating_context', PASSIVE_RESEARCH))}")
-        if linked_engagement:
-            st.caption(f"Engagement: {linked_engagement.get('name')} ({linked_engagement.get('status')})")
-        render_run_status_panel()
-
+        section_heading("Next steps")
         profile_with_scope = dict(profile)
         if target.strip() and auth_required and st.session_state.get("operating_context") == PERSONAL_LAB:
-            blocked_preflight = [
-                row
-                for row in (plan.get("module_preflights") or [])
-                if not row.get("allowed")
-            ]
-            needs_manual_scope = any(
+            profile_with_scope["needs_lab_scope"] = any(
                 row.get("needs_lab_scope_add") and not row.get("can_auto_scope")
                 for row in (plan.get("module_preflights") or [])
             )
-            profile_with_scope["personal_lab_blocked"] = bool(blocked_preflight)
-            profile_with_scope["needs_lab_scope"] = needs_manual_scope
             profile_with_scope["personal_lab_confirmed"] = st.session_state.get(
                 "personal_lab_confirmed", False
             )
@@ -655,20 +565,23 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
             )
         finally:
             conn.close()
-        _render_next_actions(actions, current_case["id"])
+        render_action_cards(actions, case_id=current_case["id"], limit=3)
 
-        st.markdown("**Analyst notes**")
-        st.text_area(
-            "Workspace notes",
-            value=st.session_state.get("workspace_analyst_notes", ""),
-            key="workspace_analyst_notes",
-            height=100,
-            label_visibility="collapsed",
-            placeholder="Optional notes for this assessment session…",
-        )
+        with st.expander("Recent runs", expanded=False):
+            render_run_status_panel()
+
+        with st.expander("Analyst notes", expanded=False):
+            st.text_area(
+                "Workspace notes",
+                value=st.session_state.get("workspace_analyst_notes", ""),
+                key="workspace_analyst_notes",
+                height=100,
+                label_visibility="collapsed",
+                placeholder="Optional notes for this session…",
+            )
 
         if target.strip() and operating_context == CLIENT_ENGAGEMENT:
             scope_preview = assess_target_scope(target.strip(), case_id=current_case["id"])
             st.caption(
-                f"Engagement scope: {(scope_preview.get('scope_status') or 'unknown').replace('_', ' ')}"
+                f"Scope: {(scope_preview.get('scope_status') or 'unknown').replace('_', ' ')}"
             )

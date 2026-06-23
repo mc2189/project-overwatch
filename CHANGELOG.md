@@ -2,6 +2,19 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.16.0 — Workspace UI Polish and Readability Pass
+
+- **Visual hierarchy** — Assessment Workspace sections: Target, Goal, Readiness, Recommended checks, Results, Next steps
+- **`ui/styles.py`** — status chips, section headings, empty states, light CSS polish
+- **`ui/workspace_cards.py`** — reusable target, goal, module, readiness, and report journey cards
+- **Run button placement** — readiness summary and primary run action moved above detailed journey content
+- **Condensed preflight** — one-line summary with **Show readiness details** expander
+- **Result cards** — status chips, plain-English timeout messaging, collapsed Summary/Findings/Raw expanders
+- **Next actions** — top 3 by default with **Show more suggestions**
+- **Empty states** — friendly messages for missing target, pivots, and actions
+- **Sidebar** — simplified case, mode, and navigation; runtime health stays on Settings
+- **Local IP route card** — clear discover → review → findings path for private targets
+
 ## v2.15.0 — Local Target Triage and Port-aware HTTP/TLS Planning
 
 - **Local/private IP triage** — Network Service Check recommended first when no service data exists; no blind TLS/HTTP on port 443

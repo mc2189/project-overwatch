@@ -1,10 +1,10 @@
-# Project Overwatch v2.15
+# Project Overwatch v2.16
 
 Project Overwatch is a **local** Python/Streamlit intelligence, OSINT, security testing and resilience advisory dashboard for **private internal use** supporting future client assessments.
 
-**v2.15** makes **local/private IP testing port-aware** — Network Service Check first, HTTP/TLS only on discovered web ports, and clear handling when services do not respond.
+**v2.16** polishes the **Assessment Workspace** — clearer sections, compact cards, summarised readiness, and collapsed advanced detail.
 
-**v2.14** turns suggested next actions into **actionable one-click workflow cards** with guardrail-aware buttons, pivot discovery, and Batch Queue integration.
+**v2.15** makes **local/private IP testing port-aware**. **v2.14** adds actionable next-step cards.
 
 **v2.13** improves **Personal Lab mode** — one confirmation checkbox auto-adds unknown targets to lab scope on run for safe active checks.
 
@@ -111,19 +111,23 @@ Before running modules, choose **Operating context** on Run Operation:
 
 Personal Lab uses a separate scope table (not a fake client engagement). Tick **one confirmation checkbox** in the run panel — unknown targets are **auto-added to Personal Lab scope on run** for safe active checks (TLS Review, HTTP Header Review, conservative Nmap). Public targets show a permission reminder; private/local targets show home-lab guidance. Client Engagement mode remains stricter.
 
-### Guided assessment workspace (v2.12)
+### Guided assessment workspace (v2.12–v2.16)
 
-**Run Operation** is now a workspace-style flow:
+**Run Operation** is a workspace with clear sections: **Target → Goal → Readiness → Recommended checks → Results → Next steps**.
 
-1. **Target profile** — detected type, case history, open findings, compatible module families, suggested goals
-2. **Goal selector** — choose what you want to achieve (quick safety check, website posture, email spoofing review, exposure, reputation, local network, evidence review, full client-style assessment, or custom)
-3. **Recommended journey** — recommended, optional, blocked, and not-relevant checks in compact lists
-4. **Run panel** — selected/passive/active counts, operating context, compact preflight, and **Run selected checks** near the top
-5. **Concise result cards** — one-line summary, severity, suggested action; details in expanders
-6. **Next best actions** — side panel suggestions (run follow-up module, queue pivot, generate report, triage findings)
-7. **Advanced / Custom module selection** — full manual module picker for power users
+**v2.16 UI polish:**
+- **Card layout** — target profile, goal, module checks, readiness, results, and next actions use consistent bordered cards
+- **Status chips** — Ready, Needs confirmation, Blocked, Passive, Active, Complete, No response, etc.
+- **Run button placement** — readiness summary and **Run selected checks** appear before long journey detail
+- **Summarised preflight** — one-line readiness by default; per-module detail in **Show readiness details**
+- **Collapsed detail** — module help, journey tables, advanced settings, raw output, and analyst notes live in expanders
+- **Next steps** — top 3 suggestions in the side column; more behind **Show more suggestions**
+- **Empty states** — friendly messages when no target, findings, pivots, or actions exist
+- **Operating mode explainer** — short Passive / Personal Lab / Client Engagement descriptions in a collapsible panel
 
-Raw module output and long configuration text are collapsed into expanders by default.
+**Quick example:** Enter `example.com` → choose **Quick safety check** → review readiness → click **Run selected checks** → read the result card summary → click a **Next step** card to queue a follow-up.
+
+Raw module output and technical data remain available under result **Details** expanders.
 
 ### Actionable next steps and pivots (v2.14)
 
@@ -688,7 +692,7 @@ Saved reports go to `reports/` (gitignored). Encrypted exports go to `exports/`.
 ```
 main.py                    Streamlit entry point and navigation router
 ui/                        Run Operation, archive pages, findings, metrics
-version.py                 PROJECT_VERSION = "2.15.0"
+version.py                 PROJECT_VERSION = "2.16.0"
 scripts/smoke_check.py     Local sanity checks
 requirements-optional.txt  kaleido, weasyprint (optional)
 database/db_setup.py       SQLite schema and helpers

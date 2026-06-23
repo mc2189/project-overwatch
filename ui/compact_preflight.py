@@ -6,6 +6,7 @@ from typing import Any
 
 import streamlit as st
 
+from ui.styles import render_status_chip, status_chip
 from utils.module_testing_levels import get_module_testing_level, is_active_testing_level
 from utils.operating_context import PERSONAL_LAB, operating_context_label
 
@@ -37,11 +38,63 @@ def _aggregate_personal_lab_status(active_rows: list[dict[str, Any]]) -> dict[st
     return {**readiness, "allowed": all_allowed, "result": result}
 
 
+def _build_summary_line(
+    *,
+    active_count: int,
+    operating_context: str,
+    result: str,
+    personal_lab_confirmed: bool | None = None,
+) -> str:
+    if active_count == 0:
+        return "No active checks in this run."
+    if result == "ready":
+        return f"Ready to run {active_count} active check(s)."
+    if result == "blocked":
+        return f"{active_count} active check(s). One or more checks are blocked."
+    if operating_context == PERSONAL_LAB and not personal_lab_confirmed:
+        return f"{active_count} active check(s) selected. Personal Lab confirmation required."
+    return f"{active_count} active check(s) selected. Confirmation required."
+
+
+def _render_preflight_details(
+    *,
+    operating_context: str,
+    active_rows: list[dict[str, Any]],
+    lab_status: dict[str, Any] | None,
+) -> None:
+    if operating_context == PERSONAL_LAB and lab_status:
+        st.caption(f"Operating context: **Personal Lab**")
+        confirmation_label = "confirmed" if lab_status.get("confirmed") else "required"
+        st.markdown(f"- Lab confirmation: **{confirmation_label}**")
+        st.markdown(f"- Lab scope: **{lab_status.get('scope_label') or 'unknown'}**")
+        st.markdown("- Testing level: **safe active permitted**")
+        if lab_status.get("target_hint"):
+            st.info(lab_status["target_hint"])
+        if lab_status.get("target_warning"):
+            st.warning(lab_status["target_warning"])
+        for row in active_rows:
+            if not row.get("allowed") and row.get("blocked_reason"):
+                st.caption(f"{row.get('display_name')}: {row['blocked_reason']}")
+    else:
+        st.caption(f"Operating context: **{operating_context_label(operating_context)}**")
+        for row in active_rows:
+            icon = "✅" if row.get("allowed") else ("🚫" if row.get("result") == "blocked" else "⚠️")
+            label = row.get("display_name") or row.get("module_id")
+            st.markdown(f"{icon} **{label}** — {row.get('result', 'unknown').replace('_', ' ')}")
+            if row.get("blocked_reason") and not row.get("allowed"):
+                st.caption(row["blocked_reason"])
+            for item in row.get("items") or []:
+                if item.get("status") == "fail" and item.get("fix"):
+                    st.caption(f"→ {item['fix']}")
+
+
 def render_compact_preflight(
     *,
     operating_context: str,
     module_preflights: list[dict[str, Any]],
     selected_module_ids: list[str],
+    passive_count: int = 0,
+    active_count: int = 0,
 ) -> dict[str, Any]:
     """Render a compact preflight summary; return aggregate status."""
     active_rows = [
@@ -51,53 +104,30 @@ def render_compact_preflight(
         and is_active_testing_level(get_module_testing_level(row.get("module_id", "")))
     ]
     if not active_rows:
-        return {"has_active": False, "ready": True, "result": "ready"}
+        if active_count:
+            st.caption(_build_summary_line(active_count=active_count, operating_context=operating_context, result="ready"))
+        return {"has_active": False, "ready": True, "result": "ready", "summary": "Passive checks only."}
 
-    with st.container(border=True):
-        st.markdown("**Active check preflight**")
-
-        if operating_context == PERSONAL_LAB:
-            lab_status = _aggregate_personal_lab_status(active_rows) or {}
-            st.caption(f"Operating context: **Personal Lab**")
-            confirmation_label = "confirmed" if lab_status.get("confirmed") else "required"
-            st.markdown(f"- Lab confirmation: **{confirmation_label}**")
-            scope_label = lab_status.get("scope_label") or "unknown"
-            st.markdown(f"- Lab scope: **{scope_label}**")
-            st.markdown("- Testing level: **safe active permitted**")
-            st.markdown("- Emergency stop: **not applicable**")
-            result = lab_status.get("result", "needs_confirmation")
-            result_display = {
-                "ready": "Ready",
-                "needs_confirmation": "Needs confirmation",
-                "needs_action": "Needs confirmation",
-                "blocked": "Blocked",
-            }.get(result, result.replace("_", " ").title())
-            if lab_status.get("allowed"):
-                st.success(f"Result: **Ready**")
-            elif result in {"needs_confirmation", "needs_action"}:
-                st.warning(f"Result: **{result_display}**")
-            else:
-                st.error(f"Result: **{result_display}**")
-            if lab_status.get("target_hint"):
-                st.info(lab_status["target_hint"])
-            if lab_status.get("target_warning"):
-                st.warning(lab_status["target_warning"])
-            for row in active_rows:
-                if not row.get("allowed") and row.get("blocked_reason"):
-                    st.caption(f"{row.get('display_name')}: {row['blocked_reason']}")
-        else:
-            st.caption(f"Operating context: **{operating_context_label(operating_context)}**")
-            for row in active_rows:
-                icon = "✅" if row.get("allowed") else ("🚫" if row.get("result") == "blocked" else "⚠️")
-                label = row.get("display_name") or row.get("module_id")
-                st.markdown(f"{icon} **{label}** — {row.get('result', 'unknown').replace('_', ' ')}")
-                if row.get("blocked_reason") and not row.get("allowed"):
-                    st.caption(row["blocked_reason"])
-                for item in row.get("items") or []:
-                    if item.get("status") == "fail" and item.get("fix"):
-                        st.caption(f"→ {item['fix']}")
-
+    lab_status = _aggregate_personal_lab_status(active_rows) if operating_context == PERSONAL_LAB else None
     all_ready = all(row.get("allowed") for row in active_rows)
     any_blocked = any(row.get("result") == "blocked" for row in active_rows)
     result = "ready" if all_ready else ("blocked" if any_blocked else "needs_confirmation")
-    return {"has_active": True, "ready": all_ready, "result": result}
+
+    summary = _build_summary_line(
+        active_count=len(active_rows),
+        operating_context=operating_context,
+        result=result,
+        personal_lab_confirmed=lab_status.get("confirmed") if lab_status else None,
+    )
+
+    chip_key = "ready" if result == "ready" else ("blocked" if result == "blocked" else "needs_confirmation")
+    render_status_chip(chip_key, label=summary)
+
+    with st.expander("Show readiness details", expanded=False):
+        _render_preflight_details(
+            operating_context=operating_context,
+            active_rows=active_rows,
+            lab_status=lab_status,
+        )
+
+    return {"has_active": True, "ready": all_ready, "result": result, "summary": summary}
