@@ -31,8 +31,19 @@ def apply_workspace_action(action: dict[str, Any], case_id: int) -> str:
             return "No module specified for this action."
         for mid in IMPLEMENTED_MODULE_IDS:
             st.session_state[f"module_sel_{mid}"] = mid == module_id
-        if action.get("target"):
-            st.session_state.operation_target = action["target"]
+        action_target = (action.get("target") or "").strip()
+        if action_target:
+            st.session_state.operation_target = action_target
+            if module_id == "infra_http_security" and action_target.startswith(("http://", "https://")):
+                st.session_state.http_requested_url = action_target
+                st.session_state.http_target_source = "discovered_service"
+            if module_id == "infra_tls_review":
+                import re
+
+                port_match = re.search(r"port\s+(\d+)", action.get("title", ""), re.IGNORECASE)
+                if port_match:
+                    st.session_state.tls_review_port_override = int(port_match.group(1))
+                    st.session_state.tls_target_source = "discovered_service"
         if action.get("goal_id"):
             st.session_state[ASSESSMENT_GOAL_SESSION_KEY] = action["goal_id"]
         st.session_state.workspace_focus_run_panel = True
@@ -135,5 +146,35 @@ def apply_workspace_action(action: dict[str, Any], case_id: int) -> str:
         note = f"[{action.get('title', 'Note')}] {action.get('reason', '')}"
         st.session_state.workspace_analyst_notes = (existing + "\n" + note).strip()
         return "Added note to workspace analyst notes."
+
+    if action_type == "try_common_web_ports":
+        target = (action.get("target") or "").strip()
+        if not target:
+            return "No target specified for web port probe."
+        if (
+            st.session_state.get("operating_context") == "personal_lab"
+            and not st.session_state.get("personal_lab_confirmed")
+        ):
+            return "Tick Personal Lab confirmation before probing web ports."
+        if (
+            st.session_state.get("operating_context") == "client_engagement"
+            and not st.session_state.get("authorisation_confirmed")
+        ):
+            return "Confirm authorisation before probing web ports."
+        from utils.web_port_planner import DEFAULT_COMMON_WEB_PORTS, probe_web_ports_sequential, reachable_probe_ports
+
+        results = probe_web_ports_sequential(target, DEFAULT_COMMON_WEB_PORTS)
+        reachable = reachable_probe_ports(results)
+        st.session_state[f"web_port_probe_{target}"] = results
+        if reachable:
+            ports = ", ".join(str(row["port"]) for row in reachable)
+            st.session_state.pending_web_port_target = target
+            st.session_state.pending_web_ports = [row["port"] for row in reachable]
+            return f"Reachable web ports on `{target}`: {ports}. Use advanced HTTP/TLS settings or next actions."
+        attempted = ", ".join(str(row["port"]) for row in results)
+        return (
+            f"No common web ports responded on `{target}` (tried {attempted}). "
+            "Run Network Service Check or confirm the host is online."
+        )
 
     return "Action applied."

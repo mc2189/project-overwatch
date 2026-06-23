@@ -2,6 +2,18 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.15.0 — Local Target Triage and Port-aware HTTP/TLS Planning
+
+- **Local/private IP triage** — Network Service Check recommended first when no service data exists; no blind TLS/HTTP on port 443
+- **`utils/service_classifier.py`** — classifies observations as HTTP, HTTPS/TLS, non-web, or unknown
+- **`utils/service_discovery.py`** — loads ports from Nmap observations, service entities, and prior runs
+- **`utils/web_port_planner.py`** — common web port probe, custom port validation (max 10, no ranges), journey filtering
+- **Journey service table** — Port, Detected service, Classification, Recommended check, Reason for discovered services
+- **HTTP/TLS timeout handling** — no missing-header or certificate findings when service is unreachable; clear connection outcome
+- **Pivot discovery** — no URL pivot from unreachable default-generated HTTPS URLs
+- **Next actions** — nmap-first for private IPs; try common web ports; port-specific HTTP/TLS when services discovered
+- **Target selection notes** — modules show whether target assumes default 443, uses discovered service, or manual port
+
 ## v2.14.0 — Actionable Next Steps and One-click Pivots
 
 - **Standardised next-action schema** — `utils/next_actions.py` actions include id, title, reason, priority, action_type, target, entity/finding/module ids, enabled flag, blocked_reason, and button_label

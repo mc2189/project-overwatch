@@ -66,17 +66,22 @@ def interpret_tls_review_results(parsed_data: dict[str, Any]) -> list[dict[str, 
     elif conn.get("error"):
         findings.append(
             make_finding(
-                "TLS connection failed",
-                "low",
-                75,
-                f"TLS review could not complete a handshake to {endpoint}: {conn['error']}. "
-                "This may indicate no TLS service, filtering, or transient unavailability — point-in-time result.",
+                "TLS service not reachable",
+                "info",
+                88,
+                f"No TLS response from {endpoint}. The selected service was not reachable "
+                f"({conn['error']}). This does not prove weak TLS — no usable handshake was received.",
                 [
-                    "Retry later if the asset is expected to expose TLS.",
-                    "Confirm host, port, and network path with the client.",
+                    "Run Network Service Check to identify TLS services and ports.",
+                    "Confirm the host is online and the expected port is correct.",
                 ],
+                finding_kind=FINDING_KIND_SOURCE_NOTICE,
             )
         )
+        return findings
+
+    if not conn.get("success"):
+        return findings
 
     days = cert.get("days_until_expiry")
     if days is not None:

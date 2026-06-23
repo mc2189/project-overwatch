@@ -11,7 +11,15 @@ from utils.assessment_goals import get_modules_for_goal
 from utils.module_compatibility import get_compatible_modules, get_incompatible_reason
 from utils.module_testing_levels import get_module_testing_level, is_active_testing_level
 from utils.operating_context import check_module_execution_guardrails
+from utils.security import is_private_or_local_ip
+from utils.service_discovery import build_service_recommendation_table, load_discovered_services
 from utils.target_detection import get_target_type
+from utils.web_port_planner import (
+    filter_modules_without_service_data,
+    is_private_ipv4_target,
+    journey_guidance_for_private_ip,
+    local_ip_triage_message,
+)
 
 
 def _module_label(module_id: str) -> str:
@@ -76,6 +84,20 @@ def build_assessment_journey(
             if module_id in compatible_ids
         ]
 
+    services = []
+    service_table: list[dict[str, Any]] = []
+    triage_message = None
+    triage_guidance: list[str] = []
+    has_service_data = False
+    if is_private_ipv4_target(cleaned) and conn is not None:
+        services = load_discovered_services(case_id, cleaned, conn=conn)
+        has_service_data = bool(services)
+        service_table = build_service_recommendation_table(services, cleaned) if services else []
+        triage_message = local_ip_triage_message(has_service_data=has_service_data)
+        triage_guidance = journey_guidance_for_private_ip(has_service_data=has_service_data)
+        if not has_service_data and goal_id != "custom_module_selection":
+            recommended_ids = filter_modules_without_service_data(recommended_ids)
+
     recommended_set = set(recommended_ids)
     optional_ids = [
         module.module_id
@@ -115,6 +137,17 @@ def build_assessment_journey(
             )
 
         row = _journey_row(module_id, category=category, preflight=preflight)
+        if (
+            is_private_ipv4_target(cleaned)
+            and not has_service_data
+            and module_id in {"infra_tls_review", "infra_http_security"}
+            and category == "recommended"
+        ):
+            row["reason"] = (
+                "Start with Network Service Check — HTTP/TLS need a reachable web/TLS service."
+            )
+            optional.append(row)
+            return
         if preflight and not preflight.get("allowed"):
             if preflight.get("result") == "needs_action":
                 active_needs_confirmation.append(row)
@@ -159,4 +192,9 @@ def build_assessment_journey(
         "not_relevant": not_relevant,
         "recommended_module_ids": recommended_ids,
         "selected_module_ids": recommended_ids if selected_module_ids is None else list(selected_module_ids),
+        "triage_message": triage_message,
+        "triage_guidance": triage_guidance,
+        "has_service_data": has_service_data,
+        "service_table": service_table,
+        "is_private_ipv4": is_private_or_local_ip(cleaned) if target_type == "ipv4" else False,
     }

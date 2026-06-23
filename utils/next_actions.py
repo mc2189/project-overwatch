@@ -29,6 +29,8 @@ from utils.operating_context import (
 from database.personal_lab import list_personal_lab_scope
 from utils.pivot_discovery import discover_pivots_from_results
 from utils.security import is_private_or_local_ip
+from utils.service_discovery import build_http_url, scheme_for_classification, web_tls_service_rows
+from utils.web_port_planner import is_private_ipv4_target
 from utils.settings_manager import check_module_preflight, has_api_key
 from utils.target_detection import get_target_type
 
@@ -44,6 +46,7 @@ ACTION_TYPES = frozenset(
         "add_lab_scope",
         "add_note",
         "no_action",
+        "try_common_web_ports",
     }
 )
 
@@ -66,6 +69,7 @@ _DEFAULT_BUTTON_LABELS: dict[str, str] = {
     "add_lab_scope": "Add lab scope",
     "add_note": "Add note",
     "no_action": "Info",
+    "try_common_web_ports": "Try common web ports",
 }
 
 
@@ -222,6 +226,17 @@ def enrich_action_readiness(
                 blocked = "Target is already in Personal Lab scope."
                 enriched["action_type"] = "no_action"
 
+    if action_type == "try_common_web_ports":
+        if operating_context == PASSIVE_RESEARCH:
+            blocked = "Switch to Personal Lab or Client Engagement for active port probes."
+            enriched["action_type"] = "no_action"
+        elif operating_context == PERSONAL_LAB and not personal_lab_confirmed:
+            blocked = "Tick Personal Lab confirmation to probe web ports."
+            enriched["action_type"] = "no_action"
+        elif operating_context == CLIENT_ENGAGEMENT and not authorisation_confirmed:
+            blocked = "Confirm authorisation before probing web ports."
+            enriched["action_type"] = "no_action"
+
     if action_type == "update_scope" and operating_context != CLIENT_ENGAGEMENT:
         enriched["why_detail"] = "Open Client Engagements to manage formal scope and ROE."
 
@@ -332,6 +347,121 @@ def suggest_next_actions(
         result.get("module_id") for result in latest_results if result.get("success")
     }
 
+    service_context = target_profile.get("service_context") or {}
+    services = service_context.get("services") or []
+    has_service_data = bool(target_profile.get("has_service_data") or services)
+    if is_private_ipv4_target(cleaned) and conn is not None and not services:
+        from utils.web_port_planner import build_service_context
+
+        service_context = build_service_context(
+            case_id, cleaned, conn=conn, latest_results=latest_results
+        )
+        services = service_context.get("services") or []
+        has_service_data = bool(services)
+
+    def _http_tls_unreachable(result: dict[str, Any]) -> bool:
+        parsed = result.get("parsed_data") or {}
+        module_id = result.get("module_id")
+        if module_id == "infra_http_security":
+            response = parsed.get("response") or {}
+            return not response.get("success")
+        if module_id == "infra_tls_review":
+            conn_info = parsed.get("connection") or {}
+            return not conn_info.get("success")
+        return False
+
+    if is_private_ipv4_target(cleaned):
+        if any(_http_tls_unreachable(result) for result in latest_results):
+            if "infra_nmap" not in ran_module_ids and "infra_nmap" in compatible_ids:
+                actions.append(
+                    make_action(
+                        title="Run Network Service Check",
+                        reason="HTTP/TLS did not respond — discover open ports and service hints first.",
+                        action_type="run_module",
+                        priority="high",
+                        module_id="infra_nmap",
+                        target=cleaned,
+                        entity_id=entity_id,
+                        button_label="Select module",
+                    )
+                )
+            actions.append(
+                make_action(
+                    title="Try common web ports",
+                    reason="Probe 80, 443, 8080, 8443, 8000, 8888 sequentially for reachability.",
+                    action_type="try_common_web_ports",
+                    priority="medium",
+                    target=cleaned,
+                    button_label="Try common web ports",
+                )
+            )
+            actions.append(
+                make_action(
+                    title="Confirm host and port",
+                    reason="Add a note if the target may be offline or firewalled.",
+                    action_type="add_note",
+                    priority="low",
+                    target=cleaned,
+                    button_label="Add note",
+                )
+            )
+        elif not has_service_data:
+            if "infra_nmap" not in ran_module_ids and "infra_nmap" in compatible_ids:
+                actions.insert(
+                    0,
+                    make_action(
+                        title="Run Network Service Check first",
+                        reason="Local/private IP — service discovery identifies which HTTP/TLS checks make sense.",
+                        action_type="run_module",
+                        priority="high",
+                        module_id="infra_nmap",
+                        target=cleaned,
+                        entity_id=entity_id,
+                        button_label="Select module",
+                    ),
+                )
+            actions.append(
+                make_action(
+                    title="Try common web ports",
+                    reason="Optional sequential probe of common web ports before full HTTP/TLS review.",
+                    action_type="try_common_web_ports",
+                    priority="medium",
+                    target=cleaned,
+                    button_label="Try common web ports",
+                )
+            )
+        else:
+            for service in web_tls_service_rows(services)[:4]:
+                port = int(service["port"])
+                scheme = scheme_for_classification(service["classification"], port)
+                url = build_http_url(cleaned, port, scheme=scheme)
+                classification = service.get("classification")
+                if classification in {"http_candidate", "https_candidate"}:
+                    actions.append(
+                        make_action(
+                            title=f"HTTP review on port {port}",
+                            reason=f"Discovered {service.get('service_name') or 'web'} service on {port}/tcp.",
+                            action_type="run_module",
+                            priority="high",
+                            module_id="infra_http_security",
+                            target=url,
+                            button_label="Select HTTP review",
+                        )
+                    )
+                if classification in {"https_candidate", "tls_candidate"}:
+                    actions.append(
+                        make_action(
+                            title=f"TLS review on port {port}",
+                            reason=f"Discovered TLS service on {port}/tcp.",
+                            action_type="run_module",
+                            priority="high",
+                            module_id="infra_tls_review",
+                            target=cleaned,
+                            button_label="Select TLS review",
+                            why_detail=f"Use port {port} in advanced TLS settings.",
+                        )
+                    )
+
     _reputation_modules = (
         ("intel_virustotal", "VirusTotal reputation"),
         ("intel_abuseipdb", "AbuseIPDB lookup"),
@@ -381,6 +511,22 @@ def suggest_next_actions(
     }
     for module_id, (suggested_goal, title) in goal_modules.items():
         if module_id not in compatible_ids or module_id in ran_module_ids:
+            continue
+        if (
+            is_private_ipv4_target(cleaned)
+            and not has_service_data
+            and module_id in {"infra_http_security", "infra_tls_review"}
+        ):
+            continue
+        if (
+            is_private_ipv4_target(cleaned)
+            and has_service_data
+            and module_id in {"infra_http_security", "infra_tls_review"}
+            and not any(
+                row.get("classification") in {"http_candidate", "https_candidate", "tls_candidate"}
+                for row in services
+            )
+        ):
             continue
         api_block = _api_key_block_reason(module_id)
         if api_block:
@@ -535,7 +681,9 @@ def suggest_next_actions(
         )
 
     if target_type == "ipv4" and is_private_or_local_ip(cleaned) and "infra_nmap" in compatible_ids:
-        if "infra_nmap" not in ran_module_ids:
+        if "infra_nmap" not in ran_module_ids and not any(
+            action.get("module_id") == "infra_nmap" for action in actions
+        ):
             actions.append(
                 make_action(
                     title="Run network service check",

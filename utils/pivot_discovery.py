@@ -120,7 +120,13 @@ def discover_pivots_from_results(results: list[dict[str, Any]]) -> list[dict[str
                 )
 
         if module_id == "infra_http_security":
-            final_url = (parsed.get("response") or {}).get("final_url")
+            response = parsed.get("response") or {}
+            if not response.get("success"):
+                continue
+            target_source = parsed.get("target_source") or "default_assumption"
+            if target_source == "default_assumption" and not response.get("success"):
+                continue
+            final_url = response.get("final_url")
             if final_url:
                 pivots.append(
                     {

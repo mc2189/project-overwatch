@@ -4,8 +4,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from utils.next_actions import make_action
+from utils.next_actions import finalize_actions, make_action
 from utils.finding_interpreter import risk_findings
+from utils.web_port_planner import is_private_ipv4_target
+
+
+def _http_tls_unreachable(result: dict[str, Any]) -> bool:
+    module_id = result.get("module_id") or ""
+    parsed = result.get("parsed_data") or {}
+    if module_id == "infra_http_security":
+        return not (parsed.get("response") or {}).get("success")
+    if module_id == "infra_tls_review":
+        return not (parsed.get("connection") or {}).get("success")
+    return False
 
 
 def suggest_result_action(result: dict[str, Any], *, target: str) -> dict[str, Any]:
@@ -13,6 +24,28 @@ def suggest_result_action(result: dict[str, Any], *, target: str) -> dict[str, A
     module_id = result.get("module_id") or ""
     parsed = result.get("parsed_data") or {}
     risk = risk_findings(result.get("interpreter_findings") or [])
+
+    if module_id in {"infra_http_security", "infra_tls_review"} and _http_tls_unreachable(result):
+        host = parsed.get("host") or target
+        port = parsed.get("port") or (443 if module_id == "infra_tls_review" else 80)
+        if is_private_ipv4_target(target):
+            return make_action(
+                title="Try common web ports",
+                reason=f"No response from {host}:{port}. Probe common web ports or run service discovery.",
+                action_type="try_common_web_ports",
+                priority="high",
+                target=target,
+                button_label="Try common web ports",
+            )
+        return make_action(
+            title="Run Network Service Check",
+            reason=f"No response from {host}:{port}. Service was not reachable.",
+            action_type="run_module",
+            priority="high",
+            target=target,
+            module_id="infra_nmap",
+            button_label="Select Nmap",
+        )
 
     if module_id == "infra_email_security":
         dmarc = (parsed.get("dmarc") or {}).get("present")

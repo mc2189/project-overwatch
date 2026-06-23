@@ -3040,6 +3040,131 @@ def _check_next_actions_schema() -> None:
         conn.close()
 
 
+def _check_local_ip_triage() -> None:
+    from database.db_setup import create_case, get_db_conn
+    from utils.assessment_goals import GOAL_FULL_CLIENT, GOAL_LOCAL_NETWORK, get_modules_for_goal
+    from utils.http_security_interpreter import interpret_http_security_results
+    from utils.journey_planner import build_assessment_journey
+    from utils.pivot_discovery import discover_pivots_from_results
+    from utils.service_classifier import (
+        CLASS_HTTP_CANDIDATE,
+        CLASS_HTTPS_CANDIDATE,
+        CLASS_NON_WEB_SERVICE,
+        classify_service_observation,
+    )
+    from utils.web_port_planner import (
+        DEFAULT_COMMON_WEB_PORTS,
+        filter_modules_without_service_data,
+        parse_custom_web_port_list,
+    )
+
+    if classify_service_observation(port=80, service_name="http") != CLASS_HTTP_CANDIDATE:
+        raise AssertionError("port 80 http should be http_candidate")
+    if classify_service_observation(port=443, service_name="https") != CLASS_HTTPS_CANDIDATE:
+        raise AssertionError("port 443 https should be https_candidate")
+    if classify_service_observation(port=22, service_name="ssh") != CLASS_NON_WEB_SERVICE:
+        raise AssertionError("port 22 ssh should be non_web_service")
+    if classify_service_observation(port=445, service_name="microsoft-ds") != CLASS_NON_WEB_SERVICE:
+        raise AssertionError("port 445 smb should be non_web_service")
+    if classify_service_observation(port=3389, service_name="ms-wbt-server") != CLASS_NON_WEB_SERVICE:
+        raise AssertionError("port 3389 rdp should be non_web_service")
+    if classify_service_observation(port=5900, service_name="vnc") != CLASS_NON_WEB_SERVICE:
+        raise AssertionError("port 5900 vnc should be non_web_service")
+
+    ports, err = parse_custom_web_port_list("80, 443, 8080")
+    if err or ports != [80, 443, 8080]:
+        raise AssertionError("valid custom port list should parse")
+    _, err = parse_custom_web_port_list("1-65535")
+    if err is None:
+        raise AssertionError("port ranges should be rejected")
+    many, err = parse_custom_web_port_list(",".join(str(8000 + i) for i in range(11)))
+    if err is None:
+        raise AssertionError("custom port list should cap at 10 ports")
+    if len(DEFAULT_COMMON_WEB_PORTS) != 6:
+        raise AssertionError("common web ports should remain capped to default list")
+
+    private_modules = get_modules_for_goal(
+        GOAL_LOCAL_NETWORK, "ipv4", target="192.168.1.10"
+    )
+    if private_modules != ["infra_nmap"]:
+        raise AssertionError("private IP local network goal should recommend nmap first")
+    full_client_private = get_modules_for_goal(
+        GOAL_FULL_CLIENT, "ipv4", target="192.168.1.10"
+    )
+    if "infra_tls_review" in full_client_private or "infra_http_security" in full_client_private:
+        raise AssertionError("private IP full client should not blindly recommend TLS/HTTP")
+    filtered = filter_modules_without_service_data(
+        ["infra_nmap", "infra_tls_review", "infra_http_security"]
+    )
+    if filtered != ["infra_nmap"]:
+        raise AssertionError("filter should remove blind HTTP/TLS without service data")
+
+    conn = get_db_conn()
+    try:
+        case = create_case("Local IP Triage", conn=conn)
+        journey = build_assessment_journey(
+            case_id=case["id"],
+            target="192.168.1.10",
+            goal_id=GOAL_LOCAL_NETWORK,
+            selected_module_ids=private_modules,
+            operating_context="personal_lab",
+            personal_lab_confirmed=True,
+            conn=conn,
+        )
+        recommended_ids = journey.get("recommended_module_ids") or []
+        if "infra_nmap" not in recommended_ids:
+            raise AssertionError("journey should recommend nmap for private IP")
+        if "infra_tls_review" in recommended_ids or "infra_http_security" in recommended_ids:
+            raise AssertionError("journey should not recommend blind HTTP/TLS without service data")
+        if not journey.get("triage_message"):
+            raise AssertionError("private IP journey should include triage message")
+
+        nmap_http = classify_service_observation(port=80, service_name="http")
+        nmap_https = classify_service_observation(port=443, service_name="https")
+        if nmap_http != CLASS_HTTP_CANDIDATE or nmap_https != CLASS_HTTPS_CANDIDATE:
+            raise AssertionError("nmap-like service hints should classify web ports")
+
+        unreachable_findings = interpret_http_security_results(
+            {
+                "host": "192.168.1.10",
+                "port": 443,
+                "scheme": "https",
+                "requested_url": "https://192.168.1.10/",
+                "target_source": "default_assumption",
+                "response": {"success": False, "error": "timed out"},
+                "connection_outcome": {
+                    "reachable": False,
+                    "host": "192.168.1.10",
+                    "port": 443,
+                    "scheme": "https",
+                    "error": "timed out",
+                },
+                "security_headers": {},
+            }
+        )
+        if any("not observed" in (f.get("title") or "").lower() for f in unreachable_findings):
+            raise AssertionError("unreachable HTTP should not create missing-header findings")
+        if not any("not reachable" in (f.get("title") or "").lower() for f in unreachable_findings):
+            raise AssertionError("unreachable HTTP should create reachability finding")
+
+        pivots = discover_pivots_from_results(
+            [
+                {
+                    "success": True,
+                    "module_id": "infra_http_security",
+                    "parsed_data": {
+                        "target_source": "default_assumption",
+                        "response": {"success": False, "final_url": "https://192.168.1.10/"},
+                    },
+                }
+            ]
+        )
+        if pivots:
+            raise AssertionError("unreachable default HTTP URL should not create URL pivot")
+    finally:
+        conn.close()
+
+
 def _check_guided_workspace_helpers() -> None:
     from utils.assessment_goals import GOAL_QUICK_SAFETY, get_modules_for_goal, list_assessment_goals
     from utils.journey_planner import build_assessment_journey
@@ -3302,6 +3427,11 @@ def main() -> int:
     run(
         "operating context framework",
         lambda: _check_operating_context_framework(),
+    )
+
+    run(
+        "local IP triage",
+        lambda: _check_local_ip_triage(),
     )
 
     run(

@@ -80,7 +80,12 @@ def render_advanced_module_settings(
                 tls_review_options = {
                     "port_override": int(port_override),
                     "protocol_probes": True,
+                    "target_source": st.session_state.get("tls_target_source", "default_assumption"),
                 }
+                note_key = st.session_state.get("tls_target_source", "default_assumption")
+                from utils.web_port_planner import http_target_note
+
+                st.caption(http_target_note(target_source=note_key))
             elif module_id == "infra_http_security":
                 request_method = st.selectbox(
                     f"{title} request method",
@@ -88,7 +93,22 @@ def render_advanced_module_settings(
                     index=0,
                     key="http_security_request_method",
                 )
-                http_security_options = {"request_method": request_method}
+                http_review_options = {
+                    "request_method": request_method,
+                    "target_source": st.session_state.get("http_target_source", "default_assumption"),
+                }
+                pending_url = st.session_state.get("http_requested_url")
+                if pending_url:
+                    http_review_options["requested_url"] = pending_url
+                    http_review_options["target_source"] = "manual_port"
+                from utils.web_port_planner import http_target_note
+
+                st.caption(
+                    http_target_note(
+                        target_source=http_review_options.get("target_source", "default_assumption")
+                    )
+                )
+                http_security_options = http_review_options
 
     st.session_state.nmap_options = nmap_options
     st.session_state.tls_review_options = tls_review_options

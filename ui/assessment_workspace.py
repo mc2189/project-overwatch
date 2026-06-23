@@ -51,6 +51,11 @@ from utils.run_modes import (
 )
 from utils.target_detection import get_target_type, normalize_target_value, target_type_label
 from utils.target_profile import build_target_profile
+from utils.web_port_planner import (
+    filter_modules_without_service_data,
+    is_private_ipv4_target,
+    parse_custom_web_port_list,
+)
 
 from utils.engagement_guardrails import assess_target_scope
 
@@ -131,10 +136,17 @@ def _execute_modules(
                 options = {
                     "port_override": tls_opts.get("port_override"),
                     "protocol_probes": tls_opts.get("protocol_probes", True),
+                    "target_source": tls_opts.get("target_source", "default_assumption"),
                 }
             elif module_id == "infra_http_security":
                 http_opts = st.session_state.get("http_security_options", {})
-                options = {"request_method": http_opts.get("request_method", "GET")}
+                options = {
+                    "request_method": http_opts.get("request_method", "GET"),
+                    "port_override": http_opts.get("port_override"),
+                    "scheme_override": http_opts.get("scheme_override"),
+                    "requested_url": http_opts.get("requested_url"),
+                    "target_source": http_opts.get("target_source", "default_assumption"),
+                }
             options["operating_context"] = operating_context
             options["personal_lab_confirmed"] = personal_lab_confirmed
             result = execute_module(
@@ -173,12 +185,19 @@ def _render_target_profile(profile: dict) -> None:
             st.caption(f"Normalised: `{profile['normalized']}`")
         elif profile.get("normalized"):
             st.caption(f"Value: `{profile['normalized']}`")
-        if profile.get("known_in_case"):
-            st.success("This target already exists in the current case.")
+        if profile.get("triage_message"):
+            st.info(profile["triage_message"])
+        if profile.get("is_private_ipv4") and not profile.get("has_service_data"):
+            st.caption(
+                "Start with service discovery unless you already know the service and port."
+            )
         families = profile.get("compatible_module_families") or []
         if families:
             st.caption("Compatible families: " + ", ".join(families))
-        suggested = profile.get("suggested_goals") or []
+        if profile.get("known_in_case"):
+            st.success("This target already exists in the current case.")
+        if profile.get("discovered_service_count"):
+            st.caption(f"Discovered services in case: {profile['discovered_service_count']}")
         if suggested:
             st.caption(
                 "Suggested goals: "
@@ -188,6 +207,28 @@ def _render_target_profile(profile: dict) -> None:
 
 def _render_journey_section(journey: dict) -> None:
     st.markdown("**Recommended journey**")
+    if journey.get("triage_message"):
+        st.info(journey["triage_message"])
+    for line in journey.get("triage_guidance") or []:
+        st.caption(line)
+
+    service_table = journey.get("service_table") or []
+    if service_table:
+        st.caption("Discovered services and recommended checks")
+        st.dataframe(
+            [
+                {
+                    "Port": row["port"],
+                    "Detected service": row["detected_service"],
+                    "Classification": row["classification"],
+                    "Recommended check": row["recommended_check"],
+                    "Reason": row["reason"],
+                }
+                for row in service_table[:12]
+            ],
+            width="stretch",
+            hide_index=True,
+        )
 
     def _list_rows(rows: list[dict], label: str, icon: str) -> None:
         if not rows:
@@ -332,6 +373,8 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
                 )
                 if (module := get_module(module_id)) and module_enabled_for_ui(module, target)
             ]
+            if is_private_ipv4_target(target.strip()) and not profile.get("has_service_data"):
+                selected_ids = filter_modules_without_service_data(selected_ids)
             apply_recommended_selection(selected_ids)
         else:
             selected_ids = _selected_module_ids()
@@ -356,6 +399,29 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
             plan_conn.close()
 
         _render_journey_section(journey)
+        if is_private_ipv4_target(target.strip()):
+            with st.expander("Local IP web port options", expanded=False):
+                st.caption(
+                    "Try common web ports sequentially (80, 443, 8080, 8443, 8000, 8888) "
+                    "or specify up to 10 custom ports for HTTP/TLS checks."
+                )
+                custom_ports_text = st.text_input(
+                    "Custom web port list",
+                    value=st.session_state.get("custom_web_ports_text", ""),
+                    placeholder="e.g. 8080, 8443",
+                    key="custom_web_ports_input",
+                )
+                st.session_state.custom_web_ports_text = custom_ports_text
+                ports, port_error = parse_custom_web_port_list(custom_ports_text)
+                if port_error and custom_ports_text.strip():
+                    st.caption(port_error)
+                custom_confirmed = st.checkbox(
+                    "I confirm these ports are intended for HTTP/TLS checking",
+                    value=st.session_state.get("custom_web_ports_confirmed", False),
+                    key="custom_web_ports_confirmed",
+                )
+                if custom_confirmed and ports:
+                    st.session_state.pending_custom_web_ports = ports
         if goal_id == GOAL_CUSTOM:
             _render_custom_module_picker(target)
         else:

@@ -1,6 +1,8 @@
-# Project Overwatch v2.14
+# Project Overwatch v2.15
 
 Project Overwatch is a **local** Python/Streamlit intelligence, OSINT, security testing and resilience advisory dashboard for **private internal use** supporting future client assessments.
+
+**v2.15** makes **local/private IP testing port-aware** — Network Service Check first, HTTP/TLS only on discovered web ports, and clear handling when services do not respond.
 
 **v2.14** turns suggested next actions into **actionable one-click workflow cards** with guardrail-aware buttons, pivot discovery, and Batch Queue integration.
 
@@ -145,6 +147,20 @@ Suggested next actions are now **concise workflow cards** with priority badges, 
 Each **concise result card** includes one practical next step (for example queue subdomains, run Shodan after clean reputation, add TLS remediation note).
 
 **Report journey** shortcuts: generate report, review evidence, and review open findings — all require a click; reports are never auto-generated.
+
+### Local target triage and port-aware HTTP/TLS (v2.15)
+
+For **private/local IPv4** targets (for example `192.168.1.10`):
+
+1. **Network Service Check first** — when no service data exists, Overwatch recommends Nmap/service discovery before HTTP/TLS checks.
+2. **No blind HTTPS on 443** — HTTP Security Header Review and TLS Review are not the primary first step without discovered web/TLS services.
+3. **Reuse discovered ports** — open ports from Nmap, service entities, and prior runs drive exact `http://ip:port/` or `https://ip:port/` recommendations.
+4. **Service classification** — SSH, SMB, RDP, VNC, and RTSP are marked non-web; HTTP/TLS review is not suggested for them.
+5. **Unreachable ≠ missing headers** — if no HTTP/TLS response is received, modules return a reachability warning only (no HSTS/CSP/security.txt missing-header findings).
+6. **Try common web ports** — optional sequential probe of 80, 443, 8080, 8443, 8000, 8888 (requires Personal Lab or Client Engagement confirmation).
+7. **Custom web port list** — up to 10 individual ports (no ranges); user confirms ports are intended for HTTP/TLS checking.
+
+The recommended journey shows a **service table** when port data exists: Port, Detected service, Classification, Recommended check, and Reason.
 
 ### Guided run modes (v1.5)
 
@@ -672,7 +688,7 @@ Saved reports go to `reports/` (gitignored). Encrypted exports go to `exports/`.
 ```
 main.py                    Streamlit entry point and navigation router
 ui/                        Run Operation, archive pages, findings, metrics
-version.py                 PROJECT_VERSION = "2.14.0"
+version.py                 PROJECT_VERSION = "2.15.0"
 scripts/smoke_check.py     Local sanity checks
 requirements-optional.txt  kaleido, weasyprint (optional)
 database/db_setup.py       SQLite schema and helpers

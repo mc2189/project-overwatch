@@ -86,7 +86,15 @@ def extract_set_cookies(response: requests.Response) -> list[dict[str, Any]]:
     return [parse_set_cookie_header(header) for header in headers]
 
 
-def parse_http_target(target: str, *, target_type: str | None = None) -> dict[str, Any]:
+def parse_http_target(
+    target: str,
+    *,
+    target_type: str | None = None,
+    scheme_override: str | None = None,
+    port_override: int | None = None,
+    path_override: str | None = None,
+    requested_url_override: str | None = None,
+) -> dict[str, Any]:
     """Build the request URL and host metadata from a domain, URL, or IPv4 target."""
     cleaned = target.strip()
     resolved_type = target_type or get_target_type(cleaned)
@@ -124,6 +132,20 @@ def parse_http_target(target: str, *, target_type: str | None = None) -> dict[st
 
     if port is None:
         port = 443 if scheme == "https" else 80
+
+    if scheme_override:
+        scheme = scheme_override.lower()
+    if port_override is not None:
+        port = int(port_override)
+    if path_override:
+        path = path_override if path_override.startswith("/") else f"/{path_override}"
+    if requested_url_override:
+        requested_url = requested_url_override
+    elif host:
+        if (scheme == "https" and port == 443) or (scheme == "http" and port == 80):
+            requested_url = f"{scheme}://{host}{path}"
+        else:
+            requested_url = f"{scheme}://{host}:{port}{path}"
 
     valid = bool(host) and bool(requested_url)
     if resolved_type == "domain" and not DOMAIN_PATTERN.match(host):
@@ -346,8 +368,17 @@ def _build_raw_output(data: dict[str, Any]) -> str:
 def _build_summary(data: dict[str, Any]) -> str:
     response = data.get("response") or {}
     url = data.get("requested_url") or data.get("target") or "target"
+    host = data.get("host") or "target"
+    port = data.get("port")
+    scheme = (data.get("scheme") or "https").lower()
+    connection = data.get("connection_outcome") or {}
     if not response.get("success"):
-        return f"HTTP security review for {url} could not complete: {response.get('error') or 'request failed'}"
+        error = response.get("error") or connection.get("error") or "request failed"
+        endpoint = f"{scheme}://{host}:{port}" if port else url
+        return (
+            f"No HTTP response from {endpoint}. "
+            f"The selected service was not reachable ({error})."
+        )
     status = response.get("status_code")
     security = data.get("security_headers") or {}
     present = sum(1 for key in security if (security.get(key) or {}).get("present"))
@@ -360,10 +391,11 @@ def _build_summary(data: dict[str, Any]) -> str:
 def _build_module_notes(data: dict[str, Any]) -> list[str]:
     notes: list[str] = []
     response = data.get("response") or {}
-    if response.get("success"):
-        notes.append(
-            f"HTTP response observed for {data.get('requested_url')} during authorised HTTP header review."
-        )
+    if not response.get("success"):
+        return notes
+    notes.append(
+        f"HTTP response observed for {data.get('requested_url')} during authorised HTTP header review."
+    )
     security = data.get("security_headers") or {}
     if data.get("scheme") == "https" and not (security.get("hsts") or {}).get("present"):
         notes.append("HSTS header not observed on HTTPS response (point-in-time result).")
@@ -377,14 +409,34 @@ def run_http_security_review(target: str, options: dict[str, Any] | None = None)
     if method not in {"GET", "HEAD"}:
         method = "GET"
 
-    parsed_target = parse_http_target(target, target_type=options.get("target_type"))
+    parsed_target = parse_http_target(
+        target,
+        target_type=options.get("target_type"),
+        scheme_override=options.get("scheme_override"),
+        port_override=options.get("port_override"),
+        path_override=options.get("path_override"),
+        requested_url_override=options.get("requested_url"),
+    )
+    target_source = options.get("target_source") or "default_assumption"
+    from utils.web_port_planner import http_target_note
+
     base_data: dict[str, Any] = {
         "target": parsed_target.get("original_target"),
         "host": parsed_target.get("host"),
         "scheme": parsed_target.get("scheme"),
         "port": parsed_target.get("port"),
+        "path": parsed_target.get("path", "/"),
         "target_type": parsed_target.get("target_type"),
         "requested_url": parsed_target.get("requested_url"),
+        "target_source": target_source,
+        "target_selection_note": http_target_note(target_source=target_source),
+        "connection_outcome": {
+            "reachable": False,
+            "host": parsed_target.get("host"),
+            "port": parsed_target.get("port"),
+            "scheme": parsed_target.get("scheme"),
+            "error": None,
+        },
         "response": {
             "success": False,
             "status_code": None,
@@ -461,6 +513,8 @@ def run_http_security_review(target: str, options: dict[str, Any] | None = None)
     }
     base_data["security_headers"] = _analyze_security_headers(header_map)
     base_data["cookies"] = main_response.get("cookies") or []
+    if main_response.get("success"):
+        base_data["connection_outcome"]["reachable"] = True
 
     base_for_well_known = main_response.get("final_url") or parsed_target["requested_url"]
     if main_response.get("success"):
@@ -470,10 +524,19 @@ def run_http_security_review(target: str, options: dict[str, Any] | None = None)
             "security_txt": {"attempts": [], "observed": False, "status_code": None, "url": None},
             "robots_txt": {"observed": False, "status_code": None, "url": None, "error": main_response.get("error")},
         }
-        warnings.append(f"Primary HTTP request note: {main_response.get('error')}")
+        base_data["connection_outcome"]["reachable"] = False
+        base_data["connection_outcome"]["error"] = main_response.get("error")
+        base_data["security_headers"] = {}
+        base_data["cookies"] = []
+        warnings.append(
+            f"No HTTP response from {parsed_target['host']}:{parsed_target['port']} — "
+            "service not reachable on selected scheme/port."
+        )
 
     has_core_data = main_response["success"] or bool(main_response.get("error"))
-    status = resolve_collection_status(warnings=warnings, has_core_data=has_core_data)
+    status = "partial" if not main_response["success"] and main_response.get("error") else resolve_collection_status(
+        warnings=warnings, has_core_data=has_core_data
+    )
     success = status in {"completed", "completed_with_warnings", "partial"}
 
     return {

@@ -15,7 +15,9 @@ from database.db_setup import (
 from utils.assessment_goals import suggested_goals_for_target
 from utils.module_compatibility import get_compatible_modules
 from utils.module_testing_levels import get_module_testing_level, is_active_testing_level
+from utils.service_discovery import load_discovered_services
 from utils.target_detection import get_target_type, normalize_target_value, target_type_label
+from utils.web_port_planner import is_private_ipv4_target, local_ip_triage_message
 
 _MODULE_FAMILIES: dict[str, str] = {
     "infra_nmap": "Network services",
@@ -112,6 +114,12 @@ def build_target_profile(
         )
         active_count = len(compatible) - passive_count
 
+        services: list[dict[str, Any]] = []
+        has_service_data = False
+        if is_private_ipv4_target(cleaned):
+            services = load_discovered_services(case_id, cleaned, conn=conn)
+            has_service_data = bool(services)
+
         return {
             "target": cleaned,
             "target_type": target_type,
@@ -129,6 +137,12 @@ def build_target_profile(
             "compatible_module_families": families,
             "suggested_goals": suggested_goals_for_target(target_type, cleaned),
             "compatible_module_ids": [module.module_id for module in compatible],
+            "is_private_ipv4": is_private_ipv4_target(cleaned),
+            "has_service_data": has_service_data,
+            "discovered_service_count": len(services),
+            "triage_message": local_ip_triage_message(has_service_data=has_service_data)
+            if is_private_ipv4_target(cleaned)
+            else None,
         }
     finally:
         if own_conn and conn is not None:

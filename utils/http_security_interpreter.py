@@ -7,16 +7,22 @@ from typing import Any
 from utils.finding_interpreter import FINDING_KIND_SOURCE_NOTICE, make_finding
 
 
+def _service_unreachable(parsed_data: dict[str, Any]) -> bool:
+    response = parsed_data.get("response") or {}
+    connection = parsed_data.get("connection_outcome") or {}
+    if response.get("success"):
+        return False
+    return bool(response.get("error") or connection.get("error") or not connection.get("reachable", True))
+
+
 def interpret_http_security_results(parsed_data: dict[str, Any]) -> list[dict[str, Any]]:
     """Return cautious analyst findings from an authorised HTTP header review."""
     findings: list[dict[str, Any]] = []
     url = parsed_data.get("requested_url") or parsed_data.get("target") or "target"
+    host = parsed_data.get("host") or "target"
+    port = parsed_data.get("port")
     scheme = (parsed_data.get("scheme") or "https").lower()
-    response = parsed_data.get("response") or {}
-    security = parsed_data.get("security_headers") or {}
-    headers = parsed_data.get("headers") or {}
-    cookies = parsed_data.get("cookies") or []
-    well_known = parsed_data.get("well_known") or {}
+    endpoint = f"{scheme}://{host}:{port}" if port else url
 
     if parsed_data.get("scope_blocked"):
         findings.append(
@@ -35,45 +41,56 @@ def interpret_http_security_results(parsed_data: dict[str, Any]) -> list[dict[st
         )
         return findings
 
-    if response.get("success"):
+    if _service_unreachable(parsed_data):
+        response = parsed_data.get("response") or {}
+        connection = parsed_data.get("connection_outcome") or {}
+        error = response.get("error") or connection.get("error") or "no response"
         findings.append(
             make_finding(
-                "HTTP response observed",
+                "HTTP service not reachable",
                 "info",
-                90,
-                f"An HTTP response was observed for {url} during authorised HTTP header review "
-                f"(status {response.get('status_code')}). Point-in-time result.",
+                88,
+                f"No HTTP response from {endpoint}. This means the selected service was not reachable, "
+                f"not that security headers are missing ({error}).",
                 [
-                    "Confirm the URL and status are expected for this asset.",
-                    "Correlate with passive website metadata if collected.",
+                    "Run Network Service Check to identify open web ports.",
+                    "Try a known web port or confirm the host is online.",
                 ],
+                finding_kind=FINDING_KIND_SOURCE_NOTICE,
             )
         )
-        if scheme == "https" or str(response.get("final_url", "")).lower().startswith("https://"):
-            findings.append(
-                make_finding(
-                    "HTTPS used",
-                    "info",
-                    85,
-                    f"The reviewed response used HTTPS for {response.get('final_url') or url}. "
-                    "Observed during authorised HTTP header review.",
-                    [
-                        "Confirm TLS configuration separately if required.",
-                        "Review HSTS and redirect behaviour for completeness.",
-                    ],
-                )
-            )
-    elif response.get("error"):
+        return findings
+
+    response = parsed_data.get("response") or {}
+    security = parsed_data.get("security_headers") or {}
+    headers = parsed_data.get("headers") or {}
+    cookies = parsed_data.get("cookies") or []
+    well_known = parsed_data.get("well_known") or {}
+
+    findings.append(
+        make_finding(
+            "HTTP response observed",
+            "info",
+            90,
+            f"An HTTP response was observed for {url} during authorised HTTP header review "
+            f"(status {response.get('status_code')}). Point-in-time result.",
+            [
+                "Confirm the URL and status are expected for this asset.",
+                "Correlate with passive website metadata if collected.",
+            ],
+        )
+    )
+    if scheme == "https" or str(response.get("final_url", "")).lower().startswith("https://"):
         findings.append(
             make_finding(
-                "HTTP response error observed",
-                "low",
-                75,
-                f"HTTP security review could not retrieve a response from {url}: {response['error']}. "
-                "Point-in-time result — may indicate filtering, downtime, or network limits.",
+                "HTTPS used",
+                "info",
+                85,
+                f"The reviewed response used HTTPS for {response.get('final_url') or url}. "
+                "Observed during authorised HTTP header review.",
                 [
-                    "Retry later if the site is expected to be reachable.",
-                    "Confirm URL, DNS, and path with the client.",
+                    "Confirm TLS configuration separately if required.",
+                    "Review HSTS and redirect behaviour for completeness.",
                 ],
             )
         )

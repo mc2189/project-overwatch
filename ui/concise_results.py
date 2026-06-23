@@ -14,7 +14,7 @@ from ui.workspace_actions import apply_workspace_action
 from utils.finding_interpreter import risk_findings
 from utils.next_actions import finalize_actions, make_action
 from utils.pivot_discovery import discover_pivots_from_results
-from utils.result_next_actions import suggest_result_action
+from utils.result_next_actions import suggest_result_action, _http_tls_unreachable
 from utils.result_status import status_label
 from utils.result_summary import summarize_run_results
 
@@ -76,6 +76,15 @@ def render_concise_result_card(
         summary = (result.get("summary") or "").strip()
         if summary:
             st.write(summary[:280] + ("…" if len(summary) > 280 else ""))
+
+        parsed = result.get("parsed_data") or {}
+        if parsed.get("target_selection_note"):
+            st.caption(parsed["target_selection_note"])
+        if _http_tls_unreachable(result):
+            st.caption(
+                "This does not prove missing headers or weak TLS. "
+                "It means no usable response was received."
+            )
 
         st.caption(f"Next step: {next_action.get('title')}")
         if next_action.get("action_type") != "no_action" and next_action.get("enabled"):

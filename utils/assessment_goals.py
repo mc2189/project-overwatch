@@ -194,7 +194,7 @@ def get_modules_for_goal(
         base = list(_GOAL_MODULE_SETS[GOAL_FULL_CLIENT])
         if target_type == "ipv4":
             if is_private_or_local_ip(target):
-                base = ["infra_nmap", "infra_tls_review"]
+                base = ["infra_nmap"]
             else:
                 extra = get_recommended_modules_for_mode(QUICK_CHECK, "ipv4", target=target)
                 for module_id in extra:

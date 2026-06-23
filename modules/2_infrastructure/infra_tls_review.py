@@ -275,11 +275,12 @@ def _build_raw_output(data: dict[str, Any]) -> str:
 def _build_module_notes(data: dict[str, Any]) -> list[str]:
     notes: list[str] = []
     conn = data.get("connection") or {}
+    if not conn.get("success"):
+        return notes
     cert = data.get("certificate") or {}
-    if conn.get("success"):
-        notes.append(
-            f"TLS service observed on {data.get('host')}:{data.get('port')} during authorised TLS review."
-        )
+    notes.append(
+        f"TLS service observed on {data.get('host')}:{data.get('port')} during authorised TLS review."
+    )
     if cert.get("subject"):
         notes.append(f"Certificate observed: {cert['subject']}")
     if cert.get("days_until_expiry") is not None and cert["days_until_expiry"] < 0:
@@ -298,7 +299,10 @@ def _build_summary(data: dict[str, Any]) -> str:
     tls = data.get("tls") or {}
     if not conn.get("success"):
         error = conn.get("error") or "connection failed"
-        return f"TLS review for {host}:{port} could not complete: {error}"
+        return (
+            f"No TLS response from {host}:{port}. "
+            f"The selected service was not reachable ({error})."
+        )
     version = tls.get("version") or "unknown"
     cert = data.get("certificate") or {}
     subject = cert.get("subject") or "unknown subject"
@@ -333,6 +337,7 @@ def run_tls_review(target: str, options: dict[str, Any] | None = None) -> dict[s
         "port": parsed_target.get("port"),
         "sni": parsed_target.get("sni"),
         "target_type": parsed_target.get("target_type"),
+        "target_source": options.get("target_source") or "default_assumption",
         "connection": {"success": False, "error": None},
         "tls": {"version": None, "cipher": None, "protocol_probe": {}},
         "certificate": {
@@ -348,6 +353,19 @@ def run_tls_review(target: str, options: dict[str, Any] | None = None) -> dict[s
             "fingerprint_sha256": None,
         },
         "warning": None,
+    }
+
+    from utils.web_port_planner import http_target_note
+
+    base_data["target_selection_note"] = http_target_note(
+        target_source=base_data["target_source"]
+    )
+    base_data["connection_outcome"] = {
+        "reachable": False,
+        "host": parsed_target.get("host"),
+        "port": parsed_target.get("port"),
+        "sni": parsed_target.get("sni"),
+        "error": None,
     }
 
     if not parsed_target.get("valid"):
@@ -397,6 +415,8 @@ def run_tls_review(target: str, options: dict[str, Any] | None = None) -> dict[s
 
     base_data["connection"]["success"] = handshake["success"]
     base_data["connection"]["error"] = handshake.get("error")
+    base_data["connection_outcome"]["reachable"] = handshake["success"]
+    base_data["connection_outcome"]["error"] = handshake.get("error")
     base_data["tls"]["version"] = handshake["tls"]["version"]
     base_data["tls"]["cipher"] = handshake["tls"]["cipher"]
     base_data["certificate"].update(handshake["certificate"])
@@ -416,10 +436,15 @@ def run_tls_review(target: str, options: dict[str, Any] | None = None) -> dict[s
                 )
 
     if handshake.get("error") and not handshake["success"]:
-        warnings.append(f"TLS connection note: {handshake['error']}")
+        warnings.append(
+            f"No TLS response from {parsed_target['host']}:{parsed_target['port']} — "
+            "service not reachable on selected port."
+        )
 
     has_core_data = handshake["success"] or bool(handshake.get("error"))
-    status = resolve_collection_status(warnings=warnings, has_core_data=has_core_data)
+    status = "partial" if not handshake["success"] and handshake.get("error") else resolve_collection_status(
+        warnings=warnings, has_core_data=has_core_data
+    )
     success = status in {"completed", "completed_with_warnings", "partial"}
 
     return {
