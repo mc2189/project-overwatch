@@ -66,6 +66,25 @@ def render_result_summary_tab(result: dict) -> None:
         if parsed_data.get("mac_address"):
             st.caption(f"MAC: {parsed_data['mac_address']}" + (f" ({parsed_data.get('mac_vendor')})" if parsed_data.get("mac_vendor") else ""))
 
+    if result["module_id"] == "infra_remote_access_review" and parsed_data:
+        services = parsed_data.get("remote_services") or []
+        st.write(f"**Remote/admin services:** {len(services)}")
+        if parsed_data.get("exposure_context"):
+            st.caption(f"Exposure context: {parsed_data['exposure_context'].replace('_', ' ')}")
+        if services:
+            preview = ", ".join(
+                f"{row.get('service_label') or row.get('port')}:{row.get('port')}"
+                for row in services[:6]
+            )
+            st.caption(preview)
+        highest = None
+        for finding in result.get("interpreter_findings") or []:
+            sev = (finding.get("severity") or "info").lower()
+            if highest is None or {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}.get(sev, 0) > {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}.get(highest, 0):
+                highest = sev
+        if highest:
+            st.caption(f"Highest severity: {highest}")
+
     if result["module_id"] == "infra_cert_subdomain" and parsed_data:
         subdomains = parsed_data.get("subdomains") or []
         st.write(f"**Certificate names returned:** {len(subdomains)}")

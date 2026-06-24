@@ -2,6 +2,14 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.26.0 — Remote Access Exposure Review
+
+- **`infra_remote_access_review`** — analysis-assisted review of SSH, RDP, VNC, SMB, Telnet, FTP, WinRM, RTSP and similar services from Nmap/service observations
+- **`utils/remote_access_classifier.py`** — remote-admin service classification without authentication or intrusive testing
+- **Nmap follow-up** — recommends Remote Access Exposure Review when relevant ports/services are found (not for web-only results)
+- **Findings, evidence, entities** — cautious exposure findings, classification summary evidence, service/product relationships
+- **Reports** — Remote Access Exposure Summary section with local/public context and limitations
+
 ## v2.25.0 — Nmap Advanced Profile Runner
 
 - **`utils/nmap_profiles.py`** — guided profile definitions (Quick, Standard, Local Device, Web Surface, Full TCP, Custom Ports, Script-assisted Safe)

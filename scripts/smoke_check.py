@@ -3658,6 +3658,74 @@ def _check_nmap_profile_runner() -> None:
         raise AssertionError("LAN enrichment should merge Nmap hints without dropping PCAP sources")
 
 
+def _check_remote_access_review() -> None:
+    from utils.remote_access_classifier import (
+        classify_remote_access_service,
+        filter_remote_access_services,
+        service_display_name,
+    )
+    from utils.remote_access_interpreter import interpret_remote_access_results
+
+    cases = (
+        (22, "ssh", "remote_admin"),
+        (3389, "ms-wbt-server", "remote_admin"),
+        (5900, "vnc", "remote_admin"),
+        (445, "microsoft-ds", "file_sharing"),
+        (23, "telnet", "legacy_cleartext"),
+        (21, "ftp", "legacy_cleartext"),
+    )
+    for port, service, expected in cases:
+        got = classify_remote_access_service(port=port, service_name=service)
+        if got != expected:
+            raise AssertionError(f"classification for {service}:{port} expected {expected}, got {got}")
+
+    services = filter_remote_access_services(
+        [
+            {"port": 22, "protocol": "tcp", "service_name": "ssh"},
+            {"port": 80, "protocol": "tcp", "service_name": "http"},
+        ]
+    )
+    if len(services) != 1 or services[0]["service_label"] != "SSH":
+        raise AssertionError("filter_remote_access_services should keep SSH only")
+
+    parsed = {
+        "target": "192.168.1.10",
+        "is_private_target": True,
+        "remote_services": services,
+        "no_service_data": False,
+    }
+    findings = interpret_remote_access_results(parsed)
+    if not findings or not any("SSH" in f.get("title", "") for f in findings):
+        raise AssertionError("interpreter should emit SSH finding")
+
+    from modules.module_registry import get_module
+    from modules.executor_dispatch import get_dispatch_entry
+
+    mod = get_module("infra_remote_access_review")
+    if mod is None or not mod.implemented:
+        raise AssertionError("infra_remote_access_review registry entry missing")
+    entry = get_dispatch_entry("infra_remote_access_review")
+    if entry is None or not callable(entry.execute):
+        raise AssertionError("infra_remote_access_review dispatch missing")
+
+    from modules.executors.loaders import _load_remote_access_handler
+
+    _load_remote_access_handler()
+    from modules.executors import loaders
+
+    if loaders._remote_access_handler is None:
+        raise AssertionError("remote access handler failed to load")
+
+    result = loaders._remote_access_handler(
+        "192.168.1.10",
+        options={"manual_services": [{"port": 22, "service_name": "ssh"}]},
+    )
+    if not result.get("success"):
+        raise AssertionError("manual port review should succeed")
+    if not result.get("data", {}).get("remote_services"):
+        raise AssertionError("manual SSH port should classify as remote access")
+
+
 def _check_executor_dispatch_registry() -> None:
     import inspect
 
@@ -3688,6 +3756,7 @@ def _check_executor_dispatch_registry() -> None:
         "infra_email_security",
         "infra_tls_review",
         "infra_http_security",
+        "infra_remote_access_review",
         "intel_virustotal",
         "intel_abuseipdb",
         "intel_greynoise",
@@ -4073,6 +4142,11 @@ def main() -> int:
     run(
         "nmap profile runner",
         lambda: _check_nmap_profile_runner(),
+    )
+
+    run(
+        "remote access review",
+        lambda: _check_remote_access_review(),
     )
 
     run(

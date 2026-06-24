@@ -277,6 +277,26 @@ def suggest_post_followup_actions(
 
         if module_id == "infra_nmap" and is_private_ipv4_target(target):
             parsed = result.get("parsed_data") or {}
+            from utils.remote_access_classifier import filter_remote_access_services, nmap_ports_to_service_rows
+
+            remote_services = filter_remote_access_services(
+                nmap_ports_to_service_rows(parsed.get("parsed_ports") or [])
+            )
+            if remote_services:
+                key = f"{target}:remote_access"
+                if key not in seen:
+                    seen.add(key)
+                    actions.append(
+                        make_action(
+                            title=f"Remote Access Exposure Review on {target}",
+                            reason="Nmap found remote-access or file-sharing services.",
+                            action_type="run_module",
+                            priority="high",
+                            target=target,
+                            module_id="infra_remote_access_review",
+                            button_label="Remote access review",
+                        )
+                    )
             ports = [
                 int(row.get("port"))
                 for row in parsed.get("parsed_ports") or []

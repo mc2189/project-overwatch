@@ -43,6 +43,7 @@ MODULE_TESTING_LEVELS: dict[str, TestingLevel] = {
     "infra_nmap": "safe_active_check",
     "infra_tls_review": "safe_active_check",
     "infra_http_security": "safe_active_check",
+    "infra_remote_access_review": "safe_active_check",
     # Planned authorised assessment modules
     "vuln_nuclei": "intrusive_active_check",
     "vuln_ffuf": "intrusive_active_check",

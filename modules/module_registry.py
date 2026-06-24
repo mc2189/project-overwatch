@@ -200,6 +200,38 @@ MODULES: list[ModuleEntry] = [
         ),
     ),
     ModuleEntry(
+        module_id="infra_remote_access_review",
+        display_name="Remote Access Exposure Review",
+        category="Infrastructure",
+        description="Review remote administration and file-sharing services from Nmap and service observations.",
+        status="active",
+        mode="active",
+        risk_level="medium",
+        requires_authorisation=True,
+        requires_api_key=False,
+        implemented=True,
+        accepted_target_types=("ipv4", "domain", "url"),
+        config_notes=(
+            "No API key required. Uses existing Nmap/service observations — does not authenticate, "
+            "guess credentials, or change remote services."
+        ),
+        rate_limit_notes="Analysis-assisted review of observed service data; optional manual port context only.",
+        short_help="Summarise SSH, RDP, VNC, SMB, Telnet, FTP and similar exposure from observed service data.",
+        detailed_help=(
+            "Turns Nmap and stored service observations into cautious remote-access exposure findings. "
+            "Does not log in, scan broadly, or send unsafe payloads. Run Network Service Check first when "
+            "no service data exists. Suitable after Nmap identifies administrative or file-sharing ports."
+        ),
+        example_inputs=("192.168.1.10", "10.0.0.5", "server.example.com"),
+        output_summary="Remote/admin service table, exposure context, classifications, and advisory findings.",
+        caution_notes=(
+            "Authorisation is required before running this module.",
+            "Findings are based on observed service data and require validation.",
+            "Absence of a listed service does not prove it is not exposed.",
+            "Does not perform authentication or intrusive protocol testing.",
+        ),
+    ),
+    ModuleEntry(
         module_id="infra_domain_intel",
         display_name="Domain Intelligence",
         category="Infrastructure",

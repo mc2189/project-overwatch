@@ -72,6 +72,7 @@ MODULE_CARD_TITLES: dict[str, str] = {
     "infra_nmap": "Network Service Check (Nmap Profile Runner)",
     "infra_tls_review": "SSL / TLS Configuration Review",
     "infra_http_security": "HTTP Security Header Review",
+    "infra_remote_access_review": "Remote Access Exposure Review",
     "infra_domain_intel": "Domain Intelligence",
     "infra_cert_subdomain": "Certificate & Subdomain Intelligence",
     "infra_website_metadata": "Website Metadata Review",

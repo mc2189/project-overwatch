@@ -2,6 +2,8 @@
 
 Project Overwatch is a **local** Python/Streamlit intelligence, OSINT, security testing and resilience advisory dashboard for **private internal use** supporting future client assessments.
 
+**v2.26** adds **Remote Access Exposure Review** — classifies SSH/RDP/VNC/SMB/Telnet/FTP and similar services from Nmap observations with cautious findings and no authentication.
+
 **v2.25** upgrades Network Service Check into an **Nmap Profile Runner** with guided profiles (Quick, Standard, Local Device, Web Surface, Full TCP, Custom Ports, Script-assisted Safe), structured parsing, and HTTP/TLS next actions from discovered web ports.
 
 **v2.24** extracts module execution handlers from the monolithic `modules/executor.py` into `modules/executors/` (infrastructure, threat intelligence, network analysis) with dispatch registration in `modules/executors/registry.py`. The public `execute_module()` API is unchanged.
@@ -697,6 +699,15 @@ Guided profiles for authorised Personal Lab and client assessments — **single 
 - **Next actions:** open web ports suggest HTTP Security Header Review and TLS Review on the assessed target.
 - **Packet Capture:** LAN device rows include **Run Network Service Check** (Local Device Detail profile).
 - Legacy profile names (`Quick check`, `Standard service scan`, …) still resolve for backward compatibility.
+
+### Remote Access Exposure Review (active / analysis-assisted)
+
+Reviews SSH, RDP, VNC, SMB, Telnet, FTP, WinRM, RTSP and similar services using **existing Nmap and service observations** — no authentication, credential checks, or exploitation.
+
+- **Data sources:** Nmap results, service entities, open-port observations, optional manual port context, LAN device role hints from Packet Capture.
+- **When to run:** After Network Service Check when remote-admin or file-sharing ports are observed; Nmap follow-up suggests this module automatically.
+- **Output:** Service table with classification (`remote_admin`, `file_sharing`, `legacy_cleartext`, etc.), cautious findings, evidence summary, and next actions (capture, report, restrict access).
+- **Guardrails:** Personal Lab or Client Engagement confirmation required; does not change remote services or send unsafe payloads.
 
 ### Domain Intelligence (passive)
 

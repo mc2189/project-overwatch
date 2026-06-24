@@ -124,6 +124,13 @@ MODULE_EVIDENCE_DEFAULTS: dict[str, dict[str, Any]] = {
         "reliability": RELIABILITY_HIGH,
         "collection_method": "controlled_http_header_review",
     },
+    "infra_remote_access_review": {
+        "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
+        "source_name": "Nmap / Remote Access Review",
+        "source_url": None,
+        "reliability": RELIABILITY_HIGH,
+        "collection_method": "remote_access_exposure_review",
+    },
     "infra_whois_rdap": {
         "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
         "source_name": "rdap.org",

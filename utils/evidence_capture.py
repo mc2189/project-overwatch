@@ -561,6 +561,87 @@ def capture_website_metadata_evidence(
     return items
 
 
+def capture_remote_access_evidence(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    observation_id: int,
+    module_id: str,
+    result: dict[str, Any],
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    parsed_data = result.get("parsed_data") or {}
+    services = list(parsed_data.get("remote_services") or [])
+
+    items.append(
+        _create_item(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            title="Remote access exposure summary",
+            summary="Summary of remote-access and administrative services from observed data.",
+            content_text=result.get("summary") or parsed_data.get("target") or "",
+            content_type="text/plain",
+            evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+            source_name="Nmap / Remote Access Review",
+            collection_method="remote_access_exposure_review",
+            reliability=RELIABILITY_HIGH,
+        )
+    )
+
+    if services:
+        lines = []
+        for service in services:
+            lines.append(
+                f"{service.get('service_label')} {service.get('port')}/{service.get('protocol', 'tcp')} "
+                f"[{service.get('classification_label')}]"
+                + (f" — {service.get('product')} {service.get('version')}".strip() if service.get("product") or service.get("version") else "")
+            )
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Remote access service classification summary",
+                summary=f"{len(services)} remote-access candidate(s) classified from observed service data.",
+                content_text="\n".join(lines),
+                content_type="text/plain",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="Nmap / Remote Access Review",
+                collection_method="remote_access_exposure_review",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    limitations = parsed_data.get("limitations") or []
+    warnings = result.get("warnings") or []
+    caveat_lines = [*(limitations or []), *(warnings or [])]
+    if caveat_lines:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Remote access review limitations",
+                summary="Caveats for interpretation of observed service data.",
+                content_text="\n".join(f"- {line}" for line in caveat_lines),
+                content_type="text/plain",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="Nmap / Remote Access Review",
+                collection_method="remote_access_exposure_review",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+    return items
+
+
 def capture_http_security_evidence(
     conn: sqlite3.Connection,
     *,
@@ -2185,6 +2266,15 @@ def capture_module_evidence(
         )
     if module_id == "infra_tls_review":
         return capture_tls_review_evidence(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            result=result,
+        )
+    if module_id == "infra_remote_access_review":
+        return capture_remote_access_evidence(
             conn,
             case_id=case_id,
             entity_id=entity_id,

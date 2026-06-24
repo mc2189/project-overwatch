@@ -50,6 +50,7 @@ from modules.executors.persistence import (
     _persist_domain_intel_records,
     _persist_email_security_records,
     _persist_http_security_records,
+    _persist_remote_access_records,
     _persist_investigation_records,
     _persist_nmap_services_and_relationships,
     _persist_tls_review_records,
@@ -769,6 +770,114 @@ def _execute_http_security(
             db_context,
             case_id=case_id,
             host_entity_id=host_entity["id"],
+            module_id=module_id,
+            target=target,
+            result=result,
+            authorisation_confirmed=authorisation_confirmed,
+            run_mode_id=run_mode_id,
+            run_mode_label=run_mode_label,
+        )
+
+    return result
+
+
+def _execute_remote_access_review(
+    module_id: str,
+    target: str,
+    options: dict[str, Any],
+    db_context: sqlite3.Connection | None,
+    authorisation_confirmed: bool,
+    case_id: int | None,
+    entity_id: int | None,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> dict[str, Any]:
+    remote_access_handler, remote_access_load_error = loaders.loaded_handler(
+        loaders._load_remote_access_handler, "_remote_access_handler", "_remote_access_load_error"
+    )
+    if remote_access_handler is None:
+        error_message = remote_access_load_error or "Remote Access Exposure Review module is not available."
+        return make_result(
+            module_id,
+            success=False,
+            status="error",
+            summary="Remote Access Exposure Review module is not available.",
+            errors=[error_message],
+        )
+
+    review_options = dict(options)
+    if review_options.get("parsed_data") and not review_options.get("parsed_ports"):
+        parsed = review_options.get("parsed_data") or {}
+        if isinstance(parsed, dict) and parsed.get("parsed_ports"):
+            review_options["parsed_ports"] = parsed.get("parsed_ports")
+
+    if db_context is not None and case_id is not None and not review_options.get("discovered_services"):
+        from utils.service_discovery import load_discovered_services
+
+        review_options["discovered_services"] = load_discovered_services(
+            case_id,
+            target,
+            conn=db_context,
+            latest_results=review_options.get("latest_results"),
+        )
+
+    review_data = remote_access_handler(target, options=review_options)
+    status = review_data.get("status", "error")
+    if not review_data.get("success"):
+        errors = review_data.get("errors") or [review_data.get("summary") or "Remote access review failed."]
+        return make_result(
+            module_id,
+            success=False,
+            status=status,
+            summary=errors[0],
+            raw_output=review_data.get("raw_output", ""),
+            errors=errors if isinstance(errors, list) else [str(errors)],
+            parsed_data=review_data.get("data"),
+            warnings=review_data.get("warnings", []),
+        )
+
+    parsed_data = review_data.get("data") or {}
+    host = parsed_data.get("host") or target
+    interpreter_findings = interpret_module_findings(module_id, parsed_data, review_options)
+    result = make_result(
+        module_id,
+        success=True,
+        status=review_data.get("status", "completed"),
+        summary=review_data.get("summary", f"Remote access review completed for {host}."),
+        raw_output=review_data.get("raw_output", ""),
+        findings=review_data.get("findings", []),
+        warnings=review_data.get("warnings", []),
+        parsed_data=parsed_data,
+        interpreter_findings=interpreter_findings,
+    )
+
+    if db_context is not None and case_id is not None:
+        from database.db_setup import create_or_get_entity
+        from utils.target_detection import ENTITY_TYPE_BY_TARGET, get_target_type
+
+        target_type = parsed_data.get("target_type") or get_target_type(target)
+        host_entity_type = ENTITY_TYPE_BY_TARGET.get(target_type, "domain")
+        if target_type in {"domain", "url"}:
+            host_entity_type = "domain"
+        elif target_type == "ipv4":
+            host_entity_type = "ipv4"
+
+        host_entity_id = entity_id
+        if host_entity_id is None:
+            host_entity = create_or_get_entity(
+                case_id,
+                host_entity_type,
+                host,
+                label=host,
+                source=module_id,
+                conn=db_context,
+            )
+            host_entity_id = host_entity["id"]
+
+        _persist_remote_access_records(
+            db_context,
+            case_id=case_id,
+            host_entity_id=host_entity_id,
             module_id=module_id,
             target=target,
             result=result,

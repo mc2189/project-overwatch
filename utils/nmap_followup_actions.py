@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from utils.next_actions import make_action
+from utils.remote_access_classifier import filter_remote_access_services, nmap_ports_to_service_rows
 from utils.web_port_planner import is_private_ipv4_target
 
 _WEB_PORTS = {80, 443, 8080, 8443, 8000, 8888, 3000, 5000, 7000, 9443}
@@ -112,16 +113,32 @@ def suggest_nmap_followup_actions(result: dict[str, Any], *, target: str) -> lis
                 seen.add(key)
                 actions.append(
                     make_action(
-                        title="Review remote access exposure",
+                        title="Remote Access Exposure Review",
                         reason=f"Remote administration service observed on port {row['port_num']}.",
-                        action_type="open_finding",
+                        action_type="run_module",
                         priority="medium",
                         target=target,
-                        module_id="infra_nmap",
-                        button_label="Review finding",
+                        module_id="infra_remote_access_review",
+                        button_label="Remote access review",
                     )
                 )
             break
+
+    remote_candidates = filter_remote_access_services(nmap_ports_to_service_rows(parsed.get("parsed_ports") or []))
+    if remote_candidates and f"{target}:remote_access" not in seen:
+        seen.add(f"{target}:remote_access")
+        if not any(action.get("module_id") == "infra_remote_access_review" for action in actions):
+            actions.append(
+                make_action(
+                    title="Remote Access Exposure Review",
+                    reason="Remote-access or file-sharing services were observed — review exposure context.",
+                    action_type="run_module",
+                    priority="medium",
+                    target=target,
+                    module_id="infra_remote_access_review",
+                    button_label="Remote access review",
+                )
+            )
 
     if not ports:
         actions.append(

@@ -17,6 +17,7 @@ from modules.executors.paths import (
     LIVE_CAPTURE_MODULE_PATH,
     NMAP_MODULE_PATH,
     PCAP_REVIEW_MODULE_PATH,
+    REMOTE_ACCESS_MODULE_PATH,
     SHODAN_MODULE_PATH,
     TLS_REVIEW_MODULE_PATH,
     URLHAUS_MODULE_PATH,
@@ -46,6 +47,9 @@ _tls_review_load_attempted = False
 _http_security_handler: Any | None = None
 _http_security_load_error: str | None = None
 _http_security_load_attempted = False
+_remote_access_handler: Any | None = None
+_remote_access_load_error: str | None = None
+_remote_access_load_attempted = False
 _whois_rdap_handler: Any | None = None
 _whois_rdap_load_error: str | None = None
 _whois_rdap_load_attempted = False
@@ -305,6 +309,29 @@ def _load_http_security_handler() -> None:
         _http_security_handler = infra_http_security.run_http_security_review
     except Exception as exc:
         _http_security_load_error = str(exc)
+
+
+def _load_remote_access_handler() -> None:
+    global _remote_access_handler, _remote_access_load_error, _remote_access_load_attempted
+
+    if _remote_access_load_attempted:
+        return
+
+    _remote_access_load_attempted = True
+
+    if not REMOTE_ACCESS_MODULE_PATH.is_file():
+        _remote_access_load_error = f"Module file not found: {REMOTE_ACCESS_MODULE_PATH}"
+        return
+
+    try:
+        spec = importlib.util.spec_from_file_location("infra_remote_access_review", REMOTE_ACCESS_MODULE_PATH)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load module spec from {REMOTE_ACCESS_MODULE_PATH}")
+        infra_remote_access_review = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(infra_remote_access_review)
+        _remote_access_handler = infra_remote_access_review.run_remote_access_review
+    except Exception as exc:
+        _remote_access_load_error = str(exc)
 
 
 def _load_whois_rdap_handler() -> None:

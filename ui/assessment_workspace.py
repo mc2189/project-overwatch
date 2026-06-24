@@ -157,6 +157,14 @@ def _execute_modules(
                     "requested_url": http_opts.get("requested_url"),
                     "target_source": http_opts.get("target_source", "default_assumption"),
                 }
+            elif module_id == "infra_remote_access_review":
+                latest = st.session_state.get("latest_run_results") or []
+                nmap_ports: list[dict] = []
+                for prior in latest:
+                    if prior.get("module_id") == "infra_nmap" and prior.get("success"):
+                        nmap_ports = (prior.get("parsed_data") or {}).get("parsed_ports") or []
+                        break
+                options = {"parsed_ports": nmap_ports, "latest_results": latest}
             elif module_id == "net_pcap_review":
                 pcap_upload = st.session_state.get(PCAP_UPLOAD_SESSION_KEY) or {}
                 options = {

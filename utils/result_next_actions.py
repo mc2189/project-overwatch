@@ -52,6 +52,47 @@ def suggest_result_action(result: dict[str, Any], *, target: str) -> dict[str, A
             button_label="Select Nmap",
         )
 
+    if module_id == "infra_remote_access_review" and result.get("success"):
+        services = parsed.get("remote_services") or []
+        if not services and parsed.get("no_service_data"):
+            return make_action(
+                title="Run Network Service Check",
+                reason="No service observations available for remote access review.",
+                action_type="run_module",
+                priority="high",
+                target=target,
+                module_id="infra_nmap",
+                button_label="Select Nmap",
+            )
+        if services and parsed.get("is_private_target"):
+            return make_action(
+                title="Capture traffic to this host",
+                reason="Local remote-access services observed — PCAP may add device context.",
+                action_type="navigate_page",
+                priority="medium",
+                target=target,
+                module_id="net_live_capture",
+                button_label="Packet Capture",
+            )
+        if services and not parsed.get("is_private_target"):
+            return make_action(
+                title="Add exposure to report",
+                reason="Public remote-access services require validation and reporting.",
+                action_type="create_report",
+                priority="high",
+                target=target,
+                button_label="Generate report",
+            )
+        if risk:
+            return make_action(
+                title="Add remote access findings to report",
+                reason="Remote-access exposure findings should be included in client output.",
+                action_type="create_report",
+                priority="medium",
+                target=target,
+                button_label="Generate report",
+            )
+
     if module_id == "infra_email_security":
         dmarc = (parsed.get("dmarc") or {}).get("present")
         if not dmarc or any("dmarc" in (f.get("title") or "").lower() for f in risk):

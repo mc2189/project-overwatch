@@ -614,6 +614,52 @@ def build_case_report(
             )
             lines.append("")
 
+        remote_observations = [
+            observation
+            for observation in observations
+            if observation.get("module_id") == "infra_remote_access_review"
+        ]
+        if remote_observations:
+            lines.extend(["## Remote Access Exposure Summary", ""])
+            lines.append(
+                "_Based on observed Nmap/service data only. No authentication or intrusive testing was performed._"
+            )
+            lines.append("")
+            for observation in remote_observations:
+                entity = _entity_display(
+                    entity_by_id.get(observation.get("entity_id")),
+                    observation.get("entity_id"),
+                )
+                payload: dict[str, Any] = {}
+                data_json = observation.get("data_json")
+                if data_json:
+                    try:
+                        payload = json.loads(data_json) if isinstance(data_json, str) else data_json
+                    except (TypeError, json.JSONDecodeError):
+                        payload = {}
+                services = payload.get("remote_services") or []
+                exposure = "local/private" if payload.get("is_private_target") else "public or non-local"
+                lines.append(f"### {observation.get('title', 'Remote access review')}")
+                lines.append("")
+                lines.append(f"- Entity: {entity}")
+                lines.append(f"- Summary: {observation.get('summary') or '_No summary._'}")
+                lines.append(f"- Exposure context: {exposure}")
+                lines.append(f"- Remote/admin services observed: {len(services)}")
+                if services:
+                    for service in services[:8]:
+                        lines.append(
+                            f"  - {service.get('service_label', 'service')} "
+                            f"{service.get('port')}/{service.get('protocol', 'tcp')} "
+                            f"({service.get('classification_label', service.get('classification', 'unknown'))})"
+                        )
+                lines.append("- Recommendation: review whether services are expected and restricted to trusted networks.")
+                lines.append(f"- Created: {observation.get('created_at', '-')}")
+                lines.append("")
+            lines.append(
+                "_Limitation: findings reflect observed service data at review time and require validation._"
+            )
+            lines.append("")
+
         lines.extend(["## Observations", ""])
         if not observations:
             lines.append("_No observations recorded for this case._")
