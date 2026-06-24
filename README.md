@@ -2,6 +2,8 @@
 
 Project Overwatch is a **local** Python/Streamlit intelligence, OSINT, security testing and resilience advisory dashboard for **private internal use** supporting future client assessments.
 
+**v2.30** adds **Report Builder v2** — guided assessment packs with eight report types, selectable sections, rule-based executive summaries, ranked recommended actions, finding/evidence controls, and Markdown/HTML/PDF export with metadata sidecars.
+
 **v2.29** adds **Document and Image Metadata Review** — local EXIF and document property extraction from uploaded files with privacy advisories for GPS and author metadata (no OCR, no external upload).
 
 **v2.28** adds **Controlled Web Path Review** — a small sequential check of curated common web paths (admin, API docs, status, CMS, sensitive-name indicators) with cautious findings and no full body storage.
@@ -338,6 +340,25 @@ Passive third-party malware URL intelligence for **URL**, **domain**, and **publ
 - **Large host results** — URL lists capped for UI/entities (20 displayed, 50 entity max) with usability warning
 - **Results** — malware URL intelligence is *reported by URLhaus* — not independently confirmed by Overwatch; host matches do not mean every path is malicious
 - **Evidence** — summaries stored in Evidence Locker; download links stripped; raw JSON collapsed in UI
+
+### Report Builder v2 (v2.30)
+
+Guided assessment pack workflow on the **Report** page:
+
+1. **Select case** (current case from navigation)
+2. **Select report type** — Personal Lab Summary, External Exposure Review, Website/Domain Posture, Local Network Review, Packet Capture/LAN Recon, Evidence Metadata Review, Full Technical Appendix, or Client Executive Pack
+3. **Choose included sections** — concise default or custom multiselect; technical appendix optional
+4. **Review findings** — active-only default; options for all, exclude info-only, or selected findings
+5. **Review evidence** — summary included by default; raw evidence only with appendix
+6. **Add analyst notes** — optional free-text section in the report
+7. **Generate report** — rule-based executive summary and ranked recommended actions
+8. **Export/download** — Markdown (primary), HTML, JSON, PDF (WeasyPrint optional), encrypted export
+
+**Executive summary** is generated locally from severity counts, modules run, operating context, and evidence — no AI/API calls. Wording uses cautious phrasing (*observed*, *suggests*, *review whether expected*, *point-in-time*).
+
+**Personal Lab vs Client:** Personal Lab packs use self-owned testing language; Client Engagement packs can include engagement/scope/ROE context when linked.
+
+Legacy export presets remain available under **Legacy export presets** on the Report page.
 
 ### PCAP Evidence Review (v2.17)
 

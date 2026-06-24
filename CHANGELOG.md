@@ -2,6 +2,20 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.30.0 — Report Builder v2 / Client Pack
+
+- **Report Builder v2 UI** — guided workflow: case → report type → sections → findings/evidence review → analyst notes → generate/export
+- **`utils/report_types.py`** — eight assessment pack types (Personal Lab Summary, External Exposure, Website/Domain Posture, Local Network, Packet Capture/LAN Recon, Evidence Metadata, Full Technical Appendix, Client Executive Pack)
+- **`utils/report_sections.py`** — selectable section registry with concise defaults and optional technical appendix
+- **`utils/report_executive_summary.py`** — rule-based plain-English executive summary (no AI/API calls)
+- **`utils/report_recommended_actions.py`** — ranked recommended actions with priority, related finding/evidence, owner/status placeholders
+- **`utils/report_finding_selection.py`** — finding include/exclude filters (active, all, exclude info, selected)
+- **`utils/report_module_summaries.py`** — concise web posture and threat intelligence summary blocks
+- **`utils/report_metadata.py`** — `.meta.json` sidecar on saved reports (case ID, type, version, timestamp)
+- **Report page** — type selector, section multiselect, findings filter, executive/actions/evidence previews, legacy presets retained in expander
+- **Export** — Markdown/HTML/JSON/PDF unchanged; PDF fails gracefully when WeasyPrint unavailable
+- **Next actions** — contextual report generation hints after assessment runs (capture/metadata packs, review findings first)
+
 ## v2.29.0 — Document and Image Metadata Review
 
 - **`evidence_file_metadata`** — local-only review of uploaded documents and images for useful metadata (no OCR, no external upload)

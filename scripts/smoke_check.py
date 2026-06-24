@@ -2570,6 +2570,63 @@ def _check_pcap_module() -> None:
             Path(empty_pcap.name).unlink(missing_ok=True)
 
 
+def _check_report_builder_v2() -> None:
+    from database.db_setup import get_or_create_default_case
+    from utils.report_builder import ReportOptions, build_case_report
+    from utils.report_executive_summary import ExecutiveSummaryContext, build_executive_summary_prose
+    from utils.report_recommended_actions import build_recommended_actions, recommended_actions_markdown
+    from utils.report_types import REPORT_TYPES, get_report_type, list_report_types
+
+    if len(list_report_types()) < 8:
+        raise AssertionError("expected at least 8 report types")
+
+    report_type = get_report_type("client_executive_pack")
+    if report_type is None:
+        raise AssertionError("client_executive_pack report type missing")
+
+    case = get_or_create_default_case()
+    options = ReportOptions(
+        report_type_id="client_executive_pack",
+        sections=report_type.default_sections,
+        operating_context=report_type.default_operating_context,
+        template=report_type.default_template,
+    )
+    markdown = build_case_report(case["id"], options=options)
+    if not markdown.startswith("# Project Overwatch Case Report"):
+        raise AssertionError("report markdown header missing")
+    if "## Executive Summary" not in markdown:
+        raise AssertionError("executive summary section missing")
+    if "## Recommended Actions" not in markdown:
+        raise AssertionError("recommended actions section missing")
+
+    prose = build_executive_summary_prose(
+        ExecutiveSummaryContext(
+            operating_context="personal_lab",
+            report_type_label="Personal Lab Summary",
+            findings=[],
+            open_findings=[],
+            observations=[],
+            evidence_items=[],
+            modules_used=["infra_nmap"],
+            highest_severity=None,
+            entity_count=0,
+            operation_count=0,
+        )
+    )
+    if "confirmed" in prose.lower() and "not confirmed" not in prose.lower():
+        raise AssertionError("executive summary should avoid unsupported certainty wording")
+
+    actions = build_recommended_actions(
+        findings=[],
+        evidence_items=[],
+        evidence_links=[],
+        operating_context="personal_lab",
+    )
+    action_lines = recommended_actions_markdown(actions)
+    if not action_lines or "Recommended Actions" not in action_lines[0]:
+        raise AssertionError("recommended actions markdown helper failed")
+
+
 def _check_file_metadata_module() -> None:
     import importlib.util
     from pathlib import Path
@@ -4535,6 +4592,11 @@ def main() -> int:
     run(
         "file metadata module",
         lambda: _check_file_metadata_module(),
+    )
+
+    run(
+        "report builder v2",
+        lambda: _check_report_builder_v2(),
     )
 
     run(

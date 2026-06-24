@@ -31,6 +31,7 @@ from utils.rdap_cache import (
     rdap_cache_ttl_hours,
 )
 from utils.graph_view import entity_graph_figure
+from ui.report_builder_page import build_report_v2_options, render_report_builder_v2
 from utils.report_builder import build_case_report, save_report_markdown
 from utils.report_encryption import is_encryption_available
 from utils.report_export import (
@@ -391,14 +392,13 @@ def render_graph_page(case_id: int, metrics: dict[str, int]) -> None:
 
 
 def render_report_page(case_id: int, metrics: dict[str, int]) -> None:
-    st.title("Report")
+    st.title("Report Builder")
     render_compact_metrics(metrics)
-    st.divider()
-
     st.caption(
-        f"Generate a Markdown report for case #{case_id}. "
+        "Generate assessment packs from case findings, evidence, and observations. "
         "Review all content before sharing externally."
     )
+    st.divider()
 
     scheduled_paths, scheduled_message = maybe_run_scheduled_exports()
     if scheduled_message:
@@ -457,130 +457,44 @@ def render_report_page(case_id: int, metrics: dict[str, int]) -> None:
             )
             st.success("Schedule settings saved. Exports run when the Report page is opened.")
 
-    active_run_mode = st.session_state.get("operation_run_mode")
-    case = get_case(case_id)
-    if case and case.get("default_run_mode"):
-        active_run_mode = case.get("default_run_mode")
-
-    suggested_preset = suggest_preset_for_run_mode(active_run_mode)
-    if suggested_preset:
-        suggested = REPORT_PRESETS[suggested_preset]
-        mode_label = get_run_mode_label(active_run_mode) if active_run_mode else "this investigation"
-        st.info(
-            f"Suggested export preset for **{mode_label}**: **{suggested.label}** — "
-            f"{suggested.description}"
-        )
-        if st.button("Apply suggested preset", key="apply_suggested_report_preset"):
-            apply_preset_to_session(suggested_preset)
-            st.rerun()
-
-    preset_col1, preset_col2 = st.columns([2, 1])
-    with preset_col1:
-        preset_options = preset_select_options(active_run_mode)
+    with st.expander("Legacy export presets", expanded=False):
+        active_run_mode = st.session_state.get("operation_run_mode")
+        case = get_case(case_id)
+        if case and case.get("default_run_mode"):
+            active_run_mode = case.get("default_run_mode")
+        suggested_preset = suggest_preset_for_run_mode(active_run_mode)
+        if suggested_preset:
+            suggested = REPORT_PRESETS[suggested_preset]
+            mode_label = get_run_mode_label(active_run_mode) if active_run_mode else "this investigation"
+            st.caption(
+                f"Suggested preset for **{mode_label}**: **{suggested.label}** — {suggested.description}"
+            )
+            if st.button("Apply suggested preset", key="apply_suggested_report_preset"):
+                apply_preset_to_session(suggested_preset)
+                st.rerun()
         preset_choice = st.selectbox(
             "Export preset",
-            options=preset_options,
+            options=preset_select_options(active_run_mode),
             format_func=lambda value: (
                 "Custom settings"
                 if value == "custom"
-                else (
-                    f"{REPORT_PRESETS[value].label} ★"
-                    if REPORT_PRESETS[value].suggested_run_mode_id == active_run_mode
-                    else REPORT_PRESETS[value].label
-                )
+                else REPORT_PRESETS[value].label
             ),
             key="report_preset_choice",
         )
-        if preset_choice != "custom":
-            st.caption(REPORT_PRESETS[preset_choice].description)
-    with preset_col2:
-        st.write("")
-        if st.button("Apply preset", width="stretch", disabled=preset_choice == "custom"):
+        if preset_choice != "custom" and st.button("Apply preset", key="apply_legacy_preset"):
             apply_preset_to_session(preset_choice)
             st.rerun()
 
-    if "report_template" not in st.session_state:
-        st.session_state.report_template = "full"
-    if "include_closed_findings" not in st.session_state:
-        st.session_state.include_closed_findings = False
-    if "include_raw_appendix" not in st.session_state:
-        st.session_state.include_raw_appendix = False
-    if "include_graph_appendix" not in st.session_state:
-        st.session_state.include_graph_appendix = False
-    if "redact_ips" not in st.session_state:
-        st.session_state.redact_ips = False
-    if "redact_emails" not in st.session_state:
-        st.session_state.redact_emails = False
-    if "redact_domains" not in st.session_state:
-        st.session_state.redact_domains = False
-
-    report_col1, report_col2 = st.columns(2)
-    with report_col1:
-        report_template = st.selectbox(
-            "Report template",
-            options=["full", "executive"],
-            format_func=lambda value: "Full technical" if value == "full" else "Executive summary",
-            help="Executive omits detailed entities, relationships, and observations.",
-            key="report_template",
-        )
-        include_closed_findings = st.checkbox(
-            "Include closed / accepted / false positive findings",
-            help="When unchecked, only active findings (open, in review, action required) are included.",
-            key="include_closed_findings",
-        )
-        include_raw_appendix = st.checkbox(
-            "Include raw output appendix",
-            help="When enabled, observation raw output is appended in fenced code blocks.",
-            key="include_raw_appendix",
-        )
-    with report_col2:
-        include_graph_appendix = st.checkbox(
-            "Include entity graph snapshot",
-            help="Embeds a PNG graph in the appendix when kaleido is available.",
-            key="include_graph_appendix",
-        )
-        include_engagement_context = st.checkbox(
-            "Include engagement / authorisation context",
-            help="Adds client engagement, scope summary, ROE limitations, and authorised testing statement.",
-            key="include_engagement_context",
-        )
-        from utils.operating_context import PASSIVE_RESEARCH, list_operating_contexts, operating_context_label
-
-        st.selectbox(
-            "Operating context for report wording",
-            options=[mode_id for mode_id, _ in list_operating_contexts()],
-            format_func=operating_context_label,
-            index=0,
-            key="report_operating_context",
-            help="How this report should describe the testing context (Passive Research, Personal Lab, or Client Engagement).",
-        )
-        redact_ips = st.checkbox("Redact IP addresses", key="redact_ips")
-        redact_emails = st.checkbox("Redact email addresses", key="redact_emails")
-        redact_domains = st.checkbox("Redact domain names", key="redact_domains")
-
-    with st.expander("Advanced redaction", expanded=False):
-        custom_terms_text = st.text_area(
-            "Additional strings to redact (one per line)",
-            height=100,
-            placeholder="internal-hostname\nclient-secret-token",
-        )
-        custom_regex_text = st.text_area(
-            "Custom regex patterns (one per line: pattern|||replacement)",
-            height=100,
-            placeholder=r"10\.\d+\.\d+\.\d+|||[REDACTED_SUBNET]",
-        )
-        st.caption("Lines starting with # are ignored. Custom redaction runs after built-in patterns.")
-
-    report_options = build_report_options_from_state(
-        branding,
-        custom_terms_text=custom_terms_text,
-        custom_regex_text=custom_regex_text,
-    )
+    render_report_builder_v2(case_id)
+    st.divider()
 
     if "case_report_markdown" not in st.session_state:
         st.session_state.case_report_markdown = ""
 
-    generate_report = st.button("Generate / refresh report preview", type="primary")
+    generate_report = st.button("Generate / refresh report", type="primary", key="generate_report_v2")
+    report_options = build_report_v2_options(branding)
+
     if generate_report:
         try:
             st.session_state.case_report_markdown = build_case_report(
@@ -618,6 +532,7 @@ def render_report_page(case_id: int, metrics: dict[str, int]) -> None:
                     saved_path = save_report_markdown(
                         case_id,
                         markdown_text=report_markdown,
+                        options=report_options,
                     )
                     st.success(f"Saved to `{saved_path}`")
                 except Exception as exc:

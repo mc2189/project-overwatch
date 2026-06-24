@@ -45,6 +45,7 @@ from utils.report_redaction import (
 )
 from utils.security import redact_secrets_from_text
 from utils.report_settings import ReportBranding, branding_footer_lines, branding_header_lines, load_report_branding
+from utils.report_types import FindingSelectionMode, get_report_type
 
 SEVERITY_SECTION_ORDER = ("critical", "high", "medium", "low", "info")
 SEVERITY_RANK = {name: index for index, name in enumerate(reversed(SEVERITY_SECTION_ORDER))}
@@ -63,6 +64,14 @@ class ReportOptions:
     custom_redaction_regex: str = ""
     include_engagement_context: bool = False
     operating_context: str | None = None
+    report_type_id: str | None = None
+    sections: frozenset[str] | None = None
+    finding_selection_mode: FindingSelectionMode = "active"
+    selected_finding_ids: frozenset[int] = field(default_factory=frozenset)
+    finding_module_filter: frozenset[str] = field(default_factory=frozenset)
+    finding_severity_filter: frozenset[str] = field(default_factory=frozenset)
+    analyst_notes: str = ""
+    include_evidence_summary: bool = True
 
 
 def _lookup_notices_from_observations(observations: list[dict[str, Any]]) -> list[str]:
@@ -272,6 +281,25 @@ def build_case_report(
     if options.branding is None:
         options.branding = load_report_branding()
 
+    from utils.report_finding_selection import filter_findings_for_report
+    from utils.report_sections import section_enabled
+    from utils.report_executive_summary import ExecutiveSummaryContext, build_executive_summary_prose, build_executive_summary_stats_lines
+    from utils.report_recommended_actions import build_recommended_actions, recommended_actions_markdown
+    from utils.report_module_summaries import (
+        build_lan_recon_summary_lines,
+        build_threat_intel_summary_lines,
+        build_web_posture_summary_lines,
+    )
+
+    report_type = get_report_type(options.report_type_id)
+    if report_type and options.sections is None:
+        options.sections = report_type.default_sections
+    if report_type and options.operating_context is None:
+        options.operating_context = report_type.default_operating_context
+
+    def enabled(section_id: str) -> bool:
+        return section_enabled(options.sections, section_id, legacy_template=options.template)
+
     conn = get_db_conn()
     try:
         data = _load_case_data(case_id, conn)
@@ -322,15 +350,24 @@ def build_case_report(
     entity_by_id = {entity["id"]: entity for entity in entities}
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     template_label = "Executive" if options.template == "executive" else "Full technical"
+    report_type_label = report_type.label if report_type else None
 
-    if options.include_closed_findings:
-        report_findings = list(all_findings)
-    else:
-        report_findings = [
+    all_findings_filtered = filter_findings_for_report(
+        all_findings,
+        mode=options.finding_selection_mode,
+        include_closed=options.include_closed_findings,
+        selected_ids=options.selected_finding_ids,
+        module_filter=options.finding_module_filter,
+        severity_filter=options.finding_severity_filter,
+    )
+    if options.include_closed_findings and options.finding_selection_mode == "active":
+        report_findings = list(all_findings_filtered) or [
             finding
             for finding in all_findings
             if normalize_finding_status(finding.get("status")) not in REPORT_EXCLUDED_STATUSES
         ]
+    else:
+        report_findings = list(all_findings_filtered)
 
     open_findings = [
         finding for finding in all_findings if normalize_finding_status(finding.get("status")) == "open"
@@ -365,37 +402,26 @@ def build_case_report(
         "# Project Overwatch Case Report",
         "",
         *branding_header_lines(branding),
-        f"_Generated: {generated_at} · Template: {template_label}_",
-        "",
-        "## Case Summary",
-        "",
-        f"- **Case name:** {case.get('name', 'Unnamed')}",
-        f"- **Case ID:** {case.get('id')}",
-        f"- **Status:** {case.get('status', 'open')}",
-        f"- **Created:** {case.get('created_at', 'unknown')}",
-        f"- **Updated:** {case.get('updated_at', 'unknown')}",
-        f"- **Description:** {case.get('description') or '_No description provided._'}",
-        "",
-        "## Executive Summary",
-        "",
-        f"- Total entities: {len(entities)}",
-        f"- Total relationships: {len(relationships)}",
-        f"- Total observations: {len(observations)}",
-        f"- Total operations: {len(operations)}",
-        f"- Operations by run mode: {_format_operation_run_modes(operations)}",
-        f"- Total findings: {len(all_findings)}",
-        f"- Open findings: {len(open_findings)}",
-        f"- Finding status summary: {status_summary}",
-        f"- Highest severity finding: {highest or 'None recorded'}",
-        f"- Main modules used: {modules_summary}",
-        f"- Batch queue runs recorded: {len(batch_queue_runs)}",
-        "",
-        "## Scope and Notes",
-        "",
-        "This report was generated from locally stored Project Overwatch case data. "
-        "Findings are analyst aids, not final proof of risk. Review all content before sharing externally.",
+        f"_Generated: {generated_at} · Template: {template_label}"
+        + (f" · Report type: {report_type_label}" if report_type_label else "")
+        + "_",
         "",
     ]
+
+    if enabled("cover_case_summary"):
+        lines.extend(
+            [
+                "## Case Summary",
+                "",
+                f"- **Case name:** {case.get('name', 'Unnamed')}",
+                f"- **Case ID:** {case.get('id')}",
+                f"- **Status:** {case.get('status', 'open')}",
+                f"- **Created:** {case.get('created_at', 'unknown')}",
+                f"- **Updated:** {case.get('updated_at', 'unknown')}",
+                f"- **Description:** {case.get('description') or '_No description provided._'}",
+                "",
+            ]
+        )
 
     from utils.operating_context import (
         CLIENT_ENGAGEMENT,
@@ -404,30 +430,66 @@ def build_case_report(
         operating_context_label,
     )
 
-    context_key = options.operating_context or PASSIVE_RESEARCH
-    lines.extend(
-        [
-            "## Operating Context",
-            "",
-            f"- **Mode:** {operating_context_label(context_key)}",
-        ]
+    exec_context = ExecutiveSummaryContext(
+        operating_context=options.operating_context or PASSIVE_RESEARCH,
+        report_type_label=report_type_label,
+        findings=report_findings,
+        open_findings=open_findings,
+        observations=observations,
+        evidence_items=evidence_items,
+        modules_used=modules_used,
+        highest_severity=highest,
+        entity_count=len(entities),
+        operation_count=len(operations),
     )
-    if context_key == PERSONAL_LAB:
-        lines.append(
-            "- **Note:** Output includes results from self-authorised Personal Lab / self-owned testing. "
-            "This is not a formal client engagement and must not be presented as client-authorised work."
+
+    if enabled("executive_summary"):
+        lines.extend(["## Executive Summary", ""])
+        lines.append(build_executive_summary_prose(exec_context))
+        lines.append("")
+        lines.extend(build_executive_summary_stats_lines(exec_context))
+        lines.append("")
+
+    if enabled("scope_limitations"):
+        lines.extend(
+            [
+                "## Scope and Limitations",
+                "",
+                "This report was generated from locally stored Project Overwatch case data. "
+                "Findings are analyst aids based on available evidence at generation time — "
+                "not final proof of risk or compromise. Review all content before sharing externally.",
+                "",
+            ]
         )
-    elif context_key == CLIENT_ENGAGEMENT:
-        lines.append(
-            "- **Note:** Active testing results, where present, were produced under client engagement "
-            "controls when applicable."
+
+    context_key = options.operating_context or PASSIVE_RESEARCH
+    if enabled("operating_context"):
+        lines.extend(
+            [
+                "## Operating Context",
+                "",
+                f"- **Mode:** {operating_context_label(context_key)}",
+            ]
         )
-    else:
-        lines.append(
-            "- **Note:** Passive research context — active testing artefacts should not be included unless "
-            "explicitly generated under Personal Lab or Client Engagement mode."
-        )
-    lines.append("")
+        if context_key == PERSONAL_LAB:
+            lines.append(
+                "- **Note:** Output includes results from self-authorised Personal Lab / self-owned testing. "
+                "This is not a formal client engagement and must not be presented as client-authorised work."
+            )
+        elif context_key == CLIENT_ENGAGEMENT:
+            lines.append(
+                "- **Note:** Active testing results, where present, were produced under client engagement "
+                "controls when applicable."
+            )
+        else:
+            lines.append(
+                "- **Note:** Passive research context — results are based on passive/public or direct "
+                "observations as recorded — not confirmed compromise."
+            )
+        lines.append("")
+
+    if options.analyst_notes.strip():
+        lines.extend(["## Analyst Notes", "", options.analyst_notes.strip(), ""])
 
     if options.include_engagement_context:
         from database.engagements import engagement_summary_for_report, get_engagement_for_case
@@ -469,7 +531,8 @@ def build_case_report(
             )
             lines.append("")
 
-    if options.template == "full":
+    show_technical_detail = options.template == "full" or options.sections is not None
+    if show_technical_detail and enabled("assets_entities"):
         lines.extend(["## Entities", ""])
         if not entities:
             lines.append("_No entities recorded for this case._")
@@ -525,12 +588,13 @@ def build_case_report(
                 )
             lines.append("")
 
+    if show_technical_detail:
         pcap_observations = [
             observation
             for observation in observations
             if observation.get("module_id") in {"net_pcap_review", "net_live_capture"}
         ]
-        if pcap_observations:
+        if pcap_observations and enabled("packet_capture_summary"):
             lines.extend(["## PCAP Evidence Summary", ""])
             lines.append(
                 "_Analysis based only on the supplied packet capture file(s). "
@@ -570,7 +634,7 @@ def build_case_report(
             for observation in observations
             if observation.get("module_id") == "evidence_file_metadata"
         ]
-        if metadata_observations:
+        if metadata_observations and enabled("file_metadata_summary"):
             lines.extend(["## File Metadata Review Summary", ""])
             lines.append(
                 "_Local metadata review of uploaded files only. Files are not sent externally. "
@@ -622,7 +686,7 @@ def build_case_report(
             for observation in observations
             if observation.get("module_id") == "infra_nmap"
         ]
-        if nmap_observations:
+        if nmap_observations and enabled("network_service_summary"):
             lines.extend(["## Network Service Check Summary", ""])
             lines.append(
                 "_Controlled Nmap profile runs against authorised targets. "
@@ -671,7 +735,7 @@ def build_case_report(
             for observation in observations
             if observation.get("module_id") == "infra_remote_access_review"
         ]
-        if remote_observations:
+        if remote_observations and enabled("remote_access_summary"):
             lines.extend(["## Remote Access Exposure Summary", ""])
             lines.append(
                 "_Based on observed Nmap/service data only. No authentication or intrusive testing was performed._"
@@ -717,7 +781,7 @@ def build_case_report(
             for observation in observations
             if observation.get("module_id") == "infra_web_stack_identifier"
         ]
-        if web_stack_observations:
+        if web_stack_observations and enabled("web_posture_summary"):
             lines.extend(["## Web Stack Summary", ""])
             lines.append(
                 "_Based on a normal HTTP GET with capped preview only. Indicators suggest possible technologies — validate before acting._"
@@ -764,7 +828,7 @@ def build_case_report(
             for observation in observations
             if observation.get("module_id") == "infra_web_path_review"
         ]
-        if web_path_observations:
+        if web_path_observations and enabled("web_posture_summary"):
             lines.extend(["## Web Path Review Summary", ""])
             lines.append(
                 "_Small curated sequential path review only — not a site map or discovery scan._"
@@ -804,7 +868,13 @@ def build_case_report(
             lines.append("_Sensitive-name paths store metadata only — no response bodies retained._")
             lines.append("")
 
-        lines.extend(["## Observations", ""])
+        if enabled("web_posture_summary"):
+            lines.extend(build_web_posture_summary_lines(observations))
+        if enabled("technical_observations"):
+            lines.extend(build_threat_intel_summary_lines(observations))
+
+        if enabled("technical_observations"):
+            lines.extend(["## Observations", ""])
         if not observations:
             lines.append("_No observations recorded for this case._")
             lines.append("")
@@ -877,7 +947,8 @@ def build_case_report(
             lines.append(f"- {notice}")
         lines.append("")
 
-    lines.extend(_evidence_summary_lines(evidence_items))
+    if options.include_evidence_summary and enabled("evidence_summary"):
+        lines.extend(_evidence_summary_lines(evidence_items))
 
     lines.extend(["## Evidence and Reliability Notes", ""])
     lines.append(
@@ -907,7 +978,27 @@ def build_case_report(
     )
     lines.append("")
 
-    lines.extend(["## Findings", ""])
+    if enabled("key_findings") and report_findings:
+        lines.extend(["## Key Findings", ""])
+        lines.append(
+            "_Highest-priority selected findings. Review whether each item reflects expected configuration._"
+        )
+        lines.append("")
+        key_sorted = sorted(
+            report_findings,
+            key=lambda item: SEVERITY_RANK.get(effective_finding_severity(item).lower(), 0),
+            reverse=True,
+        )
+        for finding in key_sorted[:8]:
+            severity = effective_finding_severity(finding)
+            lines.append(
+                f"- **[{severity.upper()}] {finding.get('title', 'Finding')}** — "
+                f"{(finding.get('explanation') or '_No explanation._').split('.')[0].strip()}."
+            )
+        lines.append("")
+
+    if enabled("findings_table"):
+        lines.extend(["## Findings", ""])
     if not report_findings:
         if not options.include_closed_findings:
             lines.append("_No active findings recorded for this case._")
@@ -988,27 +1079,25 @@ def build_case_report(
                         lines.append("")
         lines.append("")
 
-    lines.extend(["## Suggested Next Actions", ""])
-    combined_actions: list[str] = []
-    seen_actions: set[str] = set()
-    for finding in open_findings:
-        if normalize_finding_status(finding.get("status")) != "open":
-            continue
-        for action in _parse_suggested_actions(finding):
-            normalized = action.strip()
-            if not normalized or normalized in seen_actions:
-                continue
-            seen_actions.add(normalized)
-            combined_actions.append(normalized)
+    recommended = build_recommended_actions(
+        findings=report_findings or open_findings,
+        evidence_items=evidence_items,
+        evidence_links=evidence_links,
+        operating_context=context_key,
+    )
+    if enabled("recommended_actions"):
+        lines.extend(recommended_actions_markdown(recommended))
+    elif enabled("open_actions"):
+        lines.extend(["## Open Actions", ""])
+        if not recommended:
+            lines.append("_No open actions generated._")
+        else:
+            for action in recommended[:8]:
+                lines.append(f"- **{action.title}** — {action.reason}")
+        lines.append("")
 
-    if not combined_actions:
-        lines.append("_No suggested actions from open findings._")
-    else:
-        for action in combined_actions:
-            lines.append(f"- {action}")
-    lines.append("")
-
-    if options.template == "full" or options.include_raw_appendix or options.include_graph_appendix:
+    appendix_enabled = enabled("appendix_raw") or options.include_raw_appendix or options.include_graph_appendix
+    if appendix_enabled and (options.template == "full" or options.include_raw_appendix or options.include_graph_appendix):
         lines.extend(["## Appendix", ""])
         appendix_parts: list[str] = []
 
@@ -1072,6 +1161,8 @@ def save_report_markdown(
     case_id: int,
     markdown_text: str | None = None,
     output_dir: str = "reports",
+    *,
+    options: ReportOptions | None = None,
 ) -> Path:
     """
     Save a Markdown report to disk.
@@ -1098,4 +1189,19 @@ def save_report_markdown(
 
     output_path = reports_dir / filename
     output_path.write_text(markdown_text, encoding="utf-8")
+
+    if options is not None:
+        from utils.report_metadata import build_report_metadata, save_report_metadata_sidecar
+
+        metadata = build_report_metadata(
+            case_id=case_id,
+            report_type_id=options.report_type_id,
+            operating_context=options.operating_context,
+            sections=sorted(options.sections) if options.sections else None,
+            finding_selection_mode=options.finding_selection_mode,
+            template=options.template,
+            output_path=output_path,
+        )
+        save_report_metadata_sidecar(output_path, metadata)
+
     return output_path

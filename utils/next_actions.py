@@ -716,13 +716,37 @@ def suggest_next_actions(
         )
 
     if latest_results:
+        module_ids = {result.get("module_id") for result in latest_results if result.get("success")}
+        report_reason = "Summarise findings and evidence after completing checks."
+        if module_ids & {"net_pcap_review", "net_live_capture"}:
+            report_reason = "Include packet capture / LAN recon summary in the assessment pack."
+        elif "evidence_file_metadata" in module_ids:
+            report_reason = "Include file metadata review summary in the assessment pack."
         actions.append(
             make_action(
                 title="Generate case report",
-                reason="Summarise findings and evidence after completing checks.",
+                reason=report_reason,
                 action_type="create_report",
                 priority="medium",
                 button_label="Generate report",
+            )
+        )
+        actions.append(
+            make_action(
+                title="Review findings before report",
+                reason="Triage open findings before generating the assessment pack.",
+                action_type="open_finding",
+                priority="high",
+                button_label="Review findings",
+            )
+        )
+        actions.append(
+            make_action(
+                title="Add analyst notes for report",
+                reason="Capture observations on the Report page before export.",
+                action_type="add_note",
+                priority="low",
+                button_label="Add note",
             )
         )
         actions.append(
