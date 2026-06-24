@@ -128,6 +128,15 @@ The **Domain Email Security Posture** module (`infra_email_security`) is **passi
 - Results are visible service observations only — not an authenticated configuration review
 - No API keys or secrets are used by this module
 
+## Case Memory, Baselines and Change Detection (v2.33)
+
+- **Case memory** aggregates metadata from existing entities, observations, and findings — it does not store raw PCAP bodies or full HTTP responses
+- **Baseline snapshots** are local SQLite JSON summaries scoped to a case — no external sync or cloud storage
+- **Change detection** is read-only comparison — it does not auto-run modules or alter findings
+- **Expected marking** is analyst-controlled — marked items remain visible but are flagged to reduce repeated alert noise
+- **Autopilot integration** uses baseline changes for prioritisation only — active checks still require explicit confirmation and guardrails
+- Baseline and expected-item data stay on the local database with the rest of the case
+
 ## Assessment Playbooks and Autopilot Queue (v2.32)
 
 - **Playbooks** propose follow-up checks from module results using the same next-action schema as manual suggestions

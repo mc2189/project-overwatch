@@ -153,7 +153,13 @@ def update_autopilot_from_results(
     settings = autopilot_settings()
 
     if mode == MODE_MANUAL:
-        proposed = propose_followup_actions(latest_results=latest_results, target=target, playbook=playbook)
+        proposed = propose_followup_actions(
+            latest_results=latest_results,
+            target=target,
+            playbook=playbook,
+            case_id=case_id,
+            conn=conn,
+        )
         proposed = enrich_proposed_actions(
             proposed,
             case_id=case_id,
@@ -178,7 +184,13 @@ def update_autopilot_from_results(
         }
 
     existing = get_case_autopilot_queue(session_state, case_id)
-    proposed_raw = propose_followup_actions(latest_results=latest_results, target=target, playbook=playbook)
+    proposed_raw = propose_followup_actions(
+        latest_results=latest_results,
+        target=target,
+        playbook=playbook,
+        case_id=case_id,
+        conn=conn,
+    )
     proposed = enrich_proposed_actions(
         proposed_raw,
         case_id=case_id,

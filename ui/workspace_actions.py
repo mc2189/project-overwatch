@@ -176,6 +176,23 @@ def apply_workspace_action(action: dict[str, Any], case_id: int) -> str:
             st.session_state.operation_target = action["target"]
         st.rerun()
 
+    if action_type == "snapshot_baseline":
+        from utils.baseline_ops import snapshot_and_replace_baseline
+
+        conn = get_db_conn()
+        try:
+            result = snapshot_and_replace_baseline(
+                case_id,
+                name=action.get("baseline_name"),
+                notes=action.get("baseline_notes"),
+                source="workspace_action",
+                conn=conn,
+            )
+        finally:
+            conn.close()
+        verb = "created" if result.get("action") == "created" else "updated"
+        return f"Baseline {verb}: **{result.get('name')}**. Change counter reset for the next run."
+
     if action_type == "try_common_web_ports":
         target = (action.get("target") or "").strip()
         if not target:

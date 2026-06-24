@@ -21,6 +21,7 @@ from utils.report_sections import (
     SECTION_OPERATING_CONTEXT,
     SECTION_PACKET_CAPTURE,
     SECTION_PLAYBOOK,
+    SECTION_CHANGE_SUMMARY,
     SECTION_RECOMMENDED_ACTIONS,
     SECTION_REMOTE_ACCESS,
     SECTION_SCOPE,
@@ -60,7 +61,7 @@ REPORT_TYPES: dict[str, ReportType] = {
         description="Learning-oriented summary for self-owned Personal Lab testing.",
         default_sections=frozenset(
             DEFAULT_CONCISE_SECTIONS
-            | {SECTION_NETWORK_SERVICES, SECTION_PACKET_CAPTURE, SECTION_OPEN_ACTIONS}
+            | {SECTION_NETWORK_SERVICES, SECTION_PACKET_CAPTURE, SECTION_CHANGE_SUMMARY, SECTION_OPEN_ACTIONS}
         ),
         default_operating_context=PERSONAL_LAB,
         default_template="executive",
@@ -71,7 +72,7 @@ REPORT_TYPES: dict[str, ReportType] = {
         description="Exposure-focused pack for remote access, services, and perimeter observations.",
         default_sections=frozenset(
             DEFAULT_CONCISE_SECTIONS
-            | {SECTION_NETWORK_SERVICES, SECTION_REMOTE_ACCESS, SECTION_SSH_CONFIGURATION, SECTION_WEB_POSTURE}
+            | {SECTION_NETWORK_SERVICES, SECTION_REMOTE_ACCESS, SECTION_SSH_CONFIGURATION, SECTION_CHANGE_SUMMARY, SECTION_WEB_POSTURE}
         ),
         default_operating_context=CLIENT_ENGAGEMENT,
         include_engagement_by_default=True,
@@ -102,7 +103,7 @@ REPORT_TYPES: dict[str, ReportType] = {
         description="Local IP, Nmap, and LAN-oriented service observations.",
         default_sections=frozenset(
             DEFAULT_CONCISE_SECTIONS
-            | {SECTION_NETWORK_SERVICES, SECTION_REMOTE_ACCESS, SECTION_SSH_CONFIGURATION, SECTION_ASSETS}
+            | {SECTION_NETWORK_SERVICES, SECTION_REMOTE_ACCESS, SECTION_SSH_CONFIGURATION, SECTION_CHANGE_SUMMARY, SECTION_ASSETS}
         ),
         default_operating_context=PERSONAL_LAB,
         highlight_modules=frozenset({"infra_nmap", "infra_remote_access_review", "infra_ssh_review"}),
@@ -146,6 +147,7 @@ REPORT_TYPES: dict[str, ReportType] = {
                 SECTION_REMOTE_ACCESS,
                 SECTION_SSH_CONFIGURATION,
                 SECTION_PLAYBOOK,
+                SECTION_CHANGE_SUMMARY,
                 SECTION_PACKET_CAPTURE,
                 SECTION_FILE_METADATA,
                 SECTION_EVIDENCE,

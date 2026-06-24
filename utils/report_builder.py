@@ -445,6 +445,25 @@ def build_case_report(
         operation_count=len(operations),
     )
 
+    if enabled("change_summary"):
+        report_conn = get_db_conn()
+        try:
+            from utils.baseline_compare import compare_case_to_latest_baseline
+
+            comparison = compare_case_to_latest_baseline(case_id, conn=report_conn)
+            if comparison.get("has_baseline"):
+                exec_context = ExecutiveSummaryContext(
+                    **{
+                        **exec_context.__dict__,
+                        "baseline_change_summary": (
+                            f"Since baseline '{comparison.get('baseline_name') or 'Baseline'}', "
+                            f"{comparison.get('summary_text')}"
+                        ),
+                    }
+                )
+        finally:
+            report_conn.close()
+
     if enabled("executive_summary"):
         lines.extend(["## Executive Summary", ""])
         lines.append(build_executive_summary_prose(exec_context))
@@ -906,6 +925,70 @@ def build_case_report(
                 "validate scope and ROE before external reporting._"
             )
             lines.append("")
+
+        if enabled("change_summary"):
+            from utils.baseline_compare import compare_case_to_latest_baseline
+            from utils.settings_manager import show_expected_in_reports
+            from utils.operating_context import PERSONAL_LAB
+
+            report_conn = get_db_conn()
+            try:
+                comparison = compare_case_to_latest_baseline(case_id, conn=report_conn)
+            finally:
+                report_conn.close()
+            if comparison.get("has_baseline"):
+                grouped = comparison.get("grouped") or {}
+                section_title = (
+                    "Changes since previous lab baseline"
+                    if context_key == PERSONAL_LAB
+                    else "Changes since previous assessment baseline"
+                )
+                lines.extend([f"## {section_title}", ""])
+                baseline_name = comparison.get("baseline_name") or "Baseline"
+                baseline_updated = comparison.get("baseline_updated_at") or "—"
+                lines.append(f"- **Baseline used:** {baseline_name} (updated {baseline_updated})")
+                lines.append(f"- **Summary:** {comparison.get('summary_text')}")
+                lines.append("")
+                for bucket, label in (
+                    ("new", "New items"),
+                    ("changed", "Changed items"),
+                    ("resolved", "Resolved items"),
+                ):
+                    rows = grouped.get(bucket) or []
+                    if not rows:
+                        continue
+                    lines.append(f"### {label}")
+                    lines.append("")
+                    for change in rows[:12]:
+                        lines.append(f"- **{change.get('title')}** — {change.get('summary')}")
+                        if change.get("suggested_action"):
+                            lines.append(f"  - Suggested action: {change['suggested_action']}")
+                    lines.append("")
+                expected_rows = grouped.get("expected") or []
+                if show_expected_in_reports() and expected_rows:
+                    lines.append("### Expected / accepted items")
+                    lines.append("")
+                    for change in expected_rows[:10]:
+                        lines.append(f"- {change.get('title')}")
+                    lines.append("")
+                review_rows = [
+                    change
+                    for change in comparison.get("changes") or []
+                    if not change.get("expected")
+                    and change.get("category") == "new"
+                    and (change.get("importance") or "info") in {"high", "critical", "medium"}
+                ]
+                if review_rows:
+                    lines.append("### Notable changes requiring review")
+                    lines.append("")
+                    for change in review_rows[:8]:
+                        lines.append(f"- {change.get('title')}: {change.get('summary')}")
+                    lines.append("")
+                lines.append(
+                    "_Change detection compares the latest baseline snapshot to current case memory — "
+                    "mark expected items in Assessment Workspace to reduce repeated noise._"
+                )
+                lines.append("")
 
         web_stack_observations = [
             observation

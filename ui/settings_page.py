@@ -71,6 +71,15 @@ def render_settings_page(metrics: dict) -> None:
         f"{summary.get('max_active_checks', 3)} active / {summary.get('max_passive_checks', 8)} passive"
     )
     st.caption(
+        f"Case memory: auto-suggest baseline "
+        f"{'on' if summary.get('auto_suggest_baseline_creation') else 'off'} · "
+        f"change sensitivity **{summary.get('change_sensitivity', 'medium')}** · "
+        f"show expected in reports: "
+        f"{'yes' if summary.get('show_expected_in_reports') else 'no'} · "
+        f"solo operator mode: {'on' if summary.get('solo_operator_mode') else 'off'} · "
+        f"offer baseline snapshot: {'on' if summary.get('auto_offer_baseline_snapshot') else 'off'}"
+    )
+    st.caption(
         "Set via environment variables or `config/overwatch.defaults.json`. "
         "See `.env.example` for variable names."
     )

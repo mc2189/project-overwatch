@@ -12,15 +12,19 @@ from database.db_setup import (
     TERMINAL_FINDING_STATUSES,
     effective_finding_severity,
     get_db_conn,
+    get_latest_case_baseline,
     list_entities,
     list_evidence_for_finding,
     list_findings,
+    mark_expected_item,
     normalize_finding_status,
     reopen_finding,
     update_finding,
 )
 from ui.constants import FINDING_SEVERITY_OPTIONS, FINDING_SEVERITY_ORDER, FINDING_STATUS_LABELS
 from ui.metrics import render_compact_metrics
+from utils.case_memory import finding_memory_label
+from utils.memory_keys import finding_fingerprint
 from utils.evidence_model import EVIDENCE_TYPES, RELIABILITY_LEVELS, evidence_type_label, evidence_wording, reliability_label
 
 
@@ -113,6 +117,24 @@ def render_finding_review_controls(finding: dict) -> None:
             finally:
                 conn.close()
             st.rerun()
+    elif st.button("Mark as expected", key=f"finding_mark_expected_{finding_id}", width="stretch"):
+        case_id = int(st.session_state.get("case_id") or 0)
+        fingerprint = finding_fingerprint(finding)
+        conn = get_db_conn()
+        try:
+            mark_expected_item(
+                case_id,
+                item_type="finding",
+                item_key=fingerprint,
+                finding_id=finding_id,
+                notes="Marked expected from Findings page.",
+                conn=conn,
+            )
+            update_finding(finding_id, status="accepted", conn=conn)
+        finally:
+            conn.close()
+        st.success("Finding marked as expected.")
+        st.rerun()
 
 
 def render_finding_detail(
@@ -151,6 +173,10 @@ def render_finding_detail(
         if len(linked) > 5:
             st.caption(f"_Plus {len(linked) - 5} more — see Evidence Locker._")
     st.markdown(f"**Status:** {finding_status_label(finding.get('status'))}")
+    baseline_row = get_latest_case_baseline(st.session_state.get("case_id", 0))
+    baseline_findings = ((baseline_row or {}).get("summary") or {}).get("findings") or []
+    memory_label = finding_memory_label(finding, baseline_findings=baseline_findings)
+    st.markdown(f"**Memory:** {memory_label}")
     st.markdown("**Explanation**")
     st.write(finding.get("explanation") or "_No explanation provided._")
     try:
@@ -213,6 +239,8 @@ def render_findings_page(case_id: int, metrics: dict) -> None:
         for entity in entities
     }
     findings = list_findings(case_id=case_id, conn=conn)
+    baseline_row = get_latest_case_baseline(case_id, conn=conn)
+    baseline_findings = ((baseline_row or {}).get("summary") or {}).get("findings") or []
     conn.close()
 
     focus_id = st.session_state.get("findings_focus_id")
@@ -355,6 +383,7 @@ def render_findings_page(case_id: int, metrics: dict) -> None:
             {
                 "id": finding["id"],
                 "severity": effective_finding_severity(finding),
+                "memory": finding_memory_label(finding, baseline_findings=baseline_findings),
                 "confidence": finding.get("confidence"),
                 "module": finding.get("module_id"),
                 "entity": entity_lookup.get(finding.get("entity_id"), finding.get("entity_id") or "-"),
@@ -380,9 +409,10 @@ def render_findings_page(case_id: int, metrics: dict) -> None:
         for finding in severity_findings:
             entity_label = entity_lookup.get(finding.get("entity_id"), finding.get("entity_id") or "-")
             status_text = finding_status_label(finding.get("status"))
+            memory_text = finding_memory_label(finding, baseline_findings=baseline_findings)
             expander_label = (
                 f"[{effective_finding_severity(finding).upper()}] {finding.get('title', 'Finding')} · "
-                f"{finding.get('module_id')} · {entity_label} · {status_text}"
+                f"{finding.get('module_id')} · {entity_label} · {status_text} · {memory_text}"
             )
             is_focused = focus_id is not None and int(finding["id"]) == int(focus_id)
             with st.expander(expander_label, expanded=is_focused):

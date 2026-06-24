@@ -10,6 +10,7 @@ from modules.executor import execute_module
 from modules.module_registry import get_module, is_executable
 from ui.action_cards import render_action_cards
 from ui.autopilot_panel import render_autopilot_panel
+from ui.case_memory_panel import render_case_memory_panel
 from ui.case_workflow_banner import render_case_workflow_strip
 from ui.scroll_helpers import scroll_to_anchor
 from ui.compact_preflight import render_compact_preflight
@@ -293,6 +294,14 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
     del metrics  # workspace uses case-scoped inline metrics only
     apply_workspace_styles()
     _init_module_selection()
+    from utils.autopilot_engine import SESSION_ASSESSMENT_MODE_KEY
+    from utils.settings_manager import solo_operator_mode
+
+    if solo_operator_mode():
+        st.session_state.setdefault("personal_lab_confirmed", True)
+        st.session_state.setdefault("authorisation_confirmed", True)
+        st.session_state.setdefault("operating_context", PERSONAL_LAB)
+        st.session_state.setdefault(SESSION_ASSESSMENT_MODE_KEY, "personal_lab_autopilot")
     st.session_state.setdefault("operation_target", "")
     st.session_state.setdefault(RUN_GOAL_SESSION_KEY, GOAL_QUICK_SAFETY)
     sync_run_mode_from_case(current_case, session_key="operation_run_mode")
@@ -699,6 +708,7 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
 
         conn = get_db_conn()
         try:
+            render_case_memory_panel(current_case["id"], conn=conn)
             render_autopilot_panel(
                 case_id=current_case["id"],
                 target=target,

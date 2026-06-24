@@ -1,10 +1,9 @@
 """Follow-up actions from Nmap profile results."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from utils.next_actions import make_action
+from utils.expected_suppression import filter_nmap_followup_actions
 from utils.remote_access_classifier import filter_remote_access_services, nmap_ports_to_service_rows
 from utils.web_port_planner import is_private_ipv4_target
 
@@ -24,7 +23,13 @@ def _open_ports(parsed: dict[str, Any]) -> list[dict[str, Any]]:
     return ports
 
 
-def suggest_nmap_followup_actions(result: dict[str, Any], *, target: str) -> list[dict[str, Any]]:
+def suggest_nmap_followup_actions(
+    result: dict[str, Any],
+    *,
+    target: str,
+    case_id: int | None = None,
+    conn: Any | None = None,
+) -> list[dict[str, Any]]:
     """Suggest HTTP/TLS, intel, capture, and admin review actions from Nmap output."""
     if result.get("module_id") != "infra_nmap" or not result.get("success"):
         return []
@@ -168,7 +173,13 @@ def suggest_nmap_followup_actions(result: dict[str, Any], *, target: str) -> lis
             )
         )
 
-    return actions
+    return filter_nmap_followup_actions(
+        actions,
+        case_id=case_id,
+        target=target,
+        parsed=parsed,
+        conn=conn,
+    )
 
 
 def suggest_primary_nmap_action(result: dict[str, Any], *, target: str) -> dict[str, Any]:

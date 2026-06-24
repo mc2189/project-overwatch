@@ -238,6 +238,40 @@ def max_passive_checks() -> int:
     return get_int_env("PROJECT_OVERWATCH_MAX_PASSIVE_CHECKS", 8)
 
 
+def solo_operator_mode() -> bool:
+    return get_bool_env("PROJECT_OVERWATCH_SOLO_OPERATOR_MODE", False)
+
+
+def auto_offer_baseline_snapshot() -> bool:
+    if solo_operator_mode():
+        return True
+    return get_bool_env("PROJECT_OVERWATCH_AUTO_OFFER_BASELINE_SNAPSHOT", True)
+
+
+def auto_suggest_baseline_creation() -> bool:
+    if solo_operator_mode():
+        return True
+    return get_bool_env("PROJECT_OVERWATCH_AUTO_SUGGEST_BASELINE", False)
+
+
+def default_change_sensitivity() -> str:
+    value = get_env("PROJECT_OVERWATCH_CHANGE_SENSITIVITY", "medium")
+    if value not in {"low", "medium", "high"}:
+        return "medium"
+    return value
+
+
+def show_expected_in_reports() -> bool:
+    return get_bool_env("PROJECT_OVERWATCH_SHOW_EXPECTED_IN_REPORTS", False)
+
+
+def change_meets_sensitivity(importance: str) -> bool:
+    """Return True when a change importance meets the configured sensitivity threshold."""
+    rank = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
+    threshold = {"low": 1, "medium": 2, "high": 3}.get(default_change_sensitivity(), 2)
+    return rank.get((importance or "info").lower(), 0) >= threshold
+
+
 def autopilot_settings() -> dict[str, Any]:
     return {
         "default_mode": default_assessment_mode(),
@@ -246,6 +280,11 @@ def autopilot_settings() -> dict[str, Any]:
         "max_playbook_steps": max_playbook_steps(),
         "max_active_checks": max_active_checks(),
         "max_passive_checks": max_passive_checks(),
+        "auto_suggest_baseline_creation": auto_suggest_baseline_creation(),
+        "change_sensitivity": default_change_sensitivity(),
+        "show_expected_in_reports": show_expected_in_reports(),
+        "solo_operator_mode": solo_operator_mode(),
+        "auto_offer_baseline_snapshot": auto_offer_baseline_snapshot(),
     }
 
 
@@ -486,6 +525,11 @@ def general_settings_summary() -> dict[str, Any]:
         "max_playbook_steps": max_playbook_steps(),
         "max_active_checks": max_active_checks(),
         "max_passive_checks": max_passive_checks(),
+        "auto_suggest_baseline_creation": auto_suggest_baseline_creation(),
+        "change_sensitivity": default_change_sensitivity(),
+        "show_expected_in_reports": show_expected_in_reports(),
+        "solo_operator_mode": solo_operator_mode(),
+        "auto_offer_baseline_snapshot": auto_offer_baseline_snapshot(),
         "python_version": sys.version.split()[0],
     }
 

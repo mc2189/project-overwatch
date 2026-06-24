@@ -231,7 +231,17 @@ def suggest_pcap_investigation_actions(
             continue
         seen.add(action_id)
         unique.append(action)
-    return finalize_capture_actions(unique, case_id=case_id)
+    finalized = finalize_capture_actions(unique, case_id=case_id)
+    if case_id <= 0:
+        return finalized
+    from database.db_setup import get_db_conn
+    from utils.expected_suppression import filter_pcap_followup_actions
+
+    conn = get_db_conn()
+    try:
+        return filter_pcap_followup_actions(finalized, case_id=case_id, conn=conn)
+    finally:
+        conn.close()
 
 
 def suggest_pcap_primary_action(

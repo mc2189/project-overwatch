@@ -1,6 +1,12 @@
-# Project Overwatch v2.32
+# Project Overwatch v2.34
 
 Project Overwatch is a **local** Python/Streamlit intelligence, OSINT, security testing and resilience advisory dashboard for **private internal use** supporting future client assessments.
+
+**v2.35** adds **Snapshot & replace baseline** — one click after a clean run saves current state as the new comparison point (create or update latest).
+
+**v2.34** sharpens case memory for solo lab use — expected-item suppression stops repeated follow-ups, result cards show baseline deltas inline, finding fingerprints improve change detection, baseline history and batch expected marking, and optional solo operator mode.
+
+**v2.33** adds **Case Memory, Baselines and Change Detection** — track known devices, services, and findings across runs; snapshot baselines; compare current state to highlight new, changed, resolved, and expected items; optional change summary in reports.
 
 **v2.32** adds **Assessment Playbooks and Autopilot Queue** — guided follow-up checks from module results with Manual, Assisted, and opt-in autopilot modes; active checks never run silently; guardrails and stop conditions prevent runaway testing.
 
@@ -182,6 +188,31 @@ Overwatch can propose and queue follow-up checks based on module results — wit
 **Example follow-ups:** Nmap finds SSH → SSH Configuration Review; web ports → HTTP/TLS/Web Stack; capture finds LAN devices → Nmap on selected IPs; metadata with GPS → privacy review note.
 
 Configure via `.env`: `PROJECT_OVERWATCH_DEFAULT_ASSESSMENT_MODE`, `PROJECT_OVERWATCH_ENABLE_PASSIVE_AUTOPILOT`, `PROJECT_OVERWATCH_MAX_PLAYBOOK_STEPS`, etc. (see `.env.example`).
+
+### Case memory, baselines and change detection (v2.33)
+
+Each assessment run produces useful data, but without memory it is hard to tell what is **new**, **expected**, **changed**, or **resolved**. v2.33 adds a lightweight case memory layer built from existing entities, observations, findings, and evidence — without duplicating large artefacts.
+
+**Case memory** aggregates known targets, devices, IPs, MACs, hostnames, domains, services, web paths/technologies, findings (open and accepted), and public contacts from captures — with first/last seen timestamps and source modules.
+
+**Baseline snapshots** capture the current case state (devices, services, findings, remote access, PCAP LAN devices, etc.) in `case_baselines`. Create or update a baseline from **Assessment Workspace** after a meaningful run.
+
+**Change detection** compares the latest baseline to current case memory and highlights:
+- New / missing LAN devices (Packet Capture integration)
+- New / closed / version-changed services (Nmap integration)
+- New remote access exposure
+- New / repeated / resolved / accepted findings
+- New public IP/domain contacts and notable web path responses
+
+**Expected / known-good marking** — mark devices, services, findings, remote access, web paths, or technologies as expected. They remain visible but reduce repeated “brand new” noise; include in reports only when `PROJECT_OVERWATCH_SHOW_EXPECTED_IN_REPORTS=true`.
+
+**UI:** Assessment Workspace **Case memory** card (metrics, change summary, Create/Update baseline, Compare, Mark expected). Entity Workspace shows first/last seen, modules, related changes, and **Mark as expected**. Findings show memory labels (new / repeated / accepted / resolved).
+
+**Reports:** optional **Change summary** section — “Changes since previous lab baseline” (Personal Lab) or “Changes since previous assessment baseline” (Client Engagement).
+
+**Settings (conservative defaults):** `PROJECT_OVERWATCH_AUTO_SUGGEST_BASELINE=false`, `PROJECT_OVERWATCH_CHANGE_SENSITIVITY=medium`, `PROJECT_OVERWATCH_SHOW_EXPECTED_IN_REPORTS=false`.
+
+**Autopilot and next actions** prioritise high-importance baseline changes (for example new remote access), suggest baseline creation when none exists, and avoid repeatedly queueing checks for expected items.
 
 ### Actionable next steps and pivots (v2.14)
 

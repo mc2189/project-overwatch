@@ -289,6 +289,37 @@ CREATE TABLE IF NOT EXISTS rdap_lookup_cache (
 )
 """
 
+CASE_BASELINES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS case_baselines (
+    baseline_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    source TEXT DEFAULT 'manual',
+    summary_json TEXT NOT NULL,
+    notes TEXT,
+    FOREIGN KEY(case_id) REFERENCES cases(id)
+)
+"""
+
+CASE_EXPECTED_ITEMS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS case_expected_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER NOT NULL,
+    item_type TEXT NOT NULL,
+    item_key TEXT NOT NULL,
+    entity_id INTEGER,
+    finding_id INTEGER,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(case_id) REFERENCES cases(id),
+    FOREIGN KEY(entity_id) REFERENCES entities(id),
+    FOREIGN KEY(finding_id) REFERENCES findings(id),
+    UNIQUE(case_id, item_type, item_key)
+)
+"""
+
 ALL_SCHEMAS = (
     TARGETS_SCHEMA,
     RECON_DATA_SCHEMA,
@@ -304,6 +335,8 @@ ALL_SCHEMAS = (
     EVIDENCE_ITEMS_SCHEMA,
     EVIDENCE_FINDING_LINKS_SCHEMA,
     RDAP_LOOKUP_CACHE_SCHEMA,
+    CASE_BASELINES_SCHEMA,
+    CASE_EXPECTED_ITEMS_SCHEMA,
 )
 
 
@@ -2154,6 +2187,222 @@ def entity_ids_with_evidence(
             params.extend(evidence_types)
         rows = conn.execute(query, params).fetchall()
         return {int(row["entity_id"]) for row in rows if row["entity_id"] is not None}
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def create_case_baseline(
+    case_id: int,
+    *,
+    name: str,
+    summary: dict[str, Any],
+    source: str = "manual",
+    notes: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any]:
+    """Create a baseline snapshot for a case."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = conn.execute(
+            """
+            INSERT INTO case_baselines (case_id, name, created_at, updated_at, source, summary_json, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (case_id, name, now, now, source, json.dumps(summary, ensure_ascii=False), notes),
+        )
+        conn.commit()
+        baseline_id = cursor.lastrowid
+        return get_case_baseline(int(baseline_id), conn=conn) or {}
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def update_case_baseline(
+    baseline_id: int,
+    *,
+    summary: dict[str, Any],
+    name: str | None = None,
+    notes: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any] | None:
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        existing = get_case_baseline(baseline_id, conn=conn)
+        if existing is None:
+            return None
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            """
+            UPDATE case_baselines
+            SET summary_json = ?, updated_at = ?, name = COALESCE(?, name), notes = COALESCE(?, notes)
+            WHERE baseline_id = ?
+            """,
+            (
+                json.dumps(summary, ensure_ascii=False),
+                now,
+                name,
+                notes,
+                baseline_id,
+            ),
+        )
+        conn.commit()
+        return get_case_baseline(baseline_id, conn=conn)
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def get_case_baseline(
+    baseline_id: int,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any] | None:
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM case_baselines WHERE baseline_id = ?",
+            (baseline_id,),
+        ).fetchone()
+        item = _row_to_dict(row)
+        if item and item.get("summary_json"):
+            try:
+                item["summary"] = json.loads(item["summary_json"])
+            except (TypeError, json.JSONDecodeError):
+                item["summary"] = {}
+        return item
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def list_case_baselines(
+    case_id: int,
+    *,
+    limit: int = 20,
+    conn: sqlite3.Connection | None = None,
+) -> list[dict[str, Any]]:
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT * FROM case_baselines
+            WHERE case_id = ?
+            ORDER BY updated_at DESC, baseline_id DESC
+            LIMIT ?
+            """,
+            (case_id, limit),
+        ).fetchall()
+        items = _rows_to_dicts(rows)
+        for item in items:
+            if item.get("summary_json"):
+                try:
+                    item["summary"] = json.loads(item["summary_json"])
+                except (TypeError, json.JSONDecodeError):
+                    item["summary"] = {}
+        return items
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def get_latest_case_baseline(
+    case_id: int,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any] | None:
+    baselines = list_case_baselines(case_id, limit=1, conn=conn)
+    return baselines[0] if baselines else None
+
+
+def mark_expected_item(
+    case_id: int,
+    *,
+    item_type: str,
+    item_key: str,
+    entity_id: int | None = None,
+    finding_id: int | None = None,
+    notes: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any]:
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        conn.execute(
+            """
+            INSERT INTO case_expected_items (case_id, item_type, item_key, entity_id, finding_id, notes)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(case_id, item_type, item_key) DO UPDATE SET
+                entity_id = excluded.entity_id,
+                finding_id = excluded.finding_id,
+                notes = COALESCE(excluded.notes, case_expected_items.notes)
+            """,
+            (case_id, item_type, item_key.lower().strip(), entity_id, finding_id, notes),
+        )
+        conn.commit()
+        row = conn.execute(
+            """
+            SELECT * FROM case_expected_items
+            WHERE case_id = ? AND item_type = ? AND item_key = ?
+            """,
+            (case_id, item_type, item_key.lower().strip()),
+        ).fetchone()
+        return _row_to_dict(row) or {}
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def list_expected_items(
+    case_id: int,
+    conn: sqlite3.Connection | None = None,
+) -> list[dict[str, Any]]:
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT * FROM case_expected_items
+            WHERE case_id = ?
+            ORDER BY created_at DESC
+            """,
+            (case_id,),
+        ).fetchall()
+        return _rows_to_dicts(rows)
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def is_expected_item(
+    case_id: int,
+    *,
+    item_type: str,
+    item_key: str,
+    conn: sqlite3.Connection | None = None,
+) -> bool:
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        row = conn.execute(
+            """
+            SELECT 1 FROM case_expected_items
+            WHERE case_id = ? AND item_type = ? AND item_key = ?
+            """,
+            (case_id, item_type, item_key.lower().strip()),
+        ).fetchone()
+        return row is not None
     finally:
         if own_conn:
             conn.close()

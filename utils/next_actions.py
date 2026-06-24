@@ -50,6 +50,7 @@ ACTION_TYPES = frozenset(
         "try_common_web_ports",
         "open_graph",
         "navigate_page",
+        "snapshot_baseline",
     }
 )
 
@@ -75,6 +76,7 @@ _DEFAULT_BUTTON_LABELS: dict[str, str] = {
     "try_common_web_ports": "Try common web ports",
     "open_graph": "Open graph",
     "navigate_page": "Open page",
+    "snapshot_baseline": "Snapshot baseline",
 }
 
 
@@ -404,7 +406,7 @@ def suggest_next_actions(
             continue
         from utils.nmap_followup_actions import suggest_nmap_followup_actions
 
-        for action in suggest_nmap_followup_actions(result, target=cleaned):
+        for action in suggest_nmap_followup_actions(result, target=cleaned, case_id=case_id, conn=conn):
             actions.append(action)
 
     service_context = target_profile.get("service_context") or {}
@@ -788,6 +790,11 @@ def suggest_next_actions(
                     button_label="Select module",
                 )
             )
+
+    if conn is not None and case_id > 0:
+        from utils.case_memory_actions import suggest_case_memory_actions
+
+        actions.extend(suggest_case_memory_actions(case_id, conn=conn, target=cleaned))
 
     priority_rank = {"high": 0, "medium": 1, "low": 2}
     actions.sort(key=lambda item: priority_rank.get(item.get("priority", "medium"), 1))

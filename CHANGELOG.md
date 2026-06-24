@@ -2,6 +2,38 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.35.0 — Snapshot and Replace Baseline
+
+- **`utils/baseline_ops.py`** — one-click snapshot/replace for latest baseline; clean-run detection when no unexpected changes remain
+- **Assessment Workspace** — primary **Snapshot & replace latest baseline** button with optional **Snapshot anyway**
+- **Results panel** — after a successful clean run, offers snapshot banner and journey card
+- **Next actions** — `snapshot_baseline` action wired through workspace actions
+- **Settings** — `PROJECT_OVERWATCH_AUTO_OFFER_BASELINE_SNAPSHOT` (default true; always on in solo operator mode)
+
+## v2.34.0 — Case Memory Polish and Solo Operator Quality
+
+- **Expected-item suppression** — `utils/expected_suppression.py` stops repeated Nmap/PCAP/autopilot follow-ups for marked-expected devices, services, and remote access
+- **Inline baseline hints** — result cards show “since baseline” deltas after Nmap, PCAP, metadata, and web stack runs
+- **Finding fingerprints** — stable `module_id|title` keys for memory labels and baseline finding diffs
+- **Sensitive metadata changes** — baseline comparison detects new GPS/author/company metadata observations
+- **Case memory UI** — named baselines, notes, history compare, batch mark expected, expanded change summary
+- **Findings** — one-click Mark as expected from finding review controls
+- **Solo operator mode** — `PROJECT_OVERWATCH_SOLO_OPERATOR_MODE` pre-confirms lab context and enables Personal Lab autopilot defaults
+- **Executive summary** — includes baseline change sentence when Change Summary section is enabled
+
+## v2.33.0 — Case Memory, Baselines and Change Detection
+
+- **Case memory** — `utils/case_memory.py` aggregates known devices, services, findings, web stack/path data, PCAP LAN devices, and public contacts from existing entities and observations with first/last seen timestamps
+- **Baseline snapshots** — `case_baselines` table with create/update/list helpers; lightweight structured `summary_json` snapshots via `build_baseline_snapshot()`
+- **Change detection** — `utils/baseline_compare.py` compares current state to latest baseline (new/missing devices, new/closed/changed services, remote access, findings, public contacts, web paths/technologies)
+- **Expected marking** — `case_expected_items` table and `mark_expected_item()`; reduces repeated noise while keeping items visible
+- **Assessment Workspace UI** — case memory card, change summary panel, Create/Update baseline, Compare, Mark expected (`ui/case_memory_panel.py`)
+- **Entity Workspace** — first/last seen, source modules, related baseline changes, Mark as expected
+- **Findings** — memory labels (new/repeated/accepted/resolved) in list and detail views
+- **Autopilot / next actions** — `utils/case_memory_actions.py` prioritises material baseline changes; suggests baseline creation, review, and report update
+- **Reports** — optional Change Summary section with baseline reference and grouped new/changed/resolved/expected items
+- **Settings** — auto-suggest baseline (off by default), change sensitivity, show expected in reports
+
 ## v2.32.0 — Assessment Playbooks and Autopilot Queue
 
 - **Assessment playbooks** — nine guided packs (`utils/assessment_playbooks.py`) with starting modules, follow-up rules, safety levels, and stop conditions

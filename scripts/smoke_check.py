@@ -1601,6 +1601,162 @@ def _check_autopilot_playbooks() -> None:
         raise AssertionError("port validation helper failed")
 
 
+def _check_case_memory() -> None:
+    import utils.case_memory as case_memory_module
+    import utils.baseline_compare as baseline_compare_module
+    from database.db_setup import create_case, get_db_conn, mark_expected_item
+    from utils.baseline_compare import compare_baseline_to_current, compare_case_to_latest_baseline
+    from utils.case_memory import build_baseline_snapshot, build_case_memory
+    from utils.case_memory_actions import suggest_case_memory_actions
+
+    if not hasattr(case_memory_module, "build_case_memory"):
+        raise AssertionError("case_memory helper missing build_case_memory")
+    if not hasattr(baseline_compare_module, "compare_case_to_latest_baseline"):
+        raise AssertionError("baseline_compare helper missing compare_case_to_latest_baseline")
+
+    conn = get_db_conn()
+    try:
+        case = create_case("Smoke case memory", conn=conn)
+        case_id = int(case["id"])
+
+        empty = compare_case_to_latest_baseline(case_id, conn=conn)
+        if empty.get("has_baseline"):
+            raise AssertionError("empty case should not have baseline")
+        if empty.get("changes"):
+            raise AssertionError("empty case comparison should return no changes")
+
+        memory = build_case_memory(case_id, conn=conn)
+        if memory.get("case_id") != case_id:
+            raise AssertionError("case memory should include case_id")
+
+        snapshot = build_baseline_snapshot(case_id, conn=conn)
+        if snapshot.get("version") != "2.34":
+            raise AssertionError("baseline snapshot version mismatch")
+
+        baseline_summary = {
+            "name": "Smoke baseline",
+            "devices": [{"ip": "192.168.1.10"}],
+            "services": [
+                {"host": "192.168.1.10", "port": 22, "protocol": "tcp", "service": "ssh"},
+            ],
+            "findings": [],
+            "hostnames": [],
+            "macs": [],
+            "web_technologies": [],
+            "web_paths": [],
+            "remote_access_services": [],
+            "public_contacts": [],
+        }
+        current_summary = {
+            "devices": [
+                {"ip": "192.168.1.10"},
+                {
+                    "ip": "192.168.1.34",
+                    "hostname": "livingroom-tv.local",
+                    "role_hint": "smart TV",
+                },
+            ],
+            "services": [
+                {"host": "192.168.1.10", "port": 22, "protocol": "tcp", "service": "ssh"},
+                {"host": "192.168.1.10", "port": 5900, "protocol": "tcp", "service": "vnc"},
+            ],
+            "findings": [],
+            "hostnames": [],
+            "macs": [],
+            "web_technologies": [],
+            "web_paths": [],
+            "remote_access_services": [],
+            "public_contacts": [],
+        }
+        comparison = compare_baseline_to_current(
+            case_id,
+            baseline_summary=baseline_summary,
+            current_summary=current_summary,
+            conn=conn,
+        )
+        new_devices = [row for row in comparison.get("changes") or [] if row.get("change_type") == "new_device"]
+        if len(new_devices) != 1:
+            raise AssertionError("expected one new device change")
+        if "192.168.1.34" not in (new_devices[0].get("title") or ""):
+            raise AssertionError("new device title should include IP")
+
+        new_services = [row for row in comparison.get("changes") or [] if row.get("change_type") == "new_service"]
+        if not any("5900" in (row.get("title") or "") for row in new_services):
+            raise AssertionError("expected new VNC service change")
+
+        mark_expected_item(case_id, item_type="device", item_key="192.168.1.34", conn=conn)
+        suppressed = compare_baseline_to_current(
+            case_id,
+            baseline_summary=baseline_summary,
+            current_summary=current_summary,
+            conn=conn,
+        )
+        expected_devices = [
+            row
+            for row in suppressed.get("changes") or []
+            if row.get("change_type") == "new_device" and row.get("expected")
+        ]
+        if not expected_devices:
+            raise AssertionError("expected device should be flagged expected after marking")
+
+        actions = suggest_case_memory_actions(case_id, conn=conn, target="192.168.1.10")
+        if not isinstance(actions, list):
+            raise AssertionError("case memory actions should return a list")
+
+        from utils.expected_suppression import filter_nmap_followup_actions
+        from utils.memory_keys import finding_fingerprint
+
+        fp = finding_fingerprint({"module_id": "infra_nmap", "title": "SSH observed"})
+        if not fp.startswith("infra_nmap|"):
+            raise AssertionError("finding fingerprint should include module id")
+        mark_expected_item(case_id, item_type="remote_access", item_key="192.168.1.10:22/tcp", conn=conn)
+        parsed = {"parsed_ports": [{"port": 22, "protocol": "tcp", "service": "ssh"}]}
+        raw_actions = [
+            {
+                "module_id": "infra_ssh_review",
+                "title": "SSH review",
+                "reason": "test",
+                "action_type": "run_module",
+                "priority": "medium",
+                "target": "192.168.1.10",
+            }
+        ]
+        filtered = filter_nmap_followup_actions(
+            raw_actions,
+            case_id=case_id,
+            target="192.168.1.10",
+            parsed=parsed,
+            conn=conn,
+        )
+        if filtered:
+            raise AssertionError("expected SSH follow-up to be suppressed for expected remote access service")
+
+        from utils.baseline_ops import (
+            assess_baseline_snapshot,
+            is_baseline_snapshot_ready,
+            snapshot_and_replace_baseline,
+        )
+
+        assessment = assess_baseline_snapshot(
+            case_id,
+            conn=conn,
+            latest_results=[{"success": True, "module_id": "infra_nmap"}],
+        )
+        if not assessment.get("ready"):
+            raise AssertionError("empty comparison should be ready to snapshot")
+        created = snapshot_and_replace_baseline(case_id, name="Smoke baseline", conn=conn)
+        if created.get("action") != "created":
+            raise AssertionError("first snapshot should create baseline")
+        updated = snapshot_and_replace_baseline(case_id, name="Smoke baseline", conn=conn)
+        if updated.get("action") != "updated":
+            raise AssertionError("second snapshot should update latest baseline")
+        after = compare_case_to_latest_baseline(case_id, conn=conn)
+        if not is_baseline_snapshot_ready(after):
+            raise AssertionError("baseline should be clean immediately after snapshot")
+    finally:
+        conn.close()
+
+
 def _check_http_security_module() -> None:
     import importlib.util
 
@@ -4809,6 +4965,11 @@ def main() -> int:
     run(
         "autopilot playbooks",
         lambda: _check_autopilot_playbooks(),
+    )
+
+    run(
+        "case memory",
+        lambda: _check_case_memory(),
     )
 
     run(

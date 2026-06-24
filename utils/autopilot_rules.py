@@ -608,6 +608,8 @@ def propose_followup_actions(
     target: str,
     playbook: AssessmentPlaybook | None = None,
     rule_ids: tuple[str, ...] | None = None,
+    case_id: int | None = None,
+    conn: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Inspect latest results and return proposed autopilot actions."""
     playbook_id = playbook.playbook_id if playbook else None
@@ -649,4 +651,36 @@ def propose_followup_actions(
                 seen.add(key)
                 action["source_result_id"] = module_id
                 actions.append(action)
+
+    if case_id is not None and conn is not None:
+        from utils.expected_suppression import filter_autopilot_actions
+
+        actions = filter_autopilot_actions(
+            actions,
+            case_id=case_id,
+            target=target,
+            latest_results=latest_results,
+            conn=conn,
+        )
+
+    if case_id is not None and conn is not None:
+        from utils.case_memory_actions import propose_case_memory_autopilot_actions
+
+        for action in propose_case_memory_autopilot_actions(
+            case_id,
+            target=target,
+            conn=conn,
+            playbook_id=playbook_id,
+        ):
+            key = (
+                (action.get("target") or target or "").lower(),
+                action.get("module_id"),
+                action.get("autopilot_action_type") or action.get("action_type"),
+                action.get("title"),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            actions.append(action)
+
     return actions

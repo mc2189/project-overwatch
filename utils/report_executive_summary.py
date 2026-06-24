@@ -22,6 +22,7 @@ class ExecutiveSummaryContext:
     highest_severity: str | None
     entity_count: int
     operation_count: int
+    baseline_change_summary: str | None = None
 
 
 def _severity_counts(findings: list[dict[str, Any]]) -> Counter[str]:
@@ -138,6 +139,8 @@ def build_executive_summary_prose(context: ExecutiveSummaryContext) -> str:
         f"Based on available evidence ({len(context.evidence_items)} evidence item(s), "
         f"{len(context.observations)} observation(s)), this is a point-in-time review."
     )
+    if context.baseline_change_summary:
+        context_bits.append(context.baseline_change_summary)
     return opening + " ".join(context_bits)
 
 

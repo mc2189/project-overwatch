@@ -19,6 +19,7 @@ from database.db_setup import (
     list_operations,
     list_pivot_queue,
     list_relationships,
+    mark_expected_item,
     pivot_queue_contains,
     remove_from_pivot_queue,
     clear_pivot_queue,
@@ -42,6 +43,8 @@ from utils.entity_pivot import (
     parse_service_entity_details,
     split_relationships_for_entity,
 )
+from utils.baseline_compare import compare_case_to_latest_baseline
+from utils.case_memory import entity_memory_view
 from utils.module_compatibility import build_operation_plan, get_incompatible_reason
 from utils.nmap_options import PROFILE_STANDARD, default_options_for_profile
 from utils.operating_context import (
@@ -123,6 +126,71 @@ def _render_entity_details(entity: dict) -> None:
                 service_cols[3].metric("Service", details["service"])
             if details.get("version"):
                 st.caption(f"Version / banner: {details['version']}")
+
+
+def _render_entity_memory_section(case_id: int, entity: dict) -> None:
+    st.subheader("Case memory")
+    conn = get_db_conn()
+    try:
+        memory_view = entity_memory_view(entity, case_id=case_id, conn=conn)
+        comparison = compare_case_to_latest_baseline(case_id, conn=conn)
+    finally:
+        conn.close()
+
+    mem_col1, mem_col2 = st.columns(2)
+    with mem_col1:
+        st.markdown(f"**First seen:** {memory_view.get('first_seen') or '—'}")
+        st.markdown(f"**Last seen:** {memory_view.get('last_seen') or '—'}")
+        modules = memory_view.get("source_modules") or []
+        st.markdown(f"**Seen in modules:** {', '.join(f'`{mid}`' for mid in modules) if modules else '—'}")
+    with mem_col2:
+        expected_label = "Expected / known-good" if memory_view.get("expected") else "Not marked expected"
+        st.markdown(f"**Status:** {expected_label}")
+        st.markdown(f"**Open findings:** {memory_view.get('open_finding_count', 0)}")
+
+    entity_value = (entity.get("value") or "").strip().lower()
+    related_changes = [
+        change
+        for change in comparison.get("changes") or []
+        if (change.get("target") or "").strip().lower() == entity_value
+        or entity_value in (change.get("title") or "").lower()
+    ][:5]
+    if related_changes:
+        st.markdown("**Changes involving this entity**")
+        for change in related_changes:
+            st.markdown(f"- {change.get('title')}")
+            st.caption(change.get("summary"))
+    else:
+        st.caption("No baseline changes linked to this entity yet.")
+
+    baseline_meta = (comparison.get("memory") or {}).get("latest_baseline") or {}
+    if baseline_meta.get("baseline_id"):
+        st.caption(
+            f"Latest baseline: {baseline_meta.get('name') or 'Baseline'} · "
+            f"updated {baseline_meta.get('updated_at') or '—'}"
+        )
+
+    item_type = (entity.get("entity_type") or "device").lower()
+    if item_type == "service":
+        item_type = "service"
+    elif item_type not in {"device", "finding", "remote_access", "web_path", "technology"}:
+        item_type = "device"
+    item_key = entity_value or str(entity.get("id"))
+    if st.button("Mark this entity as expected", key=f"entity_expected_{entity['id']}"):
+        conn = get_db_conn()
+        try:
+            mark_expected_item(
+                case_id,
+                item_type=item_type,
+                item_key=item_key,
+                entity_id=entity["id"],
+                notes="Marked expected from Entity Workspace.",
+                conn=conn,
+            )
+        finally:
+            conn.close()
+        st.success("Marked as expected.")
+        st.rerun()
 
 
 def _render_entity_edit_form(entity: dict) -> None:
@@ -739,6 +807,7 @@ def render_entity_workspace_page(case_id: int, metrics: dict, *, case_name: str 
 
     with overview_tab:
         _render_entity_details(entity)
+        _render_entity_memory_section(case_id, entity)
         _render_entity_edit_form(entity)
         st.divider()
         st.subheader("Observations")

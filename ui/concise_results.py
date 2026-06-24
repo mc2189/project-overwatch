@@ -19,6 +19,7 @@ from ui.results import (
 from ui.styles import render_empty_state, render_status_chip, section_heading
 from ui.workspace_actions import apply_workspace_action
 from ui.workspace_cards import render_report_journey_cards
+from utils.baseline_result_hints import baseline_hints_for_result
 from utils.finding_interpreter import risk_findings
 from utils.next_actions import finalize_actions, make_action
 from utils.pivot_discovery import discover_pivots_from_results
@@ -80,6 +81,7 @@ def render_concise_result_card(
     target: str,
     case_id: int,
     card_index: int = 0,
+    baseline_comparison: dict[str, Any] | None = None,
 ) -> None:
     """Render a single concise result card with collapsed details."""
     module = get_module(result.get("module_id"))
@@ -118,6 +120,9 @@ def render_concise_result_card(
             f"{len(risk)} finding(s) · {warning_count} warning(s)"
             + (f" · highest: {highest}" if highest else "")
         )
+
+        for hint in baseline_hints_for_result(case_id, result, comparison=baseline_comparison):
+            st.info(hint)
 
         if _http_tls_unreachable(result):
             st.caption(
@@ -168,52 +173,118 @@ def render_workspace_results(
     c3.metric("Findings", summary["total_findings"])
     c4.metric("Highest", summary["highest_severity"] or "—")
 
+    baseline_comparison = None
+    snapshot_assessment: dict[str, Any] = {}
+    if case_id > 0:
+        from database.db_setup import get_db_conn
+        from utils.baseline_compare import compare_case_to_latest_baseline
+
+        conn = get_db_conn()
+        try:
+            baseline_comparison = compare_case_to_latest_baseline(case_id, conn=conn)
+        finally:
+            conn.close()
+
     for index, result in enumerate(results):
         render_concise_result_card(
             result,
             target=target,
             case_id=case_id,
             card_index=index,
+            baseline_comparison=baseline_comparison,
         )
+
+    if case_id > 0 and baseline_comparison is not None:
+        from utils.baseline_ops import assess_baseline_snapshot, snapshot_and_replace_baseline
+
+        conn = get_db_conn()
+        try:
+            snapshot_assessment = assess_baseline_snapshot(
+                case_id,
+                conn=conn,
+                latest_results=results,
+            )
+        finally:
+            conn.close()
+
+        if snapshot_assessment.get("offer_snapshot"):
+            st.success(snapshot_assessment.get("summary_text"))
+            if st.button(
+                "Snapshot & replace latest baseline",
+                key=f"results_snapshot_baseline_{case_id}",
+                type="primary",
+            ):
+                conn = get_db_conn()
+                try:
+                    snapshot_result = snapshot_and_replace_baseline(
+                        case_id,
+                        source="post_run_results",
+                        conn=conn,
+                    )
+                finally:
+                    conn.close()
+                verb = "created" if snapshot_result.get("action") == "created" else "replaced"
+                st.session_state.workspace_action_message = (
+                    f"Baseline {verb}: {snapshot_result.get('name')}. "
+                    "Next run will compare against this snapshot."
+                )
+                st.rerun()
+        elif snapshot_assessment.get("run_success") and not snapshot_assessment.get("ready"):
+            st.caption(snapshot_assessment.get("summary_text"))
 
     pivots = discover_pivots_from_results(results)
     render_pivot_cards(pivots, case_id=case_id, key_prefix="result_pivot")
 
-    report_actions = finalize_actions(
-        [
+    journey_actions: list[dict[str, Any]] = [
+        make_action(
+            title="Review findings",
+            reason="Triage open findings from this run.",
+            action_type="open_finding",
+            priority="high",
+            button_label="Review findings",
+            action_id="result_journey_findings",
+        ),
+        make_action(
+            title="Review evidence",
+            reason="Check evidence locker before reporting.",
+            action_type="review_evidence",
+            priority="medium",
+            button_label="Review evidence",
+            action_id="result_journey_evidence",
+        ),
+        make_action(
+            title="Generate report",
+            reason="Summarise this run in a case report.",
+            action_type="create_report",
+            priority="medium",
+            button_label="Generate report",
+            action_id="result_journey_report",
+        ),
+        make_action(
+            title="Add analyst note",
+            reason="Capture observations before reporting.",
+            action_type="add_note",
+            priority="low",
+            button_label="Add note",
+            action_id="result_journey_note",
+        ),
+    ]
+    if snapshot_assessment.get("offer_snapshot"):
+        journey_actions.insert(
+            0,
             make_action(
-                title="Review findings",
-                reason="Triage open findings from this run.",
-                action_type="open_finding",
+                title="Snapshot & replace latest baseline",
+                reason=snapshot_assessment.get("summary_text")
+                or "Save this clean run as the new comparison baseline.",
+                action_type="snapshot_baseline",
                 priority="high",
-                button_label="Review findings",
-                action_id="result_journey_findings",
+                button_label="Snapshot baseline",
+                action_id="result_journey_snapshot_baseline",
             ),
-            make_action(
-                title="Review evidence",
-                reason="Check evidence locker before reporting.",
-                action_type="review_evidence",
-                priority="medium",
-                button_label="Review evidence",
-                action_id="result_journey_evidence",
-            ),
-            make_action(
-                title="Generate report",
-                reason="Summarise this run in a case report.",
-                action_type="create_report",
-                priority="medium",
-                button_label="Generate report",
-                action_id="result_journey_report",
-            ),
-            make_action(
-                title="Add analyst note",
-                reason="Capture observations before reporting.",
-                action_type="add_note",
-                priority="low",
-                button_label="Add note",
-                action_id="result_journey_note",
-            ),
-        ],
+        )
+
+    report_actions = finalize_actions(
+        journey_actions,
         case_id=case_id,
         operating_context=st.session_state.get("operating_context", "passive_research"),
         personal_lab_confirmed=bool(st.session_state.get("personal_lab_confirmed")),
