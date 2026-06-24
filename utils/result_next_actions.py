@@ -25,6 +25,11 @@ def suggest_result_action(result: dict[str, Any], *, target: str) -> dict[str, A
     parsed = result.get("parsed_data") or {}
     risk = risk_findings(result.get("interpreter_findings") or [])
 
+    if module_id == "infra_nmap" and result.get("success"):
+        from utils.nmap_followup_actions import suggest_primary_nmap_action
+
+        return suggest_primary_nmap_action(result, target=target)
+
     if module_id in {"infra_http_security", "infra_tls_review"} and _http_tls_unreachable(result):
         host = parsed.get("host") or target
         port = parsed.get("port") or (443 if module_id == "infra_tls_review" else 80)

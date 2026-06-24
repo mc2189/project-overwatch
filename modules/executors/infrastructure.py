@@ -9,6 +9,7 @@ from typing import Any
 from database.db_setup import create_operation_log
 from utils.findings_registry import interpret_module_findings
 from utils.nmap_options import SCRIPT_VULN, build_nmap_flags, normalize_options
+from utils.nmap_profiles import enrich_parsed_scan_metadata, profile_display_name, resolve_profile_id
 from utils.nmap_xml_parser import parse_nmap_results
 from utils.result_status import (
     STATUS_BLOCKED,
@@ -17,6 +18,7 @@ from utils.result_status import (
     STATUS_ERROR,
 )
 
+from modules.executors import loaders
 from modules.executors.loaders import (
     _cert_subdomain_handler,
     _cert_subdomain_load_error,
@@ -107,8 +109,13 @@ def _run_nmap_with_privilege_retry(
     return scan_data, current_options
 
 
-def _build_nmap_summary(target: str, nmap_options: dict[str, Any]) -> str:
-    summary = f"Nmap scan completed for {target}."
+def _build_nmap_summary(target: str, nmap_options: dict[str, Any], parsed_data: dict[str, Any] | None = None) -> str:
+    profile_id = resolve_profile_id(nmap_options.get("profile_id") or nmap_options.get("profile"))
+    profile_name = profile_display_name(profile_id)
+    open_count = len((parsed_data or {}).get("parsed_ports") or [])
+    summary = f"Nmap {profile_name} completed for {target}."
+    if open_count:
+        summary += f" {open_count} open port(s) observed."
     notes: list[str] = []
     if nmap_options.get("os_detection_runtime_failed"):
         notes.append("OS detection failed at runtime and was not included in the final result")
@@ -134,9 +141,9 @@ def _execute_nmap(
     run_mode_id: str | None = None,
     run_mode_label: str | None = None,
 ) -> dict[str, Any]:
-    _load_nmap_handlers()
-    if _nmap_handlers is None:
-        error_message = _nmap_load_error or "Nmap module is not available."
+    loaders._load_nmap_handlers()
+    if loaders._nmap_handlers is None:
+        error_message = loaders._nmap_load_error or "Nmap module is not available."
         return make_result(
             module_id,
             success=False,
@@ -145,8 +152,18 @@ def _execute_nmap(
             errors=[error_message],
         )
 
-    run_nmap_scan, _parse_nmap_problems = _nmap_handlers
+    run_nmap_scan, _parse_nmap_problems = loaders._nmap_handlers
     nmap_options = normalize_options(options.get("nmap_options", {}))
+    port_errors = list(nmap_options.get("custom_port_errors") or [])
+    if port_errors:
+        return make_result(
+            module_id,
+            success=False,
+            status="blocked",
+            summary="Custom port list is invalid.",
+            errors=port_errors,
+            selected_options=nmap_options,
+        )
 
     if nmap_options.get("script_category") == SCRIPT_VULN and not authorisation_confirmed:
         return make_result(
@@ -163,8 +180,15 @@ def _execute_nmap(
     findings = scan_data.get("findings", [])
     xml_output = scan_data.get("xml_output", "")
     is_error = _scan_failed(scan_data)
+    flags = build_nmap_flags(nmap_options)
 
     parsed_data = parse_nmap_results(raw_output, xml_output)
+    parsed_data = enrich_parsed_scan_metadata(
+        parsed_data,
+        target=target,
+        nmap_options=nmap_options,
+        flags=flags,
+    )
     if xml_output:
         parsed_data["xml_output"] = xml_output
     interpreter_findings = interpret_module_findings(
@@ -201,7 +225,7 @@ def _execute_nmap(
             module_id,
             success=True,
             status=nmap_status,
-            summary=_build_nmap_summary(target, nmap_options),
+            summary=_build_nmap_summary(target, nmap_options, parsed_data),
             raw_output=raw_output,
             findings=findings,
             warnings=nmap_warnings,
@@ -262,9 +286,11 @@ def _execute_domain_intel(
     run_mode_id: str | None = None,
     run_mode_label: str | None = None,
 ) -> dict[str, Any]:
-    _load_domain_intel_handler()
-    if _domain_intel_handler is None:
-        error_message = _domain_intel_load_error or "Domain Intelligence module is not available."
+    domain_intel_handler, domain_intel_load_error = loaders.loaded_handler(
+        loaders._load_domain_intel_handler, "_domain_intel_handler", "_domain_intel_load_error"
+    )
+    if domain_intel_handler is None:
+        error_message = domain_intel_load_error or "Domain Intelligence module is not available."
         return make_result(
             module_id,
             success=False,
@@ -273,7 +299,7 @@ def _execute_domain_intel(
             errors=[error_message],
         )
 
-    intel_data = _domain_intel_handler(target)
+    intel_data = domain_intel_handler(target)
     if not intel_data.get("success"):
         errors = intel_data.get("errors") or ["Domain intelligence collection failed."]
         return make_result(
@@ -341,9 +367,11 @@ def _execute_cert_subdomain(
     run_mode_id: str | None = None,
     run_mode_label: str | None = None,
 ) -> dict[str, Any]:
-    _load_cert_subdomain_handler()
-    if _cert_subdomain_handler is None:
-        error_message = _cert_subdomain_load_error or "Certificate & Subdomain Intelligence module is not available."
+    cert_subdomain_handler, cert_subdomain_load_error = loaders.loaded_handler(
+        loaders._load_cert_subdomain_handler, "_cert_subdomain_handler", "_cert_subdomain_load_error"
+    )
+    if cert_subdomain_handler is None:
+        error_message = cert_subdomain_load_error or "Certificate & Subdomain Intelligence module is not available."
         return make_result(
             module_id,
             success=False,
@@ -352,7 +380,7 @@ def _execute_cert_subdomain(
             errors=[error_message],
         )
 
-    intel_data = _cert_subdomain_handler(target)
+    intel_data = cert_subdomain_handler(target)
     if not intel_data.get("success"):
         errors = intel_data.get("errors") or ["Certificate and subdomain intelligence collection failed."]
         return make_result(
@@ -414,9 +442,11 @@ def _execute_website_metadata(
     run_mode_id: str | None = None,
     run_mode_label: str | None = None,
 ) -> dict[str, Any]:
-    _load_website_metadata_handler()
-    if _website_metadata_handler is None:
-        error_message = _website_metadata_load_error or "Website Metadata Review module is not available."
+    website_metadata_handler, website_metadata_load_error = loaders.loaded_handler(
+        loaders._load_website_metadata_handler, "_website_metadata_handler", "_website_metadata_load_error"
+    )
+    if website_metadata_handler is None:
+        error_message = website_metadata_load_error or "Website Metadata Review module is not available."
         return make_result(
             module_id,
             success=False,
@@ -425,7 +455,7 @@ def _execute_website_metadata(
             errors=[error_message],
         )
 
-    intel_data = _website_metadata_handler(target)
+    intel_data = website_metadata_handler(target)
     if not intel_data.get("success"):
         errors = intel_data.get("errors") or ["Website metadata review failed."]
         return make_result(
@@ -488,9 +518,11 @@ def _execute_email_security(
     run_mode_id: str | None = None,
     run_mode_label: str | None = None,
 ) -> dict[str, Any]:
-    _load_email_security_handler()
-    if _email_security_handler is None:
-        error_message = _email_security_load_error or "Domain Email Security Posture module is not available."
+    email_security_handler, email_security_load_error = loaders.loaded_handler(
+        loaders._load_email_security_handler, "_email_security_handler", "_email_security_load_error"
+    )
+    if email_security_handler is None:
+        error_message = email_security_load_error or "Domain Email Security Posture module is not available."
         return make_result(
             module_id,
             success=False,
@@ -499,7 +531,7 @@ def _execute_email_security(
             errors=[error_message],
         )
 
-    intel_data = _email_security_handler(target, options=options)
+    intel_data = email_security_handler(target, options=options)
     if not intel_data.get("success"):
         errors = intel_data.get("errors") or ["Domain email security review failed."]
         return make_result(
@@ -563,9 +595,11 @@ def _execute_tls_review(
     run_mode_id: str | None = None,
     run_mode_label: str | None = None,
 ) -> dict[str, Any]:
-    _load_tls_review_handler()
-    if _tls_review_handler is None:
-        error_message = _tls_review_load_error or "SSL / TLS Configuration Review module is not available."
+    tls_review_handler, tls_review_load_error = loaders.loaded_handler(
+        loaders._load_tls_review_handler, "_tls_review_handler", "_tls_review_load_error"
+    )
+    if tls_review_handler is None:
+        error_message = tls_review_load_error or "SSL / TLS Configuration Review module is not available."
         return make_result(
             module_id,
             success=False,
@@ -574,7 +608,7 @@ def _execute_tls_review(
             errors=[error_message],
         )
 
-    tls_data = _tls_review_handler(target, options=options)
+    tls_data = tls_review_handler(target, options=options)
     status = tls_data.get("status", "error")
     if status == "blocked":
         errors = tls_data.get("errors") or [tls_data.get("summary") or "TLS review blocked."]
@@ -659,9 +693,11 @@ def _execute_http_security(
     run_mode_id: str | None = None,
     run_mode_label: str | None = None,
 ) -> dict[str, Any]:
-    _load_http_security_handler()
-    if _http_security_handler is None:
-        error_message = _http_security_load_error or "HTTP Security Header Review module is not available."
+    http_security_handler, http_security_load_error = loaders.loaded_handler(
+        loaders._load_http_security_handler, "_http_security_handler", "_http_security_load_error"
+    )
+    if http_security_handler is None:
+        error_message = http_security_load_error or "HTTP Security Header Review module is not available."
         return make_result(
             module_id,
             success=False,
@@ -670,7 +706,7 @@ def _execute_http_security(
             errors=[error_message],
         )
 
-    http_data = _http_security_handler(target, options=options)
+    http_data = http_security_handler(target, options=options)
     status = http_data.get("status", "error")
     if status == "blocked":
         errors = http_data.get("errors") or [http_data.get("summary") or "HTTP security review blocked."]
@@ -755,9 +791,11 @@ def _execute_whois_rdap(
     run_mode_id: str | None = None,
     run_mode_label: str | None = None,
 ) -> dict[str, Any]:
-    _load_whois_rdap_handler()
-    if _whois_rdap_handler is None:
-        error_message = _whois_rdap_load_error or "WHOIS/RDAP Intelligence module is not available."
+    whois_rdap_handler, whois_rdap_load_error = loaders.loaded_handler(
+        loaders._load_whois_rdap_handler, "_whois_rdap_handler", "_whois_rdap_load_error"
+    )
+    if whois_rdap_handler is None:
+        error_message = whois_rdap_load_error or "WHOIS/RDAP Intelligence module is not available."
         return make_result(
             module_id,
             success=False,
@@ -766,7 +804,7 @@ def _execute_whois_rdap(
             errors=[error_message],
         )
 
-    intel_data = _whois_rdap_handler(
+    intel_data = whois_rdap_handler(
         target,
         options={**options, "case_id": case_id},
     )

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from utils.nmap_options import PROFILE_DETAILED, SCRIPT_VULN
+from utils.nmap_options import SCRIPT_VULN
 
 TestingLevel = Literal[
     "passive_lookup",
@@ -96,11 +96,14 @@ def get_module_testing_level(module_id: str, options: dict[str, Any] | None = No
         return "prohibited"
     if module_id == "infra_nmap":
         nmap_options = (options or {}).get("nmap_options") or options or {}
+        from utils.nmap_profiles import profile_testing_level, resolve_profile_id
+
+        profile_id = resolve_profile_id(nmap_options.get("profile_id") or nmap_options.get("profile"))
         script_category = nmap_options.get("script_category")
-        profile = nmap_options.get("profile")
         if script_category == SCRIPT_VULN:
             return "intrusive_active_check"
-        if profile == PROFILE_DETAILED:
+        level = profile_testing_level(profile_id, nmap_options)
+        if level == "intrusive_active_check":
             return "intrusive_active_check"
         return "safe_active_check"
     return MODULE_TESTING_LEVELS.get(module_id, "passive_lookup")

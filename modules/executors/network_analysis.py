@@ -9,6 +9,7 @@ from database.db_setup import create_operation_log
 from utils.findings_registry import interpret_module_findings
 from utils.result_status import STATUS_BLOCKED, STATUS_COMPLETED, STATUS_COMPLETED_WITH_WARNINGS, STATUS_ERROR, STATUS_PARTIAL
 
+from modules.executors import loaders
 from modules.executors.loaders import (
     _live_capture_handler,
     _live_capture_load_error,
@@ -31,9 +32,11 @@ def _execute_pcap_review(
     run_mode_id: str | None = None,
     run_mode_label: str | None = None,
 ) -> dict[str, Any]:
-    _load_pcap_review_handler()
-    if _pcap_review_handler is None:
-        error_message = _pcap_review_load_error or "PCAP Evidence Review module is not available."
+    pcap_review_handler, pcap_review_load_error = loaders.loaded_handler(
+        loaders._load_pcap_review_handler, "_pcap_review_handler", "_pcap_review_load_error"
+    )
+    if pcap_review_handler is None:
+        error_message = pcap_review_load_error or "PCAP Evidence Review module is not available."
         return make_result(
             module_id,
             success=False,
@@ -60,7 +63,7 @@ def _execute_pcap_review(
     if case_id is not None:
         run_options.setdefault("case_id", case_id)
 
-    review_data = _pcap_review_handler(target, options=run_options)
+    review_data = pcap_review_handler(target, options=run_options)
     status = review_data.get("status") or STATUS_ERROR
     parsed_data = review_data.get("parsed_data") or {}
     filename = parsed_data.get("filename") or target
@@ -136,9 +139,11 @@ def _execute_live_capture(
     run_mode_id: str | None = None,
     run_mode_label: str | None = None,
 ) -> dict[str, Any]:
-    _load_live_capture_handler()
-    if _live_capture_handler is None:
-        error_message = _live_capture_load_error or "Personal Lab Packet Capture module is not available."
+    live_capture_handler, live_capture_load_error = loaders.loaded_handler(
+        loaders._load_live_capture_handler, "_live_capture_handler", "_live_capture_load_error"
+    )
+    if live_capture_handler is None:
+        error_message = live_capture_load_error or "Personal Lab Packet Capture module is not available."
         return make_result(
             module_id,
             success=False,
@@ -151,7 +156,7 @@ def _execute_live_capture(
     if case_id is not None:
         run_options.setdefault("case_id", case_id)
 
-    capture_data = _live_capture_handler(target, options=run_options)
+    capture_data = live_capture_handler(target, options=run_options)
     status = capture_data.get("status") or STATUS_ERROR
     parsed_data = capture_data.get("parsed_data") or {}
     interpreter_findings = capture_data.get("interpreter_findings")

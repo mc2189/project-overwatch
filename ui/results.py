@@ -47,6 +47,25 @@ def render_result_summary_tab(result: dict) -> None:
     _render_warnings_block(result)
 
     parsed_data = result.get("parsed_data") or {}
+    if result["module_id"] == "infra_nmap" and parsed_data:
+        scan_profile = parsed_data.get("scan_profile") or {}
+        if scan_profile.get("display_name"):
+            st.markdown(f"**Profile:** {scan_profile['display_name']}")
+        host_status = parsed_data.get("host_status") or (parsed_data.get("primary_host") or {}).get("host_status")
+        if host_status:
+            st.caption(f"Host status: {host_status}")
+        ports = parsed_data.get("parsed_ports") or []
+        st.write(f"**Open ports:** {len(ports)}")
+        if ports:
+            preview = ", ".join(
+                f"{row.get('port')}/{row.get('protocol', 'tcp')}"
+                + (f" {row.get('service')}" if row.get("service") else "")
+                for row in ports[:8]
+            )
+            st.caption(preview)
+        if parsed_data.get("mac_address"):
+            st.caption(f"MAC: {parsed_data['mac_address']}" + (f" ({parsed_data.get('mac_vendor')})" if parsed_data.get("mac_vendor") else ""))
+
     if result["module_id"] == "infra_cert_subdomain" and parsed_data:
         subdomains = parsed_data.get("subdomains") or []
         st.write(f"**Certificate names returned:** {len(subdomains)}")

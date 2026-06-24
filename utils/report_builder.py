@@ -565,6 +565,55 @@ def build_case_report(
                 lines.append(f"- Created: {observation.get('created_at', '-')}")
                 lines.append("")
 
+        nmap_observations = [
+            observation
+            for observation in observations
+            if observation.get("module_id") == "infra_nmap"
+        ]
+        if nmap_observations:
+            lines.extend(["## Network Service Check Summary", ""])
+            lines.append(
+                "_Controlled Nmap profile runs against authorised targets. "
+                "Service detection is point-in-time and requires validation._"
+            )
+            lines.append("")
+            for observation in nmap_observations:
+                entity = _entity_display(
+                    entity_by_id.get(observation.get("entity_id")),
+                    observation.get("entity_id"),
+                )
+                payload: dict[str, Any] = {}
+                data_json = observation.get("data_json")
+                if data_json:
+                    try:
+                        payload = json.loads(data_json) if isinstance(data_json, str) else data_json
+                    except (TypeError, json.JSONDecodeError):
+                        payload = {}
+                profile_label = payload.get("nmap_profile") or "Network Service Check"
+                parsed_ports = payload.get("parsed_ports") or []
+                warnings = payload.get("warnings") or []
+                lines.append(f"### {profile_label}")
+                lines.append("")
+                lines.append(f"- Entity: {entity}")
+                lines.append(f"- Summary: {observation.get('summary') or '_No summary._'}")
+                lines.append(f"- Open ports observed: {len(parsed_ports)}")
+                if parsed_ports:
+                    preview = ", ".join(
+                        f"{row.get('port')}/{row.get('protocol', 'tcp')}"
+                        + (f" ({row.get('service')})" if row.get("service") else "")
+                        for row in parsed_ports[:10]
+                    )
+                    lines.append(f"- Key services: {preview}")
+                if warnings:
+                    lines.append(f"- Scan limitations: {'; '.join(warnings)}")
+                lines.append(f"- Created: {observation.get('created_at', '-')}")
+                lines.append("")
+            lines.append(
+                "_Point-in-time caveat: port state and service banners may change; "
+                "confirm exposure context before acting on findings._"
+            )
+            lines.append("")
+
         lines.extend(["## Observations", ""])
         if not observations:
             lines.append("_No observations recorded for this case._")

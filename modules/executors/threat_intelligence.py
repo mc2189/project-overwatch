@@ -9,6 +9,7 @@ from database.db_setup import create_operation_log
 from utils.findings_registry import interpret_module_findings
 from utils.result_status import STATUS_BLOCKED, STATUS_COMPLETED, STATUS_COMPLETED_WITH_WARNINGS, STATUS_ERROR
 
+from modules.executors import loaders
 from modules.executors.loaders import (
     _abuseipdb_handler,
     _abuseipdb_load_error,
@@ -46,9 +47,11 @@ def _execute_virustotal(
     run_mode_id: str | None = None,
     run_mode_label: str | None = None,
 ) -> dict[str, Any]:
-    _load_virustotal_handler()
-    if _virustotal_handler is None:
-        error_message = _virustotal_load_error or "VirusTotal module is not available."
+    virustotal_handler, virustotal_load_error = loaders.loaded_handler(
+        loaders._load_virustotal_handler, "_virustotal_handler", "_virustotal_load_error"
+    )
+    if virustotal_handler is None:
+        error_message = virustotal_load_error or "VirusTotal module is not available."
         return make_result(
             module_id,
             success=False,
@@ -61,7 +64,7 @@ def _execute_virustotal(
 
     api_key = get_env("VIRUSTOTAL_API_KEY") or ""
     target_type = get_target_type(target)
-    intel_data = _virustotal_handler(
+    intel_data = virustotal_handler(
         target,
         api_key=api_key,
         target_type=target_type,
@@ -156,9 +159,11 @@ def _execute_abuseipdb(
     run_mode_id: str | None = None,
     run_mode_label: str | None = None,
 ) -> dict[str, Any]:
-    _load_abuseipdb_handler()
-    if _abuseipdb_handler is None:
-        error_message = _abuseipdb_load_error or "AbuseIPDB module is not available."
+    abuseipdb_handler, abuseipdb_load_error = loaders.loaded_handler(
+        loaders._load_abuseipdb_handler, "_abuseipdb_handler", "_abuseipdb_load_error"
+    )
+    if abuseipdb_handler is None:
+        error_message = abuseipdb_load_error or "AbuseIPDB module is not available."
         return make_result(
             module_id,
             success=False,
@@ -171,7 +176,7 @@ def _execute_abuseipdb(
 
     api_key = get_env("ABUSEIPDB_API_KEY") or ""
     target_type = get_target_type(target)
-    intel_data = _abuseipdb_handler(
+    intel_data = abuseipdb_handler(
         target,
         api_key=api_key,
         target_type=target_type,
@@ -265,9 +270,11 @@ def _execute_greynoise(
     run_mode_id: str | None = None,
     run_mode_label: str | None = None,
 ) -> dict[str, Any]:
-    _load_greynoise_handler()
-    if _greynoise_handler is None:
-        error_message = _greynoise_load_error or "GreyNoise module is not available."
+    greynoise_handler, greynoise_load_error = loaders.loaded_handler(
+        loaders._load_greynoise_handler, "_greynoise_handler", "_greynoise_load_error"
+    )
+    if greynoise_handler is None:
+        error_message = greynoise_load_error or "GreyNoise module is not available."
         return make_result(
             module_id,
             success=False,
@@ -280,7 +287,7 @@ def _execute_greynoise(
 
     api_key = get_env("GREYNOISE_API_KEY")
     target_type = get_target_type(target)
-    intel_data = _greynoise_handler(
+    intel_data = greynoise_handler(
         target,
         api_key=api_key,
         target_type=target_type,
@@ -374,9 +381,11 @@ def _execute_shodan(
     run_mode_id: str | None = None,
     run_mode_label: str | None = None,
 ) -> dict[str, Any]:
-    _load_shodan_handler()
-    if _shodan_handler is None:
-        error_message = _shodan_load_error or "Shodan module is not available."
+    shodan_handler, shodan_load_error = loaders.loaded_handler(
+        loaders._load_shodan_handler, "_shodan_handler", "_shodan_load_error"
+    )
+    if shodan_handler is None:
+        error_message = shodan_load_error or "Shodan module is not available."
         return make_result(
             module_id,
             success=False,
@@ -389,7 +398,7 @@ def _execute_shodan(
 
     api_key = get_env("SHODAN_API_KEY") or ""
     target_type = get_target_type(target)
-    intel_data = _shodan_handler(
+    intel_data = shodan_handler(
         target,
         api_key=api_key,
         target_type=target_type,
@@ -483,9 +492,11 @@ def _execute_urlhaus(
     run_mode_id: str | None = None,
     run_mode_label: str | None = None,
 ) -> dict[str, Any]:
-    _load_urlhaus_handler()
-    if _urlhaus_handler is None:
-        error_message = _urlhaus_load_error or "URLhaus module is not available."
+    urlhaus_handler, urlhaus_load_error = loaders.loaded_handler(
+        loaders._load_urlhaus_handler, "_urlhaus_handler", "_urlhaus_load_error"
+    )
+    if urlhaus_handler is None:
+        error_message = urlhaus_load_error or "URLhaus module is not available."
         return make_result(
             module_id,
             success=False,
@@ -498,7 +509,7 @@ def _execute_urlhaus(
 
     auth_key = get_urlhaus_auth_key()
     target_type = get_target_type(target)
-    intel_data = _urlhaus_handler(
+    intel_data = urlhaus_handler(
         target,
         auth_key=auth_key,
         target_type=target_type,

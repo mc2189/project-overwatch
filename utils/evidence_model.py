@@ -77,10 +77,10 @@ EVIDENCE_WORDING: dict[str, str] = {
 MODULE_EVIDENCE_DEFAULTS: dict[str, dict[str, Any]] = {
     "infra_nmap": {
         "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
-        "source_name": "local_nmap",
+        "source_name": "Nmap",
         "source_url": None,
         "reliability": RELIABILITY_HIGH,
-        "collection_method": "local_command",
+        "collection_method": "controlled_network_service_check",
     },
     "infra_domain_intel": {
         "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,

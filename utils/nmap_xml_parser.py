@@ -32,19 +32,47 @@ def parse_nmap_xml(xml_content: str) -> dict[str, Any]:
     parsed_services: list[dict[str, Any]] = []
     os_matches: list[dict[str, Any]] = []
     script_results: list[dict[str, Any]] = []
+    scan_stats: dict[str, Any] = {}
+
+    runstats = root.find("runstats/finished")
+    if runstats is not None:
+        scan_stats = {
+            "elapsed_seconds": runstats.get("elapsed"),
+            "exit": runstats.get("exit"),
+            "summary": runstats.get("summary", ""),
+        }
 
     for host in root.findall("host"):
-        host_status = host.find("status")
-        if host_status is not None and host_status.get("state") not in (None, "up", "unknown"):
+        host_status_el = host.find("status")
+        host_state = host_status_el.get("state", "unknown") if host_status_el is not None else "unknown"
+        if host_state not in (None, "up", "unknown"):
+            hosts.append({"host_status": host_state, "addresses": [], "hostnames": [], "ports": [], "os_matches": []})
             continue
 
-        addresses = [
-            {"addr": addr.get("addr", ""), "type": addr.get("addrtype", "")}
-            for addr in host.findall("address")
-        ]
+        addresses = []
+        mac_address = ""
+        mac_vendor = ""
+        primary_ip = ""
+        for addr in host.findall("address"):
+            entry = {
+                "addr": addr.get("addr", ""),
+                "type": addr.get("addrtype", ""),
+                "vendor": addr.get("vendor", "") or "",
+            }
+            addresses.append(entry)
+            if entry["type"] == "ipv4" and not primary_ip:
+                primary_ip = entry["addr"]
+            if entry["type"] == "mac":
+                mac_address = entry["addr"]
+                mac_vendor = entry["vendor"]
+
         hostnames = [name.get("name", "") for name in host.findall("hostnames/hostname") if name.get("name")]
 
         host_entry: dict[str, Any] = {
+            "host_status": host_state,
+            "primary_ip": primary_ip,
+            "mac_address": mac_address,
+            "mac_vendor": mac_vendor,
             "addresses": addresses,
             "hostnames": hostnames,
             "ports": [],
@@ -62,6 +90,8 @@ def parse_nmap_xml(xml_content: str) -> dict[str, Any]:
             product = service_el.get("product", "") if service_el is not None else ""
             version = service_el.get("version", "") if service_el is not None else ""
             extra_info = service_el.get("extrainfo", "") if service_el is not None else ""
+            cpes = [cpe.text or "" for cpe in service_el.findall("cpe")] if service_el is not None else []
+            cpes = [cpe for cpe in cpes if cpe]
 
             version_text = " ".join(part for part in [product, version, extra_info] if part).strip()
 
@@ -73,6 +103,7 @@ def parse_nmap_xml(xml_content: str) -> dict[str, Any]:
                 "product": product,
                 "version": version_text or version,
                 "extra_info": extra_info,
+                "cpes": cpes,
                 "scripts": [],
             }
 
@@ -98,6 +129,7 @@ def parse_nmap_xml(xml_content: str) -> dict[str, Any]:
                         "version": version_text,
                         "product": product,
                         "extra_info": extra_info,
+                        "cpes": cpes,
                     }
                 )
                 parsed_services.append(
@@ -108,6 +140,7 @@ def parse_nmap_xml(xml_content: str) -> dict[str, Any]:
                         "product": product,
                         "version": version_text,
                         "extra_info": extra_info,
+                        "cpes": cpes,
                     }
                 )
 
@@ -132,12 +165,20 @@ def parse_nmap_xml(xml_content: str) -> dict[str, Any]:
 
         hosts.append(host_entry)
 
+    primary_host = hosts[0] if hosts else {}
     return {
         "hosts": hosts,
+        "primary_host": primary_host,
+        "host_status": primary_host.get("host_status"),
+        "primary_ip": primary_host.get("primary_ip"),
+        "hostname": (primary_host.get("hostnames") or [None])[0],
+        "mac_address": primary_host.get("mac_address"),
+        "mac_vendor": primary_host.get("mac_vendor"),
         "parsed_ports": parsed_ports,
         "parsed_services": parsed_services,
         "os_matches": os_matches,
         "script_results": script_results,
+        "scan_stats": scan_stats,
         "parse_source": "xml",
     }
 

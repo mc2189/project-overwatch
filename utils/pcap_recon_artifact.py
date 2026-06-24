@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from utils.nmap_lan_enrichment import enrich_lan_devices_from_nmap
 from utils.pcap_device_map import lan_device_summary
 from utils.pcap_followup_runner import build_recon_progress_summary
 from utils.pcap_next_actions import suggest_post_followup_actions
@@ -42,7 +43,10 @@ def build_capture_recon_artifact(
     followup_results = followup_results or []
 
     progress = build_recon_progress_summary(capture_result, followup_results)
-    devices = list(pcap_parsed.get("lan_devices") or [])
+    devices = enrich_lan_devices_from_nmap(
+        list(pcap_parsed.get("lan_devices") or []),
+        followup_results,
+    )
     ranked = list(triage.get("ranked_entities") or [])
     synthesis = build_capture_followup_synthesis(
         pcap_parsed,

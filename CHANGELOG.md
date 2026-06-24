@@ -2,6 +2,15 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.25.0 — Nmap Advanced Profile Runner
+
+- **`utils/nmap_profiles.py`** — guided profile definitions (Quick, Standard, Local Device, Web Surface, Full TCP, Custom Ports, Script-assisted Safe)
+- **Network Service Check UI** — profile selector with noise/testing/elevation explanations; custom port validation (max 50)
+- **Nmap XML parsing** — host status, MAC/vendor, CPEs, scan duration, profile metadata on results
+- **Findings & next actions** — database/admin/web service findings; HTTP/TLS/capture/intel follow-ups from open ports
+- **Packet Capture** — Run Network Service Check from LAN device rows (Local Device Detail profile)
+- **Backward compatible** — legacy profile names still resolve; existing Nmap execution path unchanged
+
 ## v2.24.0 — Executor handler extraction and module architecture cleanup
 
 - **`modules/executors/`** — per-category execution handlers (`infrastructure.py`, `threat_intelligence.py`, `network_analysis.py`)

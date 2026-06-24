@@ -69,7 +69,7 @@ def implemented_module_ids() -> tuple[str, ...]:
 IMPLEMENTED_MODULE_IDS: tuple[str, ...] = implemented_module_ids()
 
 MODULE_CARD_TITLES: dict[str, str] = {
-    "infra_nmap": "Network Service Check, powered by Nmap",
+    "infra_nmap": "Network Service Check (Nmap Profile Runner)",
     "infra_tls_review": "SSL / TLS Configuration Review",
     "infra_http_security": "HTTP Security Header Review",
     "infra_domain_intel": "Domain Intelligence",

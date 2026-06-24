@@ -101,7 +101,7 @@ MODULES: list[ModuleEntry] = [
     # Infrastructure
     ModuleEntry(
         module_id="infra_nmap",
-        display_name="Nmap (Port Scan)",
+        display_name="Network Service Check (Nmap Profile Runner)",
         category="Infrastructure",
         description="Manual port and service discovery via Nmap.",
         status="active",
@@ -113,11 +113,12 @@ MODULES: list[ModuleEntry] = [
         accepted_target_types=("ipv4", "domain"),
         config_notes="No API key required. Requires Nmap on PATH and authorisation before running.",
         rate_limit_notes="Active scan — use sparingly; not subject to passive lookup rate limits.",
-        short_help="Active scan of reachable network services on an IPv4 address or domain.",
+        short_help="Active Nmap profile runner for controlled port and service discovery on an IPv4 address or domain.",
         detailed_help=(
-            "Runs Nmap against an IPv4 address or domain to discover open ports, services, and optional "
-            "script output. Results are stored as observations and advisory findings — they indicate what "
-            "was reachable at scan time, not proof of exploitability or business risk."
+            "Runs guided Nmap profiles against an IPv4 address or domain to discover open ports, services, "
+            "and optional script output. Choose Quick Service Check, Standard Service Detection, Web Surface "
+            "Discovery, or other bounded profiles. Results are stored as observations and advisory findings — "
+            "they indicate what was reachable at scan time, not proof of exploitability or business risk."
         ),
         example_inputs=("192.168.1.10", "example.com"),
         output_summary="Open ports, service banners, optional OS/script notes, entities and relationships.",

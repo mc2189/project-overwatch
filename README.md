@@ -2,6 +2,8 @@
 
 Project Overwatch is a **local** Python/Streamlit intelligence, OSINT, security testing and resilience advisory dashboard for **private internal use** supporting future client assessments.
 
+**v2.25** upgrades Network Service Check into an **Nmap Profile Runner** with guided profiles (Quick, Standard, Local Device, Web Surface, Full TCP, Custom Ports, Script-assisted Safe), structured parsing, and HTTP/TLS next actions from discovered web ports.
+
 **v2.24** extracts module execution handlers from the monolithic `modules/executor.py` into `modules/executors/` (infrastructure, threat intelligence, network analysis) with dispatch registration in `modules/executors/registry.py`. The public `execute_module()` API is unchanged.
 
 **v2.21** adds executor dispatch registry, module contributor checklist, case workflow stages, and an entity-centric investigation shell in Entity Workspace.
@@ -675,12 +677,26 @@ Legacy `reviewed` rows are migrated automatically to `in_review`.
 
 Re-running a module does not automatically reopen closed/accepted/false positive duplicates; a new observation may still be recorded separately.
 
-### Nmap (active)
+### Network Service Check / Nmap Profile Runner (active)
 
-- Guided profiles: Quick, Standard, Detailed, Host discovery, Custom
-- XML parsing with text fallback; service entities and relationships
-- Advisory interpreter creates findings (open ports, exposure notes, script output caveats)
-- OS detection / traceroute may need elevated privileges in lab environments only
+Guided profiles for authorised Personal Lab and client assessments — **single host only** by default; no broad range scans.
+
+| Profile | Purpose |
+|---------|---------|
+| **Quick Service Check** | Fast common-port overview (`-F`, open ports only) |
+| **Standard Service Detection** | Service/version detection on default port selection |
+| **Local Device Detail** | Richer local fingerprint; OS detection only when elevated |
+| **Web Surface Discovery** | Common web ports (80, 443, 8080, 8443, …) for HTTP/TLS follow-up |
+| **Full TCP Common Ports** | Bounded top-200 TCP review |
+| **Custom Port List** | Up to 50 comma-separated ports (validated) |
+| **Script-assisted Safe Review** | `-sV` plus safe NSE scripts (not default) |
+
+- **Defaults:** Quick Service Check for general targets; Standard for Local Network Check goal; Web Surface for website/local web triage goals.
+- **Elevation:** OS detection is skipped with a clear message when the Streamlit session is not elevated — the rest of the scan still runs.
+- **Results:** XML parsing (host status, MAC/vendor, services, CPEs, duration) with text fallback; profile name stored on the result.
+- **Next actions:** open web ports suggest HTTP Security Header Review and TLS Review on the assessed target.
+- **Packet Capture:** LAN device rows include **Run Network Service Check** (Local Device Detail profile).
+- Legacy profile names (`Quick check`, `Standard service scan`, …) still resolve for backward compatibility.
 
 ### Domain Intelligence (passive)
 

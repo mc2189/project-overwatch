@@ -162,7 +162,9 @@ def _persist_investigation_records(
                 "status": result["status"],
                 "findings_count": len(result["findings"]),
                 "findings": result["findings"],
-                "nmap_profile": selected_options.get("profile"),
+                "nmap_profile": selected_options.get("profile_id")
+                or (parsed_data.get("scan_profile") or {}).get("profile_id")
+                or selected_options.get("profile"),
                 "selected_options": selected_options,
                 "parsed_ports": parsed_data.get("parsed_ports", []),
                 "parsed_services": parsed_data.get("parsed_services", []),

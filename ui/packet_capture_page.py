@@ -136,8 +136,13 @@ def _append_followup_results(capture_result: dict, new_results: list[dict], *, c
     return f"Ran {len(new_results)} check(s): {completed} completed."
 
 
-def _render_lan_devices(pcap_parsed: dict) -> None:
+def _render_lan_devices(case_id: int, pcap_parsed: dict) -> None:
     devices = list(pcap_parsed.get("lan_devices") or [])
+    followup_results = st.session_state.get(CAPTURE_FOLLOWUP_RESULTS_KEY) or []
+    if followup_results:
+        from utils.nmap_lan_enrichment import enrich_lan_devices_from_nmap
+
+        devices = enrich_lan_devices_from_nmap(devices, followup_results)
     if not devices:
         if pcap_parsed.get("dhcp_activity") or pcap_parsed.get("arp_activity") or pcap_parsed.get("mdns_activity"):
             st.caption("LAN discovery traffic was seen, but no stable device rows could be inferred yet.")
@@ -152,6 +157,7 @@ def _render_lan_devices(pcap_parsed: dict) -> None:
                 "MAC": row.get("mac") or "—",
                 "Hostname": row.get("hostname") or "—",
                 "Role": row.get("role_label") or "—",
+                "Nmap": row.get("nmap_services_summary") or "—",
                 "Sources": ", ".join(row.get("sources") or []),
                 "Confidence": row.get("confidence") or "—",
             }
@@ -160,6 +166,54 @@ def _render_lan_devices(pcap_parsed: dict) -> None:
         width="stretch",
         hide_index=True,
     )
+
+    lab_ok = _followup_lab_confirmed()
+    for index, device in enumerate(devices[:8]):
+        ip = str(device.get("ip") or "").strip()
+        if not ip:
+            continue
+        label = device.get("hostname") or ip
+        if st.button(
+            f"Run Network Service Check on {label}",
+            key=f"capture_lan_nmap_{index}_{ip}",
+            disabled=not lab_ok,
+            width="stretch",
+        ):
+            from utils.nmap_profiles import options_for_profile, PROFILE_LOCAL_DEVICE
+
+            conn = get_db_conn()
+            try:
+                entity = create_or_get_entity(
+                    case_id,
+                    infer_entity_type(ip),
+                    ip,
+                    label=label,
+                    source="capture_lan_device",
+                    conn=conn,
+                )
+                result = execute_module(
+                    "infra_nmap",
+                    ip,
+                    options={
+                        "operating_context": PERSONAL_LAB,
+                        "personal_lab_confirmed": lab_ok,
+                        "nmap_options": options_for_profile(PROFILE_LOCAL_DEVICE),
+                    },
+                    db_context=conn,
+                    authorisation_confirmed=lab_ok,
+                    case_id=case_id,
+                    entity_id=entity["id"],
+                    run_mode_id="capture_lan_nmap",
+                    run_mode_label="LAN device Nmap",
+                )
+                result["target"] = ip
+            finally:
+                conn.close()
+            capture_result = st.session_state.get(CAPTURE_LAST_RESULT_KEY) or {}
+            st.session_state.capture_action_message = _append_followup_results(
+                capture_result, [result], case_id=case_id
+            )
+            st.rerun()
 
 
 def _render_recon_artifact(
@@ -657,7 +711,7 @@ def _render_capture_result(case_id: int) -> None:
     ranked = triage.get("ranked_entities") or []
     if not ranked and pcap_parsed:
         ranked = rank_investigation_entities(pcap_parsed)
-    _render_lan_devices(pcap_parsed)
+    _render_lan_devices(case_id, pcap_parsed)
     _render_interactive_followups(case_id, ranked=ranked, capture_result=result)
     _render_recon_artifact(
         case_id,

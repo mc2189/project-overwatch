@@ -592,6 +592,8 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
             selected_ids,
             target,
             conservative_nmap=conservative_nmap,
+            goal_id=goal_id,
+            run_mode_id=run_mode_id,
         )
 
         latest_results = st.session_state.get("latest_run_results") or []

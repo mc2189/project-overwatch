@@ -32,6 +32,8 @@ def render_advanced_module_settings(
     target: str,
     *,
     conservative_nmap: bool = False,
+    goal_id: str | None = None,
+    run_mode_id: str | None = None,
 ) -> dict[str, dict]:
     """Render collapsed advanced settings for selected modules."""
     nmap_options: dict = st.session_state.get("nmap_options", {})
@@ -57,6 +59,9 @@ def render_advanced_module_settings(
                 nmap_options = render_nmap_options(
                     True,
                     initial_profile=PROFILE_QUICK_CHECK if conservative_nmap else None,
+                    conservative_nmap=conservative_nmap,
+                    goal_id=goal_id,
+                    run_mode_id=run_mode_id,
                     collapse_settings=conservative_nmap,
                 )
                 if nmap_options.get("script_category") == SCRIPT_VULN:

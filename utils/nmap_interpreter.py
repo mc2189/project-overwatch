@@ -97,6 +97,35 @@ def interpret_nmap_results(parsed_data: dict[str, Any], options: dict[str, Any] 
         )
         return findings
 
+    scan_profile = parsed_data.get("scan_profile") or {}
+    if scan_profile.get("display_name"):
+        findings.append(
+            _finding(
+                "Nmap profile completed",
+                "info",
+                90,
+                f"Scan profile '{scan_profile['display_name']}' completed. Results are point-in-time and require validation.",
+                [
+                    "Review open services in context of asset inventory.",
+                    "Use suggested next actions for HTTP/TLS follow-up where web ports were found.",
+                ],
+            )
+        )
+
+    if parsed_data.get("host_status") == "down":
+        findings.append(
+            _finding(
+                "Host appears offline",
+                "info",
+                80,
+                "Nmap reported the host as down during this profile run.",
+                [
+                    "Confirm the target IP is correct and reachable on the network.",
+                    "Consider PCAP/ARP evidence or host discovery if the device may be sleeping.",
+                ],
+            )
+        )
+
     if not parsed_ports:
         findings.append(
             _finding(
@@ -184,6 +213,31 @@ def interpret_nmap_results(parsed_data: dict[str, Any], options: dict[str, Any] 
                         "Confirm whether this legacy service is still required.",
                         "Replace with encrypted alternatives where possible.",
                         "Restrict access and monitor authentication attempts.",
+                    ],
+                )
+            )
+        elif any(token in combined for token in ("mysql", "postgres", "postgresql", "mssql", "redis", "mongodb", "oracle")):
+            findings.append(
+                _finding(
+                    f"Database-like service observed on {port_label}",
+                    "medium",
+                    74,
+                    "Database or data-store service detected by Nmap — review whether exposure is expected.",
+                    [
+                        "Confirm the service should be reachable from this network context.",
+                        "Restrict to authorised clients and review authentication.",
+                    ],
+                )
+            )
+        elif version and service:
+            findings.append(
+                _finding(
+                    f"Service version observed on {port_label}",
+                    "info",
+                    68,
+                    f"Nmap service detection reported '{service}' with version hints — validate manually.",
+                    [
+                        "Corroborate version with vendor documentation or patch records.",
                     ],
                 )
             )

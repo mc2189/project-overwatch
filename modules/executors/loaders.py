@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import importlib.util
 import shutil
-from typing import Any
+import sys
+from typing import Any, Callable
 
 from modules.executors.paths import (
     ABUSEIPDB_MODULE_PATH,
@@ -492,3 +493,14 @@ def _load_live_capture_handler() -> None:
 
 def _nmap_binary_available() -> bool:
     return shutil.which("nmap") is not None
+
+
+def loaded_handler(
+    load_fn: Callable[[], None],
+    handler_attr: str,
+    error_attr: str,
+) -> tuple[Any | None, str | None]:
+    """Return a lazily loaded handler and its load error from this module."""
+    load_fn()
+    module = sys.modules[__name__]
+    return getattr(module, handler_attr), getattr(module, error_attr)

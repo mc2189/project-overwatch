@@ -148,7 +148,141 @@ def capture_nmap_evidence(
 ) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     parsed_data = result.get("parsed_data") or {}
+    selected_options = result.get("selected_options") or {}
     raw_output = result.get("raw_output") or ""
+    scan_profile = parsed_data.get("scan_profile") or {}
+    warnings = list(result.get("warnings") or [])
+
+    profile_name = scan_profile.get("display_name") or selected_options.get("profile") or "Network Service Check"
+    flags = scan_profile.get("flags") or []
+    profile_lines = [
+        f"Profile: {profile_name}",
+        f"Target: {scan_profile.get('target') or result.get('target') or 'unknown'}",
+    ]
+    if flags:
+        profile_lines.append(f"Flags: {' '.join(flags)}")
+    if scan_profile.get("estimated_noise"):
+        profile_lines.append(f"Estimated noise: {scan_profile['estimated_noise']}")
+    if warnings:
+        profile_lines.append("Warnings: " + "; ".join(warnings))
+    items.append(
+        _create_item(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            title="Nmap profile and command summary",
+            summary="Controlled network service check profile and sanitised command flags.",
+            content_text="\n".join(profile_lines),
+            content_type="text/plain",
+            evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+            source_name="Nmap",
+            collection_method="controlled_network_service_check",
+            reliability=RELIABILITY_HIGH,
+        )
+    )
+
+    parsed_ports = parsed_data.get("parsed_ports") or []
+    if parsed_ports:
+        port_lines = [
+            f"{row.get('port')}/{row.get('protocol', 'tcp')}"
+            + (f" {row.get('service')}" if row.get("service") else "")
+            + (f" ({row.get('product')} {row.get('version')})".strip() if row.get("product") or row.get("version") else "")
+            for row in parsed_ports
+        ]
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Nmap open ports summary",
+                summary=f"{len(parsed_ports)} open port(s) observed on assessed target.",
+                content_text="\n".join(port_lines),
+                content_type="text/plain",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="Nmap",
+                collection_method="controlled_network_service_check",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    script_results = parsed_data.get("script_results") or []
+    if script_results:
+        script_lines = [
+            f"{row.get('port')}/{row.get('protocol', 'tcp')}: {row.get('script_id')} — {row.get('output', '')[:240]}"
+            for row in script_results[:20]
+        ]
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Nmap script output summary",
+                summary="Safe script output observed during scan (truncated).",
+                content_text="\n".join(script_lines),
+                content_type="text/plain",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="Nmap",
+                collection_method="controlled_network_service_check",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    if warnings:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Nmap scan limitations",
+                summary="Operational warnings from the profile run.",
+                content_text="\n".join(f"- {warning}" for warning in warnings),
+                content_type="text/plain",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="Nmap",
+                collection_method="controlled_network_service_check",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    structured = {
+        "scan_profile": scan_profile,
+        "host_status": parsed_data.get("host_status"),
+        "primary_ip": parsed_data.get("primary_ip"),
+        "mac_address": parsed_data.get("mac_address"),
+        "mac_vendor": parsed_data.get("mac_vendor"),
+        "parsed_ports": parsed_ports,
+        "parsed_services": parsed_data.get("parsed_services", []),
+        "os_matches": parsed_data.get("os_matches", []),
+        "script_results": script_results,
+        "scan_stats": parsed_data.get("scan_stats"),
+        "parse_source": parsed_data.get("parse_source"),
+    }
+    if any(value for value in structured.values() if value not in (None, [], {})):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Nmap structured service summary",
+                summary="Structured port and service data parsed from Nmap XML or text output.",
+                content_text=_text_summary(structured),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="Nmap",
+                collection_method="controlled_network_service_check",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
 
     if raw_output.strip():
         items.append(
@@ -159,12 +293,12 @@ def capture_nmap_evidence(
                 observation_id=observation_id,
                 module_id=module_id,
                 title="Nmap raw text output",
-                summary="Directly observed during local Nmap execution.",
+                summary="Full text output from local Nmap execution (collapsed in UI by default).",
                 content_text=raw_output,
                 content_type="text/plain",
                 evidence_type=EVIDENCE_DIRECT_OBSERVATION,
-                source_name="local_nmap",
-                collection_method="local_command",
+                source_name="Nmap",
+                collection_method="controlled_network_service_check",
                 reliability=RELIABILITY_HIGH,
             )
         )
@@ -183,37 +317,12 @@ def capture_nmap_evidence(
                 content_text=xml_output,
                 content_type="application/xml",
                 evidence_type=EVIDENCE_DIRECT_OBSERVATION,
-                source_name="local_nmap",
-                collection_method="local_command",
+                source_name="Nmap",
+                collection_method="controlled_network_service_check",
                 reliability=RELIABILITY_HIGH,
             )
         )
 
-    structured = {
-        "parsed_ports": parsed_data.get("parsed_ports", []),
-        "parsed_services": parsed_data.get("parsed_services", []),
-        "os_matches": parsed_data.get("os_matches", []),
-        "script_results": parsed_data.get("script_results", []),
-        "parse_source": parsed_data.get("parse_source"),
-    }
-    if any(structured.values()):
-        items.append(
-            _create_item(
-                conn,
-                case_id=case_id,
-                entity_id=entity_id,
-                observation_id=observation_id,
-                module_id=module_id,
-                title="Nmap parsed scan data",
-                summary="Structured port and service data parsed from Nmap output.",
-                content_text=_text_summary(structured),
-                content_type="application/json",
-                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
-                source_name="local_nmap",
-                collection_method="parser_inferred",
-                reliability=RELIABILITY_HIGH,
-            )
-        )
     return items
 
 

@@ -377,6 +377,17 @@ def suggest_next_actions(
         result.get("module_id") for result in latest_results if result.get("success")
     }
 
+    for result in latest_results:
+        if result.get("module_id") != "infra_nmap" or not result.get("success"):
+            continue
+        result_target = (result.get("target") or cleaned).strip()
+        if result_target != cleaned:
+            continue
+        from utils.nmap_followup_actions import suggest_nmap_followup_actions
+
+        for action in suggest_nmap_followup_actions(result, target=cleaned):
+            actions.append(action)
+
     service_context = target_profile.get("service_context") or {}
     services = service_context.get("services") or []
     has_service_data = bool(target_profile.get("has_service_data") or services)

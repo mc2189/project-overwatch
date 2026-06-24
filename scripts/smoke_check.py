@@ -3578,6 +3578,86 @@ def _check_assessment_goal_modules_registered() -> None:
         raise AssertionError("infra_shodan should be intel_shodan in goal module sets")
 
 
+def _check_nmap_profile_runner() -> None:
+    from utils.nmap_profiles import (
+        PROFILE_ORDER,
+        PROFILE_WEB_SURFACE,
+        all_profile_ids,
+        dangerous_default_flags,
+        get_profile_definition,
+        options_for_profile,
+        parse_custom_port_list,
+        profile_display_name,
+        resolve_profile_id,
+    )
+    from utils.nmap_options import build_nmap_flags, normalize_options
+
+    if len(all_profile_ids()) != len(PROFILE_ORDER):
+        raise AssertionError("profile order mismatch")
+    for profile_id in PROFILE_ORDER:
+        definition = get_profile_definition(profile_id)
+        for key in (
+            "profile_id",
+            "display_name",
+            "description",
+            "intended_use",
+            "estimated_noise",
+            "testing_level",
+            "requires_elevation",
+            "active_warning",
+        ):
+            if key not in definition:
+                raise AssertionError(f"profile {profile_id} missing {key}")
+        if not profile_display_name(profile_id):
+            raise AssertionError(f"profile display name missing for {profile_id}")
+
+    validated, errors = parse_custom_port_list("80,443,abc")
+    if validated or not errors:
+        raise AssertionError("custom port validation should reject abc")
+    validated, errors = parse_custom_port_list("80,443")
+    if validated != "80,443" or errors:
+        raise AssertionError("custom port validation should accept 80,443")
+
+    too_many = ",".join(str(port) for port in range(1, 60))
+    _, errors = parse_custom_port_list(too_many)
+    if not errors:
+        raise AssertionError("custom port list should cap at 50 ports")
+
+    if dangerous_default_flags():
+        raise AssertionError(f"dangerous default profiles: {dangerous_default_flags()}")
+
+    web_opts = normalize_options(options_for_profile(PROFILE_WEB_SURFACE))
+    flags = build_nmap_flags(web_opts)
+    if "-F" in flags and "--top-ports=1000" in " ".join(flags):
+        raise AssertionError("web surface profile should not use broad default range")
+
+    legacy = resolve_profile_id("Quick check")
+    if legacy != "quick_service_check":
+        raise AssertionError("legacy profile alias failed")
+
+    from modules.executor_dispatch import get_dispatch_entry
+
+    entry = get_dispatch_entry("infra_nmap")
+    if entry is None or not callable(entry.execute):
+        raise AssertionError("infra_nmap dispatch entry missing after profile runner")
+
+    from utils.nmap_lan_enrichment import enrich_lan_devices_from_nmap
+
+    devices = [{"ip": "192.168.1.10", "hostname": "router", "sources": ["dhcp"], "confidence": "high"}]
+    nmap_result = {
+        "module_id": "infra_nmap",
+        "success": True,
+        "target": "192.168.1.10",
+        "parsed_data": {
+            "parsed_ports": [{"port": 443, "protocol": "tcp", "service": "https"}],
+            "scan_profile": {"display_name": "Local Device Detail"},
+        },
+    }
+    enriched = enrich_lan_devices_from_nmap(devices, [nmap_result])
+    if enriched[0].get("nmap_open_ports") != 1 or "nmap" not in enriched[0].get("sources", []):
+        raise AssertionError("LAN enrichment should merge Nmap hints without dropping PCAP sources")
+
+
 def _check_executor_dispatch_registry() -> None:
     import inspect
 
@@ -3988,6 +4068,11 @@ def main() -> int:
     run(
         "workspace UI helpers",
         lambda: _check_workspace_ui_helpers(),
+    )
+
+    run(
+        "nmap profile runner",
+        lambda: _check_nmap_profile_runner(),
     )
 
     run(

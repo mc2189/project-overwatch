@@ -120,19 +120,54 @@ PROFILE_DEFAULTS: dict[str, dict[str, Any]] = {
 
 
 def default_options_for_profile(profile: str) -> dict[str, Any]:
+    from utils.nmap_profiles import options_for_profile, resolve_profile_id
+
+    profile_id = resolve_profile_id(profile)
+    if profile_id in {
+        "quick_service_check",
+        "standard_service_detection",
+        "local_device_detail",
+        "web_surface_discovery",
+        "full_tcp_common_ports",
+        "custom_port_list",
+        "script_assisted_safe_review",
+    }:
+        return options_for_profile(profile_id)
     return deepcopy(PROFILE_DEFAULTS.get(profile, PROFILE_DEFAULTS[PROFILE_STANDARD]))
 
 
 def normalize_options(options: dict[str, Any]) -> dict[str, Any]:
     """Apply compatibility rules and return a safe option set."""
-    normalized = deepcopy(options)
-    profile = normalized.get("profile", PROFILE_STANDARD)
+    from utils.nmap_profiles import options_for_profile, parse_custom_port_list, resolve_profile_id
 
-    if profile != PROFILE_CUSTOM:
-        preset = default_options_for_profile(profile)
-        preset.update({k: v for k, v in normalized.items() if k != "profile"})
-        preset["profile"] = profile
-        normalized = preset
+    normalized = deepcopy(options)
+    profile_key = normalized.get("profile_id") or normalized.get("profile", PROFILE_STANDARD)
+    profile_id = resolve_profile_id(str(profile_key))
+
+    used_runner_profile = profile_id in {
+        "quick_service_check",
+        "standard_service_detection",
+        "local_device_detail",
+        "web_surface_discovery",
+        "full_tcp_common_ports",
+        "custom_port_list",
+        "script_assisted_safe_review",
+    }
+
+    if used_runner_profile:
+        custom_ports = str(normalized.get("custom_ports") or "")
+        normalized = options_for_profile(profile_id, custom_ports=custom_ports)
+        if profile_id == "custom_port_list" and custom_ports.strip():
+            validated, errors = parse_custom_port_list(custom_ports)
+            normalized["custom_ports"] = validated
+            normalized["custom_port_errors"] = errors
+    else:
+        profile = normalized.get("profile", PROFILE_STANDARD)
+        if profile != PROFILE_CUSTOM:
+            preset = default_options_for_profile(profile)
+            preset.update({k: v for k, v in normalized.items() if k != "profile"})
+            preset["profile"] = profile
+            normalized = preset
 
     if normalized.get("host_discovery_only"):
         normalized["fast_scan"] = False
@@ -150,6 +185,10 @@ def normalize_options(options: dict[str, Any]) -> dict[str, Any]:
         normalized["top_ports"] = None
 
     custom_ports = str(normalized.get("custom_ports") or "").strip()
+    if custom_ports and profile_id == "custom_port_list":
+        validated, errors = parse_custom_port_list(custom_ports)
+        normalized["custom_ports"] = validated or custom_ports
+        normalized["custom_port_errors"] = errors
     top_ports = normalized.get("top_ports")
 
     if custom_ports:
