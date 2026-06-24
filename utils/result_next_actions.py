@@ -12,7 +12,7 @@ from utils.web_port_planner import is_private_ipv4_target
 def _http_tls_unreachable(result: dict[str, Any]) -> bool:
     module_id = result.get("module_id") or ""
     parsed = result.get("parsed_data") or {}
-    if module_id == "infra_http_security":
+    if module_id in {"infra_http_security", "infra_web_stack_identifier"}:
         return not (parsed.get("response") or {}).get("success")
     if module_id == "infra_tls_review":
         return not (parsed.get("connection") or {}).get("success")
@@ -30,7 +30,7 @@ def suggest_result_action(result: dict[str, Any], *, target: str) -> dict[str, A
 
         return suggest_primary_nmap_action(result, target=target)
 
-    if module_id in {"infra_http_security", "infra_tls_review"} and _http_tls_unreachable(result):
+    if module_id in {"infra_http_security", "infra_tls_review", "infra_web_stack_identifier"} and _http_tls_unreachable(result):
         host = parsed.get("host") or target
         port = parsed.get("port") or (443 if module_id == "infra_tls_review" else 80)
         if is_private_ipv4_target(target):
@@ -143,6 +143,43 @@ def suggest_result_action(result: dict[str, Any], *, target: str) -> dict[str, A
             target=target,
             button_label="Generate report",
         )
+
+    if module_id == "infra_web_stack_identifier" and result.get("success"):
+        from utils.web_stack_indicators import CATEGORY_CMS
+
+        parsed_indicators = parsed.get("indicators") or []
+        headers = parsed.get("headers") or {}
+        if (parsed.get("response") or {}).get("success"):
+            if any(row.get("category") == CATEGORY_CMS for row in parsed_indicators):
+                return make_action(
+                    title="Run Website Metadata Review",
+                    reason="CMS indicators observed — sitemap and metadata review may help content discovery later.",
+                    action_type="run_module",
+                    priority="medium",
+                    target=target,
+                    module_id="infra_website_metadata",
+                    button_label="Website metadata",
+                )
+            if headers.get("server") or headers.get("x-powered-by"):
+                return make_action(
+                    title="HTTP Security Header Review",
+                    reason="Server disclosure headers observed — review security headers and cookie flags.",
+                    action_type="run_module",
+                    priority="medium",
+                    target=target,
+                    module_id="infra_http_security",
+                    button_label="HTTP headers",
+                )
+            if parsed_indicators:
+                return make_action(
+                    title="Validate stack indicators",
+                    reason="Review whether observed technologies match asset inventory.",
+                    action_type="open_finding",
+                    priority="low",
+                    target=target,
+                    module_id=module_id,
+                    button_label="Review findings",
+                )
 
     if module_id == "infra_tls_review":
         cert = parsed.get("certificate") or {}

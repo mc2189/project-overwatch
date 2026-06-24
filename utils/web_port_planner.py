@@ -84,7 +84,7 @@ def journey_guidance_for_private_ip(*, has_service_data: bool) -> list[str]:
 
 def filter_modules_without_service_data(module_ids: list[str]) -> list[str]:
     """Remove blind HTTP/TLS recommendations when no service context exists."""
-    blocked = {"infra_tls_review", "infra_http_security"}
+    blocked = {"infra_tls_review", "infra_http_security", "infra_web_stack_identifier"}
     return [module_id for module_id in module_ids if module_id not in blocked]
 
 

@@ -2,6 +2,8 @@
 
 Project Overwatch is a **local** Python/Streamlit intelligence, OSINT, security testing and resilience advisory dashboard for **private internal use** supporting future client assessments.
 
+**v2.27** adds **Web Stack Identifier** — a controlled HTTP GET that surfaces visible web technology indicators from headers and a capped page preview, without storing full page bodies.
+
 **v2.26** adds **Remote Access Exposure Review** — classifies SSH/RDP/VNC/SMB/Telnet/FTP and similar services from Nmap observations with cautious findings and no authentication.
 
 **v2.25** upgrades Network Service Check into an **Nmap Profile Runner** with guided profiles (Quick, Standard, Local Device, Web Surface, Full TCP, Custom Ports, Script-assisted Safe), structured parsing, and HTTP/TLS next actions from discovered web ports.
@@ -102,6 +104,7 @@ Results appear automatically in Operations, Observations, Findings, Relationship
 - **Network Service Check, powered by Nmap** — active; IPv4 or domain only (not URL — enter hostname separately for port scans).
 - **SSL / TLS Configuration Review** — active; domain, URL, or IPv4; single host:port TLS handshake (default 443); authorisation and engagement/scope required.
 - **HTTP Security Header Review** — active; domain, URL, or IPv4; GET/HEAD response review with security header and cookie flag analysis; authorisation required.
+- **Web Stack Identifier** — active; domain, URL, or IPv4; single HTTP GET with capped preview to suggest web server, CMS, framework, hosting, CDN, and analytics indicators; authorisation required; no full page body stored.
 - **WHOIS / RDAP Intelligence** — passive registration/allocation metadata for domain, URL (host extracted), or public IPv4 via public RDAP.
 - **VirusTotal Reputation Intelligence** — passive API reputation enrichment for domain, URL, or public IPv4 (`VIRUSTOTAL_API_KEY` required; private IPs skipped).
 - **AbuseIPDB Reputation Intelligence** — passive abuse-confidence lookup for public IPv4 only (`ABUSEIPDB_API_KEY` required; lookup-only, no report submission).
@@ -708,6 +711,22 @@ Reviews SSH, RDP, VNC, SMB, Telnet, FTP, WinRM, RTSP and similar services using 
 - **When to run:** After Network Service Check when remote-admin or file-sharing ports are observed; Nmap follow-up suggests this module automatically.
 - **Output:** Service table with classification (`remote_admin`, `file_sharing`, `legacy_cleartext`, etc.), cautious findings, evidence summary, and next actions (capture, report, restrict access).
 - **Guardrails:** Personal Lab or Client Engagement confirmation required; does not change remote services or send unsafe payloads.
+
+### Web Stack Identifier (active / safe active check)
+
+Identifies **visible web stack indicators** from a normal authorised HTTP GET — headers, meta generator, script/stylesheet references, and a **capped page preview** (2048 bytes max). Does **not** store full page bodies.
+
+- **Indicators:** web server, CMS, JavaScript framework, frontend library, hosting platform, CDN/edge, analytics tool
+- **Language:** cautious only — “indicator observed”, “appears to use”, “review whether expected”
+- **Output:** indicator table with confidence and source; web service and software entities where useful
+- **Next actions:** CMS indicators → Website Metadata Review; server disclosure → HTTP Security Header Review; no response → Network Service Check
+- **Reports:** Web Stack Summary section with categories and limitations
+
+**How to test:** against an authorised site such as `https://example.com`:
+
+1. Confirm Personal Lab or Client Engagement context and authorisation.
+2. Select **Web Stack Identifier** and run against the target URL.
+3. Review the concise result card, collapsed indicator table, findings, and evidence (no full HTML body in structured data).
 
 ### Domain Intelligence (passive)
 

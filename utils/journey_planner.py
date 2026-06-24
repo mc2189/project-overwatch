@@ -140,7 +140,7 @@ def build_assessment_journey(
         if (
             is_private_ipv4_target(cleaned)
             and not has_service_data
-            and module_id in {"infra_tls_review", "infra_http_security"}
+            and module_id in {"infra_tls_review", "infra_http_security", "infra_web_stack_identifier"}
             and category == "recommended"
         ):
             row["reason"] = (

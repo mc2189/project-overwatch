@@ -232,6 +232,41 @@ MODULES: list[ModuleEntry] = [
         ),
     ),
     ModuleEntry(
+        module_id="infra_web_stack_identifier",
+        display_name="Web Stack Identifier",
+        category="Infrastructure",
+        description="Identify visible web stack indicators from a normal HTTP page response.",
+        status="active",
+        mode="active",
+        risk_level="low",
+        requires_authorisation=True,
+        requires_api_key=False,
+        implemented=True,
+        accepted_target_types=("domain", "url", "ipv4"),
+        config_notes=(
+            "No API key required. Performs a single authorised HTTP GET with capped preview — "
+            "does not store full page bodies."
+        ),
+        rate_limit_notes="Active HTTP request — single target URL per run; headers and capped HTML preview only.",
+        short_help="Identify web server, CMS, framework, hosting, CDN, and analytics indicators from HTTP response metadata.",
+        detailed_help=(
+            "Collects response headers, meta generator, script/stylesheet references, and a small capped page "
+            "preview to suggest possible web technologies. Uses cautious language — indicators are review prompts, "
+            "not confirmed fingerprinting. Does not browse beyond the supplied URL except redirects during the GET."
+        ),
+        example_inputs=("example.com", "https://example.com", "8.8.8.8"),
+        output_summary=(
+            "Final URL, status, header banners, stack indicator table with confidence/source, and advisory findings."
+        ),
+        caution_notes=(
+            "This module performs a live HTTP GET to the target — use only on owned or authorised assets.",
+            "Authorisation and engagement/scope controls apply before execution.",
+            "Full page bodies are not stored; only capped preview text used for detection.",
+            "Indicators suggest possible technologies — validate against asset inventory.",
+            "Results reflect the point in time tested.",
+        ),
+    ),
+    ModuleEntry(
         module_id="infra_domain_intel",
         display_name="Domain Intelligence",
         category="Infrastructure",

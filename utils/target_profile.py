@@ -23,6 +23,7 @@ _MODULE_FAMILIES: dict[str, str] = {
     "infra_nmap": "Network services",
     "infra_tls_review": "TLS / certificates",
     "infra_http_security": "HTTP security",
+    "infra_web_stack_identifier": "Web stack",
     "infra_domain_intel": "Domain intelligence",
     "infra_cert_subdomain": "Subdomains / CT",
     "infra_website_metadata": "Website metadata",

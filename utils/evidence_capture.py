@@ -753,6 +753,97 @@ def capture_http_security_evidence(
     return items
 
 
+def capture_web_stack_evidence(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    observation_id: int,
+    module_id: str,
+    result: dict[str, Any],
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    parsed_data = result.get("parsed_data") or {}
+    response = parsed_data.get("response") or {}
+    headers = parsed_data.get("headers") or {}
+    indicators = list(parsed_data.get("indicators") or [])
+
+    items.append(
+        _create_item(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            title="HTTP response summary",
+            summary="Web stack identification response summary (no full page body stored).",
+            content_text=_text_summary(
+                {
+                    "requested_url": parsed_data.get("requested_url"),
+                    "final_url": response.get("final_url"),
+                    "status_code": response.get("status_code"),
+                    "redirect_chain": response.get("redirect_chain"),
+                    "content_type": response.get("content_type"),
+                    "error": response.get("error"),
+                }
+            ),
+            content_type="application/json",
+            evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+            source_name="http_response",
+            collection_method="web_stack_identification",
+            reliability=RELIABILITY_HIGH if response.get("success") else RELIABILITY_MEDIUM,
+        )
+    )
+
+    if headers.get("server") or headers.get("x-powered-by"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Server banner summary",
+                summary="Observed Server and X-Powered-By headers.",
+                content_text=_text_summary(headers),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="http_response",
+                collection_method="web_stack_identification",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    if indicators:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Web stack indicator summary",
+                summary="Visible technology indicators from headers and capped page preview.",
+                content_text=_text_summary(
+                    {
+                        "indicators": indicators,
+                        "categories": parsed_data.get("categories"),
+                        "script_sources": parsed_data.get("script_sources"),
+                        "stylesheet_links": parsed_data.get("stylesheet_links"),
+                        "meta_generator": parsed_data.get("meta_generator"),
+                    }
+                ),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="http_response",
+                collection_method="web_stack_identification",
+                reliability=RELIABILITY_MEDIUM,
+            )
+        )
+
+    return items
+
+
 def capture_tls_review_evidence(
     conn: sqlite3.Connection,
     *,
@@ -2275,6 +2366,15 @@ def capture_module_evidence(
         )
     if module_id == "infra_remote_access_review":
         return capture_remote_access_evidence(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            result=result,
+        )
+    if module_id == "infra_web_stack_identifier":
+        return capture_web_stack_evidence(
             conn,
             case_id=case_id,
             entity_id=entity_id,

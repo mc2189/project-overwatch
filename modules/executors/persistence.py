@@ -1106,6 +1106,154 @@ def _persist_remote_access_records(
         )
 
 
+def _persist_web_stack_records(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    host_entity_id: int,
+    module_id: str,
+    target: str,
+    result: dict[str, Any],
+    authorisation_confirmed: bool,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> None:
+    """Save web stack identification operations, observations, entities, and relationships."""
+    result = _prepare_module_result(result)
+    create_operation_log(
+        case_id,
+        module_id,
+        target,
+        result["status"],
+        authorisation_confirmed=authorisation_confirmed,
+        summary=result["summary"],
+        run_mode_id=run_mode_id,
+        run_mode_label=run_mode_label,
+        conn=conn,
+    )
+
+    if not should_persist_observation(result["status"]):
+        return
+
+    parsed_data = result.get("parsed_data") or {}
+    host = parsed_data.get("host") or target
+    scheme = (parsed_data.get("scheme") or "https").lower()
+    port = int(parsed_data.get("port") or (443 if scheme == "https" else 80))
+    response = parsed_data.get("response") or {}
+    indicators = list(parsed_data.get("indicators") or [])
+
+    if response.get("success"):
+        service_value = f"{host}:{port}/{scheme}"
+        service_label = f"{port}/{scheme} web"
+        service_entity = create_or_get_entity(
+            case_id,
+            "service",
+            service_value,
+            label=service_label,
+            source=module_id,
+            confidence=85,
+            conn=conn,
+        )
+        create_relationship(
+            case_id,
+            host_entity_id,
+            "exposes_web_service",
+            service_entity["id"],
+            source_module=module_id,
+            confidence=85,
+            conn=conn,
+        )
+
+    notable_categories = {"cms", "hosting_platform", "javascript_framework", "web_server"}
+    for row in indicators:
+        if row.get("confidence") == "low" and row.get("category") not in {"cms", "hosting_platform"}:
+            continue
+        if row.get("category") not in notable_categories and row.get("category") != "cdn_platform":
+            continue
+        name = row.get("name")
+        if not name:
+            continue
+        software_entity = create_or_get_entity(
+            case_id,
+            "software",
+            f"{host}:{name}",
+            label=str(name)[:120],
+            source=module_id,
+            confidence=75 if row.get("confidence") == "high" else 65,
+            conn=conn,
+        )
+        create_relationship(
+            case_id,
+            host_entity_id,
+            "identifies_product",
+            software_entity["id"],
+            source_module=module_id,
+            confidence=75 if row.get("confidence") == "high" else 65,
+            conn=conn,
+        )
+
+    observation = create_observation(
+        case_id,
+        host_entity_id,
+        module_id,
+        "web_stack_identification",
+        "Web stack identification result",
+        summary=result["summary"],
+        data_json=json.dumps(
+            {
+                "module_id": module_id,
+                "success": result["success"],
+                "status": result["status"],
+                "findings": result.get("findings", []),
+                "interpreter_findings": result.get("interpreter_findings", []),
+                "warnings": result.get("warnings", []),
+                "target": parsed_data.get("target"),
+                "host": host,
+                "scheme": scheme,
+                "port": port,
+                "requested_url": parsed_data.get("requested_url"),
+                "response": {
+                    "success": response.get("success"),
+                    "status_code": response.get("status_code"),
+                    "final_url": response.get("final_url"),
+                    "redirect_chain": response.get("redirect_chain"),
+                    "content_type": response.get("content_type"),
+                    "error": response.get("error"),
+                },
+                "headers": parsed_data.get("headers"),
+                "indicators": indicators,
+                "categories": parsed_data.get("categories"),
+                "script_sources": parsed_data.get("script_sources"),
+                "stylesheet_links": parsed_data.get("stylesheet_links"),
+                "meta_generator": parsed_data.get("meta_generator"),
+            }
+        ),
+        raw_output=result["raw_output"],
+        **_observation_evidence_kwargs(module_id, result),
+        conn=conn,
+    )
+
+    _persist_observation_evidence(
+        conn,
+        case_id=case_id,
+        entity_id=host_entity_id,
+        observation_id=observation["id"],
+        module_id=module_id,
+        result=result,
+    )
+
+    interpreter_findings = result.get("interpreter_findings") or []
+    if interpreter_findings:
+        _persist_module_findings(
+            conn,
+            case_id=case_id,
+            entity_id=host_entity_id,
+            observation_id=observation["id"],
+            module_id=module_id,
+            interpreter_findings=interpreter_findings,
+        )
+
+
 def _organisation_entity_value(info: dict[str, Any] | None) -> str | None:
     if not info:
         return None

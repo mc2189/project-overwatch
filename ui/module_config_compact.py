@@ -43,7 +43,7 @@ def render_advanced_module_settings(
     active_selected = [
         module_id
         for module_id in module_ids
-        if module_id in {"infra_nmap", "infra_tls_review", "infra_http_security"}
+        if module_id in {"infra_nmap", "infra_tls_review", "infra_http_security", "infra_web_stack_identifier"}
     ]
     if not active_selected:
         return {

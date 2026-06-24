@@ -910,6 +910,7 @@ def _check_target_compatibility() -> None:
         "infra_nmap" not in module_ids
         or "infra_tls_review" not in module_ids
         or "infra_http_security" not in module_ids
+        or "infra_web_stack_identifier" not in module_ids
         or "infra_domain_intel" not in module_ids
         or "infra_cert_subdomain" not in module_ids
         or "infra_website_metadata" not in module_ids
@@ -3716,14 +3717,156 @@ def _check_remote_access_review() -> None:
     if loaders._remote_access_handler is None:
         raise AssertionError("remote access handler failed to load")
 
-    result = loaders._remote_access_handler(
+    if not loaders._remote_access_handler(
         "192.168.1.10",
         options={"manual_services": [{"port": 22, "service_name": "ssh"}]},
-    )
-    if not result.get("success"):
+    ).get("success"):
         raise AssertionError("manual port review should succeed")
-    if not result.get("data", {}).get("remote_services"):
+    if not loaders._remote_access_handler(
+        "192.168.1.10",
+        options={"manual_services": [{"port": 22, "service_name": "ssh"}]},
+    ).get("data", {}).get("remote_services"):
         raise AssertionError("manual SSH port should classify as remote access")
+
+
+def _check_web_stack_identifier() -> None:
+    import importlib.util
+
+    from utils.web_stack_indicators import CATEGORY_CMS, detect_indicators, extract_html_artifacts
+    from utils.web_stack_interpreter import interpret_web_stack_results
+
+    html = (
+        '<html><head><meta name="generator" content="WordPress 6.4">'
+        '<script src="/wp-includes/js/jquery/jquery.min.js"></script>'
+        '<link href="/wp-content/themes/twenty/style.css" rel="stylesheet">'
+        "</head><body>Example</body></html>"
+    )
+    artifacts = extract_html_artifacts(html)
+    if artifacts["meta_generator"] != "WordPress 6.4":
+        raise AssertionError("meta generator extraction failed")
+    indicators = detect_indicators(
+        headers={"server": "nginx/1.24.0", "x-powered-by": "PHP/8.2"},
+        body_preview=html,
+        script_sources=artifacts["script_sources"],
+        stylesheet_links=artifacts["stylesheet_links"],
+        meta_generator=artifacts["meta_generator"],
+        cookie_names=["wordpress_logged_in"],
+        redirect_urls=["https://example.com/"],
+    )
+    names = {row["name"] for row in indicators}
+    if "WordPress" not in names or "nginx" not in names:
+        raise AssertionError(f"expected WordPress/nginx indicators, got {names}")
+
+    mock_data = {
+        "target": "example.com",
+        "host": "example.com",
+        "scheme": "https",
+        "port": 443,
+        "requested_url": "https://example.com/",
+        "target_type": "domain",
+        "response": {
+            "success": True,
+            "status_code": 200,
+            "final_url": "https://example.com/",
+            "redirect_chain": [{"url": "https://example.com/", "status_code": 200}],
+            "content_type": "text/html",
+            "error": None,
+        },
+        "headers": {"server": "nginx", "x-powered-by": "PHP/8.2"},
+        "indicators": indicators,
+        "categories": ["CMS", "Web server"],
+        "script_sources": artifacts["script_sources"],
+        "stylesheet_links": artifacts["stylesheet_links"],
+        "meta_generator": artifacts["meta_generator"],
+    }
+    findings = interpret_web_stack_results(mock_data)
+    if not findings or not any("indicator" in f.get("title", "").lower() for f in findings):
+        raise AssertionError("web stack interpreter should emit indicator finding")
+
+    registry = __import__("modules.module_registry", fromlist=["get_module"])
+    module = registry.get_module("infra_web_stack_identifier")
+    if module is None or not module.implemented:
+        raise AssertionError("infra_web_stack_identifier registry entry missing or not implemented")
+    if not module.requires_authorisation:
+        raise AssertionError("infra_web_stack_identifier must require authorisation")
+    if module.requires_api_key:
+        raise AssertionError("infra_web_stack_identifier should not require API key")
+    if module.accepted_target_types != ("domain", "url", "ipv4"):
+        raise AssertionError("infra_web_stack_identifier accepted_target_types mismatch")
+    for field in ("short_help", "detailed_help", "caution_notes", "config_notes"):
+        if not getattr(module, field, None):
+            raise AssertionError(f"infra_web_stack_identifier missing registry metadata: {field}")
+
+    module_path = Path(PROJECT_ROOT) / "modules" / "2_infrastructure" / "infra_web_stack_identifier.py"
+    spec = importlib.util.spec_from_file_location("infra_web_stack_identifier", module_path)
+    if spec is None or spec.loader is None:
+        raise AssertionError("could not load infra_web_stack_identifier module spec")
+    stack_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(stack_mod)
+
+    result = stack_mod.run_web_stack_identifier("example.com", options={"mock_data": mock_data})
+    if not result.get("success") or result.get("module_id") != "infra_web_stack_identifier":
+        raise AssertionError("mock web stack identification should succeed")
+    data = result.get("data") or {}
+    if "body_preview" in data:
+        raise AssertionError("parsed data must not store full page body")
+    if len(result.get("raw_output", "")) > 50000:
+        raise AssertionError("raw output unexpectedly large")
+
+    blocked = stack_mod.run_web_stack_identifier("not a valid domain !!!")
+    if blocked.get("success"):
+        raise AssertionError("invalid web stack target should be blocked")
+
+    registry_pipeline = __import__(
+        "utils.findings_registry",
+        fromlist=["module_has_findings_pipeline", "interpret_module_findings"],
+    )
+    if not registry_pipeline.module_has_findings_pipeline("infra_web_stack_identifier"):
+        raise AssertionError("findings pipeline not registered for infra_web_stack_identifier")
+
+    executor = __import__("modules.executor", fromlist=["is_runtime_ready", "execute_module"])
+    if not executor.is_runtime_ready("infra_web_stack_identifier"):
+        raise AssertionError("executor cannot load infra_web_stack_identifier backend")
+
+    evidence = __import__("utils.evidence_model", fromlist=["default_evidence_for_module", "default_relationship_evidence"])
+    defaults = evidence.default_evidence_for_module("infra_web_stack_identifier")
+    if not defaults.get("collection_method"):
+        raise AssertionError("web stack default evidence missing collection_method")
+    rel = evidence.default_relationship_evidence("infra_web_stack_identifier", "exposes_web_service")
+    if not rel.get("evidence_type"):
+        raise AssertionError("web stack relationship evidence missing")
+
+    testing_levels = __import__("utils.module_testing_levels", fromlist=["get_module_testing_level"])
+    if testing_levels.get_module_testing_level("infra_web_stack_identifier") != "safe_active_check":
+        raise AssertionError("infra_web_stack_identifier testing level should be safe_active_check")
+
+    source = module_path.read_text(encoding="utf-8")
+    if "subprocess" in source or "shell=True" in source:
+        raise AssertionError("infra_web_stack_identifier must not use subprocess/shell=True")
+
+    from modules.executor_dispatch import get_dispatch_entry
+
+    entry = get_dispatch_entry("infra_web_stack_identifier")
+    if entry is None or not callable(entry.execute):
+        raise AssertionError("infra_web_stack_identifier dispatch missing")
+
+    from modules.executors.loaders import _load_web_stack_handler
+
+    _load_web_stack_handler()
+    from modules.executors import loaders
+
+    if loaders._web_stack_handler is None:
+        raise AssertionError("web stack handler failed to load")
+
+    from utils.result_next_actions import suggest_result_action
+
+    cms_data = {**mock_data, "indicators": [{"name": "WordPress", "category": CATEGORY_CMS, "confidence": "high", "source": "meta"}]}
+    cms_action = suggest_result_action(
+        {"module_id": "infra_web_stack_identifier", "success": True, "parsed_data": cms_data, "interpreter_findings": findings},
+        target="example.com",
+    )
+    if cms_action.get("module_id") != "infra_website_metadata":
+        raise AssertionError("CMS indicators should suggest website metadata review")
 
 
 def _check_executor_dispatch_registry() -> None:
@@ -3757,6 +3900,7 @@ def _check_executor_dispatch_registry() -> None:
         "infra_tls_review",
         "infra_http_security",
         "infra_remote_access_review",
+        "infra_web_stack_identifier",
         "intel_virustotal",
         "intel_abuseipdb",
         "intel_greynoise",
@@ -4147,6 +4291,11 @@ def main() -> int:
     run(
         "remote access review",
         lambda: _check_remote_access_review(),
+    )
+
+    run(
+        "web stack identifier",
+        lambda: _check_web_stack_identifier(),
     )
 
     run(

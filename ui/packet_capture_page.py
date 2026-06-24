@@ -266,7 +266,7 @@ def _render_recon_artifact(
     next_steps = artifact.get("suggested_next_steps") or []
     if next_steps:
         st.markdown("**Suggested next tests**")
-        active_modules = {"infra_nmap", "infra_tls_review", "infra_http_security", "infra_remote_access_review"}
+        active_modules = {"infra_nmap", "infra_tls_review", "infra_http_security", "infra_web_stack_identifier", "infra_remote_access_review"}
         for pindex, action in enumerate(next_steps[:6]):
             module_id = action.get("module_id")
             needs_lab = module_id in active_modules

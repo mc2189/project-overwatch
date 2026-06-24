@@ -2,6 +2,15 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.27.0 — Web Stack Identifier
+
+- **`infra_web_stack_identifier`** — controlled active HTTP GET to identify visible web stack indicators (server, CMS, framework, hosting, CDN, analytics) from headers and capped page preview
+- **`utils/web_stack_indicators.py`** — indicator rules with confidence, source, and cautious reason text; no full page body retention
+- **`utils/web_stack_interpreter.py`** — advisory findings only (indicators observed, server disclosure, CMS/framework/platform/analytics prompts)
+- **Findings, evidence, entities** — web service and software entities; indicator summary evidence; exposes_web_service / identifies_product relationships
+- **Reports** — Web Stack Summary section with categories, indicator table, and limitations
+- **Next actions** — CMS → website metadata; server disclosure → HTTP header review; no response → Network Service Check
+
 ## v2.26.0 — Remote Access Exposure Review
 
 - **`infra_remote_access_review`** — analysis-assisted review of SSH, RDP, VNC, SMB, Telnet, FTP, WinRM, RTSP and similar services from Nmap/service observations

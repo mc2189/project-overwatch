@@ -157,6 +157,14 @@ def _execute_modules(
                     "requested_url": http_opts.get("requested_url"),
                     "target_source": http_opts.get("target_source", "default_assumption"),
                 }
+            elif module_id == "infra_web_stack_identifier":
+                http_opts = st.session_state.get("http_security_options", {})
+                options = {
+                    "port_override": http_opts.get("port_override"),
+                    "scheme_override": http_opts.get("scheme_override"),
+                    "requested_url": http_opts.get("requested_url"),
+                    "target_source": http_opts.get("target_source", "default_assumption"),
+                }
             elif module_id == "infra_remote_access_review":
                 latest = st.session_state.get("latest_run_results") or []
                 nmap_ports: list[dict] = []

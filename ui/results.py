@@ -85,6 +85,26 @@ def render_result_summary_tab(result: dict) -> None:
         if highest:
             st.caption(f"Highest severity: {highest}")
 
+    if result["module_id"] == "infra_web_stack_identifier" and parsed_data:
+        response = parsed_data.get("response") or {}
+        indicators = parsed_data.get("indicators") or []
+        categories = parsed_data.get("categories") or []
+        st.write(f"**Target:** {parsed_data.get('requested_url') or parsed_data.get('target')}")
+        st.write(f"**Final URL:** {response.get('final_url') or '—'}")
+        st.write(f"**Indicators observed:** {len(indicators)}")
+        if categories:
+            st.caption(f"Categories: {', '.join(categories[:6])}")
+        headers = parsed_data.get("headers") or {}
+        notes: list[str] = []
+        if headers.get("server"):
+            notes.append(f"Server header: {headers['server']}")
+        if headers.get("x-powered-by"):
+            notes.append(f"X-Powered-By: {headers['x-powered-by']}")
+        if parsed_data.get("meta_generator"):
+            notes.append(f"Meta generator: {parsed_data['meta_generator']}")
+        if notes:
+            st.caption(" · ".join(notes[:3]))
+
     if result["module_id"] == "infra_cert_subdomain" and parsed_data:
         subdomains = parsed_data.get("subdomains") or []
         st.write(f"**Certificate names returned:** {len(subdomains)}")
@@ -633,6 +653,26 @@ def render_result_summary_tab(result: dict) -> None:
             f"(status {robots.get('status_code')})"
         )
 
+    if result["module_id"] == "infra_web_stack_identifier" and parsed_data:
+        response = parsed_data.get("response") or {}
+        headers = parsed_data.get("headers") or {}
+        indicators = parsed_data.get("indicators") or []
+        st.markdown(f"**Requested URL:** {parsed_data.get('requested_url')}")
+        st.markdown(f"**Final URL:** {response.get('final_url')}")
+        st.markdown(f"**Status code:** {response.get('status_code')}")
+        if indicators:
+            st.markdown(f"**Indicators:** {len(indicators)} observed")
+            preview = ", ".join(
+                f"{row.get('name')} ({row.get('confidence')})" for row in indicators[:6]
+            )
+            st.caption(preview)
+        if headers.get("server"):
+            st.markdown(f"**Server:** {headers['server']}")
+        if headers.get("x-powered-by"):
+            st.markdown(f"**X-Powered-By:** {headers['x-powered-by']}")
+        if parsed_data.get("meta_generator"):
+            st.markdown(f"**Meta generator:** {parsed_data['meta_generator']}")
+
 
 def render_result_interpretation_tab(result: dict) -> None:
     interpreter_findings = result.get("interpreter_findings") or []
@@ -881,6 +921,28 @@ def render_result_module_output_tab(result: dict) -> None:
             st.dataframe(pd.DataFrame(chain), width="stretch", hide_index=True)
         with st.expander("Raw response headers", expanded=False):
             st.json((parsed_data.get("headers") or {}).get("raw") or {})
+
+    if result["module_id"] == "infra_web_stack_identifier" and parsed_data:
+        response = parsed_data.get("response") or {}
+        st.markdown(f"**Requested URL:** {parsed_data.get('requested_url')}")
+        st.markdown(f"**Final URL:** {response.get('final_url')}")
+        st.markdown(f"**Status code:** {response.get('status_code')}")
+        indicators = parsed_data.get("indicators") or []
+        if indicators:
+            st.markdown("**Stack indicators**")
+            st.dataframe(pd.DataFrame(indicators), width="stretch", hide_index=True)
+        scripts = parsed_data.get("script_sources") or []
+        styles = parsed_data.get("stylesheet_links") or []
+        if scripts:
+            with st.expander("Script sources (names only)", expanded=False):
+                st.dataframe(pd.DataFrame({"script_src": scripts[:40]}), width="stretch", hide_index=True)
+        if styles:
+            with st.expander("Stylesheet / link references", expanded=False):
+                st.dataframe(pd.DataFrame({"href": styles[:40]}), width="stretch", hide_index=True)
+        chain = response.get("redirect_chain") or []
+        if chain:
+            with st.expander("Redirect chain", expanded=False):
+                st.dataframe(pd.DataFrame(chain), width="stretch", hide_index=True)
 
 
 def render_result_raw_tab(result: dict) -> None:

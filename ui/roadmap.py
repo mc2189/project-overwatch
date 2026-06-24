@@ -31,6 +31,7 @@ ROADMAP_SECTIONS: tuple[dict[str, object], ...] = (
             "infra_nmap",
             "infra_tls_review",
             "infra_http_security",
+            "infra_web_stack_identifier",
             "net_pcap_review",
             "net_live_capture",
         ),

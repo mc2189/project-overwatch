@@ -660,6 +660,53 @@ def build_case_report(
             )
             lines.append("")
 
+        web_stack_observations = [
+            observation
+            for observation in observations
+            if observation.get("module_id") == "infra_web_stack_identifier"
+        ]
+        if web_stack_observations:
+            lines.extend(["## Web Stack Summary", ""])
+            lines.append(
+                "_Based on a normal HTTP GET with capped preview only. Indicators suggest possible technologies — validate before acting._"
+            )
+            lines.append("")
+            for observation in web_stack_observations:
+                entity = _entity_display(
+                    entity_by_id.get(observation.get("entity_id")),
+                    observation.get("entity_id"),
+                )
+                payload: dict[str, Any] = {}
+                data_json = observation.get("data_json")
+                if data_json:
+                    try:
+                        payload = json.loads(data_json) if isinstance(data_json, str) else data_json
+                    except (TypeError, json.JSONDecodeError):
+                        payload = {}
+                indicators = payload.get("indicators") or []
+                categories = payload.get("categories") or []
+                response = payload.get("response") or {}
+                lines.append(f"### {observation.get('title', 'Web stack identification')}")
+                lines.append("")
+                lines.append(f"- Entity: {entity}")
+                lines.append(f"- Summary: {observation.get('summary') or '_No summary._'}")
+                lines.append(f"- Final URL: {response.get('final_url') or payload.get('requested_url') or '—'}")
+                lines.append(f"- Indicators observed: {len(indicators)}")
+                if categories:
+                    lines.append(f"- Categories: {', '.join(categories[:8])}")
+                for row in indicators[:10]:
+                    version = f" {row['version']}" if row.get("version") else ""
+                    lines.append(
+                        f"  - {row.get('name')}{version} "
+                        f"({row.get('category_label', row.get('category'))}, "
+                        f"{row.get('confidence', 'unknown')} confidence, source: {row.get('source')})"
+                    )
+                lines.append("- Recommendation: review whether observed stack indicators are expected.")
+                lines.append(f"- Created: {observation.get('created_at', '-')}")
+                lines.append("")
+            lines.append("_No full page bodies are stored in observations or evidence._")
+            lines.append("")
+
         lines.extend(["## Observations", ""])
         if not observations:
             lines.append("_No observations recorded for this case._")

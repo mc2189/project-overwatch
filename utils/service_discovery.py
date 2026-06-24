@@ -157,7 +157,7 @@ def load_discovered_services(
             continue
         module_id = observation.get("module_id") or ""
         obs_type = observation.get("observation_type") or ""
-        if module_id not in {"infra_nmap", "infra_tls_review", "infra_http_security"} and obs_type != "network_scan":
+        if module_id not in {"infra_nmap", "infra_tls_review", "infra_http_security", "infra_web_stack_identifier"} and obs_type != "network_scan":
             continue
         raw_json = observation.get("data_json")
         if not raw_json:

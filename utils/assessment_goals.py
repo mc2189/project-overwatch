@@ -97,6 +97,7 @@ _GOAL_MODULE_SETS: dict[str, tuple[str, ...]] = {
         "infra_website_metadata",
         "infra_tls_review",
         "infra_http_security",
+        "infra_web_stack_identifier",
     ),
 }
 

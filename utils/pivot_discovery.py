@@ -137,6 +137,32 @@ def discover_pivots_from_results(results: list[dict[str, Any]]) -> list[dict[str
                     }
                 )
 
+        if module_id == "infra_web_stack_identifier":
+            response = parsed.get("response") or {}
+            if not response.get("success"):
+                continue
+            indicators = parsed.get("indicators") or []
+            from utils.web_stack_indicators import CATEGORY_CMS
+
+            if any(row.get("category") == CATEGORY_CMS for row in indicators):
+                pivots.append(
+                    {
+                        "pivot_type": "url",
+                        "value": str(response.get("final_url") or parsed.get("requested_url") or ""),
+                        "source_module": module_id,
+                        "suggested_checks": ["infra_website_metadata"],
+                    }
+                )
+            elif indicators:
+                pivots.append(
+                    {
+                        "pivot_type": "url",
+                        "value": str(response.get("final_url") or parsed.get("requested_url") or ""),
+                        "source_module": module_id,
+                        "suggested_checks": ["infra_http_security"],
+                    }
+                )
+
         if module_id == "infra_tls_review":
             cert = parsed.get("certificate") or {}
             for san in cert.get("san_dns_names") or []:

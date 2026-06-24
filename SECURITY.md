@@ -115,6 +115,15 @@ The **Domain Email Security Posture** module (`infra_email_security`) is **passi
 - Uses `requests` with short timeout and redirect limit — no subprocess, no `shell=True`
 - Cookie and token values are redacted and not stored in observations, evidence, or reports
 
+## Web Stack Identifier (v2.27)
+
+- **Module ID:** `infra_web_stack_identifier` — controlled active assessment (`safe_active_check`)
+- Allowed: single-target HTTP GET with redirect limit, response header collection, meta/script/stylesheet name extraction, capped page preview (2048 bytes max) for indicator matching
+- **Not allowed:** full page body storage, form submission, login interaction, crawling beyond the supplied URL except redirects during the GET
+- Requires authorisation and the correct operating context (Personal Lab or Client Engagement) with scope/ROE guardrails before connecting
+- Uses `requests` with short timeout — no subprocess, no `shell=True`
+- Indicators use cautious language only — they are review prompts, not confirmed fingerprinting
+
 ## Authorised assessment model (v2.8+)
 
 Project Overwatch is designed for **authorised client assessments**, not unconstrained scanning.

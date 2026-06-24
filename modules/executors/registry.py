@@ -132,6 +132,14 @@ def register_all_executors() -> None:
             unavailable_label="Remote Access Exposure Review",
         ),
         ModuleDispatchEntry(
+            "infra_web_stack_identifier",
+            load=loaders._load_web_stack_handler,
+            is_ready=_module_ready(loaders._load_web_stack_handler, lambda: loaders._web_stack_handler),
+            get_error=_module_error(loaders._load_web_stack_handler, lambda: loaders._web_stack_load_error),
+            execute=infrastructure._execute_web_stack_identifier,
+            unavailable_label="Web Stack Identifier",
+        ),
+        ModuleDispatchEntry(
             "infra_whois_rdap",
             load=loaders._load_whois_rdap_handler,
             is_ready=_module_ready(loaders._load_whois_rdap_handler, lambda: loaders._whois_rdap_handler),
