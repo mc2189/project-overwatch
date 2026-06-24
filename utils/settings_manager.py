@@ -104,6 +104,12 @@ GENERAL_SETTING_DEFAULTS: dict[str, Any] = {
     "PROJECT_OVERWATCH_DEFAULT_TIMEOUT": 30,
     "PROJECT_OVERWATCH_MAX_BATCH_ITEMS": 50,
     "PROJECT_OVERWATCH_ENABLE_ACTIVE_MODULES": True,
+    "PROJECT_OVERWATCH_DEFAULT_ASSESSMENT_MODE": "assisted",
+    "PROJECT_OVERWATCH_ENABLE_PASSIVE_AUTOPILOT": False,
+    "PROJECT_OVERWATCH_ENABLE_PERSONAL_LAB_AUTOPILOT": False,
+    "PROJECT_OVERWATCH_MAX_PLAYBOOK_STEPS": 10,
+    "PROJECT_OVERWATCH_MAX_ACTIVE_CHECKS": 3,
+    "PROJECT_OVERWATCH_MAX_PASSIVE_CHECKS": 8,
 }
 
 
@@ -203,6 +209,44 @@ def personal_lab_enabled() -> bool:
 
 def personal_lab_private_quick_scope_enabled() -> bool:
     return get_bool_env("PROJECT_OVERWATCH_PERSONAL_LAB_PRIVATE_QUICK_SCOPE", True)
+
+
+def default_assessment_mode() -> str:
+    value = get_env("PROJECT_OVERWATCH_DEFAULT_ASSESSMENT_MODE", "assisted")
+    if value not in {"manual", "assisted", "passive_autopilot", "personal_lab_autopilot"}:
+        return "assisted"
+    return value
+
+
+def passive_autopilot_enabled() -> bool:
+    return get_bool_env("PROJECT_OVERWATCH_ENABLE_PASSIVE_AUTOPILOT", False)
+
+
+def personal_lab_autopilot_enabled() -> bool:
+    return get_bool_env("PROJECT_OVERWATCH_ENABLE_PERSONAL_LAB_AUTOPILOT", False)
+
+
+def max_playbook_steps() -> int:
+    return get_int_env("PROJECT_OVERWATCH_MAX_PLAYBOOK_STEPS", 10)
+
+
+def max_active_checks() -> int:
+    return get_int_env("PROJECT_OVERWATCH_MAX_ACTIVE_CHECKS", 3)
+
+
+def max_passive_checks() -> int:
+    return get_int_env("PROJECT_OVERWATCH_MAX_PASSIVE_CHECKS", 8)
+
+
+def autopilot_settings() -> dict[str, Any]:
+    return {
+        "default_mode": default_assessment_mode(),
+        "passive_autopilot_enabled": passive_autopilot_enabled(),
+        "personal_lab_autopilot_enabled": personal_lab_autopilot_enabled(),
+        "max_playbook_steps": max_playbook_steps(),
+        "max_active_checks": max_active_checks(),
+        "max_passive_checks": max_passive_checks(),
+    }
 
 
 def has_api_key(env_key: str) -> bool:
@@ -436,6 +480,12 @@ def general_settings_summary() -> dict[str, Any]:
         "active_modules_enabled": active_modules_enabled(),
         "personal_lab_enabled": personal_lab_enabled(),
         "personal_lab_private_quick_scope": personal_lab_private_quick_scope_enabled(),
+        "default_assessment_mode": default_assessment_mode(),
+        "passive_autopilot_enabled": passive_autopilot_enabled(),
+        "personal_lab_autopilot_enabled": personal_lab_autopilot_enabled(),
+        "max_playbook_steps": max_playbook_steps(),
+        "max_active_checks": max_active_checks(),
+        "max_passive_checks": max_passive_checks(),
         "python_version": sys.version.split()[0],
     }
 

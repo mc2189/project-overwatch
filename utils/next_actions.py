@@ -49,6 +49,7 @@ ACTION_TYPES = frozenset(
         "no_action",
         "try_common_web_ports",
         "open_graph",
+        "navigate_page",
     }
 )
 
@@ -73,6 +74,7 @@ _DEFAULT_BUTTON_LABELS: dict[str, str] = {
     "no_action": "Info",
     "try_common_web_ports": "Try common web ports",
     "open_graph": "Open graph",
+    "navigate_page": "Open page",
 }
 
 

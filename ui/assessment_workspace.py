@@ -9,6 +9,7 @@ from database.engagements import get_engagement_for_case
 from modules.executor import execute_module
 from modules.module_registry import get_module, is_executable
 from ui.action_cards import render_action_cards
+from ui.autopilot_panel import render_autopilot_panel
 from ui.case_workflow_banner import render_case_workflow_strip
 from ui.scroll_helpers import scroll_to_anchor
 from ui.compact_preflight import render_compact_preflight
@@ -693,6 +694,25 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
             )
 
     with side_col:
+        engagement = get_engagement_for_case(current_case["id"]) if current_case else None
+        emergency_stop_active = bool(engagement and engagement.get("emergency_stop_active"))
+
+        conn = get_db_conn()
+        try:
+            render_autopilot_panel(
+                case_id=current_case["id"],
+                target=target,
+                goal_id=goal_id,
+                latest_results=st.session_state.get("latest_run_results") or [],
+                operating_context=st.session_state.get("operating_context", PASSIVE_RESEARCH),
+                personal_lab_confirmed=bool(st.session_state.get("personal_lab_confirmed")),
+                authorisation_confirmed=bool(st.session_state.get("authorisation_confirmed")),
+                emergency_stop_active=emergency_stop_active,
+                conn=conn,
+            )
+        finally:
+            conn.close()
+
         section_heading("Next steps")
         profile_with_scope = dict(profile)
         if target.strip() and auth_required and st.session_state.get("operating_context") == PERSONAL_LAB:

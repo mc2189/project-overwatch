@@ -167,6 +167,15 @@ def apply_workspace_action(action: dict[str, Any], case_id: int) -> str:
         st.session_state.workspace_analyst_notes = (existing + "\n" + note).strip()
         return "Added note to workspace analyst notes."
 
+    if action_type == "navigate_page":
+        page = action.get("navigate_page") or action.get("module_id") or "Packet Capture"
+        if page == "net_live_capture":
+            page = "Packet Capture"
+        st.session_state.nav_page = str(page)
+        if action.get("target"):
+            st.session_state.operation_target = action["target"]
+        st.rerun()
+
     if action_type == "try_common_web_ports":
         target = (action.get("target") or "").strip()
         if not target:

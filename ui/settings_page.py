@@ -64,6 +64,13 @@ def render_settings_page(metrics: dict) -> None:
             "Enabled" if summary["personal_lab_private_quick_scope"] else "Disabled",
         )
     st.caption(
+        f"Default assessment mode: **{summary.get('default_assessment_mode', 'assisted')}** · "
+        f"Passive autopilot: {'enabled' if summary.get('passive_autopilot_enabled') else 'disabled'} · "
+        f"Personal Lab autopilot: {'enabled' if summary.get('personal_lab_autopilot_enabled') else 'disabled'} · "
+        f"Playbook limits: {summary.get('max_playbook_steps', 10)} steps / "
+        f"{summary.get('max_active_checks', 3)} active / {summary.get('max_passive_checks', 8)} passive"
+    )
+    st.caption(
         "Set via environment variables or `config/overwatch.defaults.json`. "
         "See `.env.example` for variable names."
     )

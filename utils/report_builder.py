@@ -24,6 +24,7 @@ from database.db_setup import (
     list_observations,
     list_operations,
     list_batch_queue_runs,
+    list_batch_queue_items,
     list_relationships,
     normalize_finding_status,
 )
@@ -152,6 +153,7 @@ def _load_case_data(case_id: int, conn) -> dict[str, Any]:
         "operations": list_operations(case_id=case_id, conn=conn),
         "findings": list_findings(case_id=case_id, conn=conn),
         "batch_queue_runs": list_batch_queue_runs(case_id, limit=10, conn=conn),
+        "batch_queue_items": list_batch_queue_items(case_id, conn=conn),
         "evidence_items": list_evidence_items(case_id=case_id, conn=conn),
         "evidence_finding_links": list_evidence_finding_links(case_id=case_id, conn=conn),
     }
@@ -833,6 +835,75 @@ def build_case_report(
                 lines.append("")
             lines.append(
                 "_Limitation: banner and handshake metadata reflect point-in-time visible service information only._"
+            )
+            lines.append("")
+
+        batch_items = data.get("batch_queue_items") or []
+        autopilot_ops = [
+            op
+            for op in operations
+            if "autopilot" in str(op.get("run_mode_label") or "").lower()
+        ]
+        autopilot_queue_rows = []
+        for item in batch_items:
+            summary = item.get("summary") or ""
+            if "playbook/autopilot" in summary or item.get("autopilot_metadata"):
+                autopilot_queue_rows.append(item)
+            elif summary.strip().startswith("{"):
+                try:
+                    meta = json.loads(summary)
+                    if meta.get("source") == "playbook/autopilot":
+                        autopilot_queue_rows.append(item)
+                except (TypeError, json.JSONDecodeError):
+                    pass
+        if enabled("playbook_summary") and (autopilot_queue_rows or autopilot_ops):
+            lines.extend(["## Assessment Playbook Summary", ""])
+            lines.append(
+                "_Automated follow-up path using assessment playbooks. Active checks require explicit "
+                "Personal Lab or Client Engagement confirmation — autopilot does not bypass guardrails._"
+            )
+            lines.append("")
+            if autopilot_ops:
+                lines.append("### Modules run via autopilot")
+                lines.append("")
+                for op in autopilot_ops[:12]:
+                    lines.append(
+                        f"- {op.get('module_id')} on {op.get('target')} "
+                        f"({op.get('run_mode_label') or 'autopilot'}) — {op.get('status', 'completed')}"
+                    )
+                lines.append("")
+            if autopilot_queue_rows:
+                lines.append("### Queued / completed follow-up checks")
+                lines.append("")
+                for item in autopilot_queue_rows[:15]:
+                    reason = item.get("summary") or ""
+                    if reason.startswith("{"):
+                        try:
+                            meta = json.loads(reason)
+                            reason = meta.get("why_detail") or meta.get("reason") or reason
+                        except (TypeError, json.JSONDecodeError):
+                            pass
+                    lines.append(
+                        f"- {item.get('module_display_name') or item.get('module_id')} "
+                        f"→ {item.get('execution_target') or item.get('entity_value')} "
+                        f"({item.get('status')})"
+                    )
+                    if reason and not reason.startswith("{"):
+                        lines.append(f"  - Reason: {str(reason)[:200]}")
+                lines.append("")
+            blocked = [item for item in autopilot_queue_rows if item.get("status") == "blocked"]
+            if blocked:
+                lines.append("### Skipped / blocked checks")
+                lines.append("")
+                for item in blocked[:8]:
+                    lines.append(
+                        f"- {item.get('module_id')} on {item.get('execution_target')}: "
+                        f"{item.get('compatibility_status') or item.get('summary') or 'blocked'}"
+                    )
+                lines.append("")
+            lines.append(
+                "_Limitation: playbook follow-ups are suggestions based on observed results — "
+                "validate scope and ROE before external reporting._"
             )
             lines.append("")
 

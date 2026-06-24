@@ -2,6 +2,16 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.32.0 — Assessment Playbooks and Autopilot Queue
+
+- **Assessment playbooks** — nine guided packs (`utils/assessment_playbooks.py`) with starting modules, follow-up rules, safety levels, and stop conditions
+- **Follow-up rule engine** — `utils/autopilot_rules.py` inspects module results and proposes next checks using the shared next-actions schema
+- **Autopilot queue** — `utils/autopilot_queue.py` + `utils/autopilot_engine.py` with deduplication, passive/active split, and Batch Queue integration
+- **Assessment modes** — Manual, Assisted, Passive Autopilot, Personal Lab Autopilot (conservative defaults; full autopilot modes opt-in via settings)
+- **Assessment Workspace UI** — playbook selector, queue preview, explainability, Run queue / Stop / Resume, autopilot summary panel
+- **Reports** — Assessment Playbook Summary section with automated follow-up path, blocked/skipped reasons, and limitations
+- **Settings** — default assessment mode, autopilot enable flags, max steps/active/passive checks via environment variables
+
 ## v2.31.0 — SSH Configuration Review
 
 - **`infra_ssh_review`** — safe single-port SSH banner and visible handshake metadata review (no authentication)

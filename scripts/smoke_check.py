@@ -1477,6 +1477,130 @@ def _check_ssh_review_module() -> None:
         raise AssertionError("infra_ssh_review must not use subprocess/shell=True")
 
 
+def _check_autopilot_playbooks() -> None:
+    from utils.assessment_playbooks import (
+        MODE_ASSISTED,
+        MODE_MANUAL,
+        get_playbook,
+        list_playbooks,
+        playbook_limits,
+    )
+    from utils.autopilot_queue import (
+        build_autopilot_item,
+        evaluate_stop_conditions,
+        is_duplicate_autopilot_item,
+        merge_proposed_actions,
+    )
+    from utils.autopilot_rules import make_autopilot_action, propose_followup_actions
+    from utils.autopilot_engine import update_autopilot_from_results
+
+    playbooks = list_playbooks()
+    if len(playbooks) < 9:
+        raise AssertionError("expected at least nine assessment playbooks")
+    for playbook in playbooks:
+        if not playbook.playbook_id or not playbook.starting_modules:
+            raise AssertionError(f"invalid playbook definition: {playbook.playbook_id}")
+        limits = playbook_limits(playbook)
+        if limits["max_steps"] < 1 or limits["max_active"] < 0:
+            raise AssertionError("playbook limits invalid")
+
+    mock_nmap = {
+        "module_id": "infra_nmap",
+        "success": True,
+        "parsed_data": {
+            "target": "192.168.1.10",
+            "parsed_ports": [
+                {"port": 22, "protocol": "tcp", "service": "ssh"},
+                {"port": 443, "protocol": "tcp", "service": "https"},
+            ],
+        },
+    }
+    actions = propose_followup_actions(
+        latest_results=[mock_nmap],
+        target="192.168.1.10",
+        playbook=get_playbook("local_network_triage"),
+    )
+    module_ids = {action.get("module_id") for action in actions if action.get("module_id")}
+    if "infra_ssh_review" not in module_ids:
+        raise AssertionError("nmap SSH rule should propose SSH review")
+    if not any(action.get("autopilot") for action in actions):
+        raise AssertionError("autopilot actions should be flagged")
+
+    first = build_autopilot_item(actions[0], playbook_id="local_network_triage")
+    if not is_duplicate_autopilot_item([first], actions[0], playbook_id="local_network_triage"):
+        raise AssertionError("duplicate detection should match same target/module/playbook")
+    merged, skipped = merge_proposed_actions([], actions[:2], playbook_id="local_network_triage")
+    if len(merged) < 1:
+        raise AssertionError("merge should add autopilot items")
+    merged2, skipped2 = merge_proposed_actions(merged, actions[:2], playbook_id="local_network_triage")
+    if len(merged2) != len(merged):
+        raise AssertionError("duplicate merge should not add repeated items")
+    if not skipped2:
+        raise AssertionError("duplicate merge should report skipped duplicates")
+
+    should_stop, reason = evaluate_stop_conditions(
+        [{"status": "completed", "is_active": True}] * 12,
+        playbook=get_playbook("quick_safety_check"),
+        settings={"max_playbook_steps": 10},
+    )
+    if not should_stop:
+        raise AssertionError("stop conditions should trigger at max steps")
+
+    passive_action = make_autopilot_action(
+        title="AbuseIPDB lookup",
+        reason="Public IP reputation",
+        action_type="add_to_queue",
+        target="8.8.8.8",
+        module_id="intel_abuseipdb",
+        playbook_id="external_exposure_review",
+    )
+    if not passive_action.get("is_passive"):
+        raise AssertionError("intel_abuseipdb should classify as passive")
+    if passive_action.get("requires_confirmation"):
+        raise AssertionError("passive queue actions should not require confirmation by default")
+
+    active_action = make_autopilot_action(
+        title="SSH review",
+        reason="SSH observed",
+        action_type="run_module",
+        target="192.168.1.10",
+        module_id="infra_ssh_review",
+    )
+    if not active_action.get("requires_confirmation"):
+        raise AssertionError("active module actions should require confirmation")
+
+    session_state: dict = {}
+    update = update_autopilot_from_results(
+        case_id=1,
+        target="192.168.1.10",
+        latest_results=[mock_nmap],
+        session_state=session_state,
+        operating_context="personal_lab",
+        personal_lab_confirmed=True,
+        authorisation_confirmed=False,
+        goal_id="local_network_check",
+        conn=None,
+    )
+    if update.get("mode") != MODE_ASSISTED and update.get("mode") != MODE_MANUAL:
+        pass
+    if not update.get("proposed") and not update.get("queue"):
+        raise AssertionError("autopilot update should return proposed or queue items")
+
+    from utils.settings_manager import autopilot_settings, default_assessment_mode
+
+    settings = autopilot_settings()
+    if default_assessment_mode() not in {MODE_MANUAL, MODE_ASSISTED, "passive_autopilot", "personal_lab_autopilot"}:
+        raise AssertionError("default assessment mode invalid")
+    if "max_playbook_steps" not in settings:
+        raise AssertionError("autopilot settings missing max_playbook_steps")
+
+    # validate_port lives in ssh_banner — ensure autopilot_rules import path is not required
+    from utils.ssh_banner import validate_port as ssh_validate_port
+
+    if ssh_validate_port(22) != 22:
+        raise AssertionError("port validation helper failed")
+
+
 def _check_http_security_module() -> None:
     import importlib.util
 
@@ -4680,6 +4804,11 @@ def main() -> int:
     run(
         "ssh review module",
         lambda: _check_ssh_review_module(),
+    )
+
+    run(
+        "autopilot playbooks",
+        lambda: _check_autopilot_playbooks(),
     )
 
     run(

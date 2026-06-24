@@ -128,6 +128,16 @@ The **Domain Email Security Posture** module (`infra_email_security`) is **passi
 - Results are visible service observations only — not an authenticated configuration review
 - No API keys or secrets are used by this module
 
+## Assessment Playbooks and Autopilot Queue (v2.32)
+
+- **Playbooks** propose follow-up checks from module results using the same next-action schema as manual suggestions
+- **Manual / Assisted modes** are default-safe — Assisted builds a queue but does not auto-run active checks
+- **Passive Autopilot** (opt-in) may auto-run passive modules only when API keys, compatibility, and guardrails allow
+- **Personal Lab Autopilot** (opt-in) requires an explicit confirmation checkbox before safe active follow-ups on lab targets
+- **Client Engagement** autopilot respects scope, ROE, authorisation, and emergency stop — autopilot cannot bypass `check_module_execution_guardrails`
+- **Stop conditions** — max steps (default 10), max active (3), max passive (8), max failures (3), duplicate suppression, user stop, emergency stop
+- **No broad scans** — autopilot does not trigger range scans or silent active testing; Batch Queue limits still apply
+
 ## HTTP Security Header Review (v2.10)
 
 - **Module ID:** `infra_http_security` — controlled active assessment (`safe_active_check`)

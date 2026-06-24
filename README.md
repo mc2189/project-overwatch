@@ -1,6 +1,8 @@
-# Project Overwatch v2.31
+# Project Overwatch v2.32
 
 Project Overwatch is a **local** Python/Streamlit intelligence, OSINT, security testing and resilience advisory dashboard for **private internal use** supporting future client assessments.
+
+**v2.32** adds **Assessment Playbooks and Autopilot Queue** — guided follow-up checks from module results with Manual, Assisted, and opt-in autopilot modes; active checks never run silently; guardrails and stop conditions prevent runaway testing.
 
 **v2.31** adds **SSH Configuration Review** — a safe single-port SSH banner and visible handshake metadata review using Nmap/service context and one lightweight connection (no login, passwords, or private keys).
 
@@ -157,6 +159,29 @@ Personal Lab uses a separate scope table (not a fake client engagement). Tick **
 **Quick example:** Enter `example.com` → choose **Quick safety check** → review readiness → click **Run selected checks** → read the result card summary → click a **Next step** card to queue a follow-up.
 
 Raw module output and technical data remain available under result **Details** expanders.
+
+### Assessment playbooks and autopilot queue (v2.32)
+
+Overwatch can propose and queue follow-up checks based on module results — without removing manual control.
+
+| Mode | Behaviour |
+|------|-----------|
+| **Manual** | Suggestions only — you choose every action (default-safe) |
+| **Assisted** | Builds a follow-up queue; you confirm before running |
+| **Passive Autopilot** | Opt-in — may auto-run **passive** follow-ups when API keys and guardrails allow |
+| **Personal Lab Autopilot** | Opt-in — after one clear confirmation, may run safe **active** follow-ups on lab targets |
+
+**Playbooks** (Quick Safety Check, Website/Domain Posture, External Exposure, Local Network Triage, Packet Capture LAN Recon, Remote Access Review, Evidence File Review, Full Personal Lab Assessment, Client Executive Review) define starting modules, follow-up rules, and stop conditions.
+
+**Safety controls:**
+- Active checks are **never** run silently — Personal Lab or Client Engagement guardrails still apply
+- Duplicate target/module pairs are suppressed; max steps/active/passive checks and failure limits prevent loops
+- Emergency stop blocks autopilot; **Stop autopilot** pauses the queue
+- Autopilot uses the same executor preflight as normal runs and integrates with the existing Batch Queue
+
+**Example follow-ups:** Nmap finds SSH → SSH Configuration Review; web ports → HTTP/TLS/Web Stack; capture finds LAN devices → Nmap on selected IPs; metadata with GPS → privacy review note.
+
+Configure via `.env`: `PROJECT_OVERWATCH_DEFAULT_ASSESSMENT_MODE`, `PROJECT_OVERWATCH_ENABLE_PASSIVE_AUTOPILOT`, `PROJECT_OVERWATCH_MAX_PLAYBOOK_STEPS`, etc. (see `.env.example`).
 
 ### Actionable next steps and pivots (v2.14)
 
