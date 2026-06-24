@@ -9,7 +9,7 @@ import streamlit as st
 from database.db_setup import create_or_get_entity, get_db_conn, infer_entity_type, list_operations
 from database.personal_lab import add_personal_lab_scope_item, list_personal_lab_scope
 from ui.constants import IMPLEMENTED_MODULE_IDS
-from ui.entity_workspace import open_entity_in_workspace
+from ui.navigation import open_entity_in_workspace
 from utils.batch_queue import add_queue_item, sort_queue_items
 from utils.batch_queue_store import load_batch_queue, save_batch_queue
 from utils.engagement_guardrails import resolve_scope_match
@@ -29,6 +29,13 @@ def apply_workspace_action(action: dict[str, Any], case_id: int) -> str:
         module_id = action.get("module_id")
         if not module_id:
             return "No module specified for this action."
+        provenance = st.session_state.get("capture_provenance")
+        if provenance and action.get("target"):
+            st.session_state.capture_followup_pending = {
+                "sha256": provenance.get("sha256"),
+                "target": action.get("target"),
+                "module_id": module_id,
+            }
         for mid in IMPLEMENTED_MODULE_IDS:
             st.session_state[f"module_sel_{mid}"] = mid == module_id
         action_target = (action.get("target") or "").strip()
@@ -112,6 +119,13 @@ def apply_workspace_action(action: dict[str, Any], case_id: int) -> str:
 
     if action_type == "review_evidence":
         st.session_state.nav_page = "Evidence Locker"
+        st.rerun()
+
+    if action_type == "open_graph":
+        entity_id = action.get("entity_id")
+        if entity_id:
+            st.session_state.graph_focus_entity = int(entity_id)
+        st.session_state.nav_page = "Graph"
         st.rerun()
 
     if action_type == "create_report":

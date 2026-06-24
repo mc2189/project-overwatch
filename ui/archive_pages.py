@@ -225,7 +225,7 @@ def render_operations_page(case_id: int, metrics: dict[str, int]) -> None:
 
 
 def render_graph_page(case_id: int, metrics: dict[str, int]) -> None:
-    from ui.entity_workspace import open_entity_in_workspace
+    from ui.navigation import open_entity_in_workspace
     from utils.entity_pivot import get_entity_neighbour_ids
 
     st.title("Graph")

@@ -7,7 +7,7 @@ Copy and adapt when building a new collection module.
 Checklist before registering:
   1. Add a ModuleEntry to modules/module_registry.py (module_id, target types, mode, etc.)
   2. Implement run_<your_module>() returning a standard result via build_module_result()
-  3. Wire the executor in modules/executor.py (preflight + persistence hooks)
+  3. Register dispatch in modules/executor.py — see docs/MODULE_CONTRIBUTOR_CHECKLIST.md
   4. Add a findings interpreter if the module produces advisory findings
   5. Add evidence capture in utils/evidence_capture.py if raw artefacts should be stored
   6. Run: python scripts/smoke_check.py

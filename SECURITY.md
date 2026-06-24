@@ -64,6 +64,29 @@ The **URLhaus Malware URL Intelligence** module (`intel_urlhaus`) is **lookup-on
 - `ABUSECH_AUTH_KEY` (or `URLHAUS_AUTH_KEY` alias) must remain in `.env` only — never persisted in observations, findings, evidence, or reports
 - Malware download links (`urlhaus_download`) are stripped from summaries; raw JSON remains collapsed in the UI
 
+## PCAP Evidence Review boundary (v2.17)
+
+The **PCAP Evidence Review** module (`net_pcap_review`) is **supplied-capture-only**:
+
+- Allowed: local parsing of user-uploaded `.pcap` / `.pcapng` files with bounded metadata extraction
+- **Not allowed** in this module: live interface capture, wireless monitor mode, packet injection/sending, decryption/cracking, or password recovery
+- **Not displayed by default:** raw packet payloads, passwords, tokens, cookies, authorisation headers, session values, or credential-like strings
+- Sensitive-looking material detected during HTTP review is redacted before persistence; a cautious finding may be recorded
+- File hashes and summaries may be stored in observations, findings, evidence, and reports — not full payload dumps
+- Analysis reflects only the uploaded capture at review time — not proof of current network behaviour
+- Optional `pyshark` / `tshark` dependency: when missing, the module returns metadata-only partial results without crashing the app
+
+## Personal Lab Packet Capture boundary (v2.18)
+
+The **Personal Lab Packet Capture** module (`net_live_capture`) is **bounded local capture only**:
+
+- Allowed: short sequential captures on a user-selected interface using tshark or tcpdump with duration and packet caps
+- **Not allowed:** wireless monitor mode, packet injection/sending, continuous/background capture, client engagement requirements, or decryption
+- Requires a single Personal Lab confirmation checkbox — not formal ROE or scope forms
+- Captured files are stored in a controlled case folder; UI/reports show filename and SHA-256 only
+- Captured PCAPs are analysed via PCAP Evidence Review — same redaction and no raw payload display by default
+- Capture only on systems and networks you own or are authorised to monitor
+
 ## Domain Email Security Posture boundary (v2.7)
 
 The **Domain Email Security Posture** module (`infra_email_security`) is **passive DNS/policy review only**:

@@ -13,6 +13,7 @@ from database.db_setup import (
     get_db_conn,
     infer_entity_type,
     list_entities,
+    list_evidence_items,
     list_findings,
     list_observations,
     list_operations,
@@ -25,12 +26,16 @@ from database.db_setup import (
     update_entity_label,
     update_entity_notes,
 )
+from database.engagements import get_engagement_for_case
 from modules.executor import execute_module
 from modules.module_registry import get_module, is_executable
+from ui.compact_preflight import render_compact_preflight
 from ui.constants import MODULE_CARD_TITLES
-from ui.findings_page import render_finding_review_controls
+from ui.findings_page import render_finding_detail
+from ui.evidence_page import render_evidence_item_detail
 from ui.metrics import render_compact_metrics
-from ui.results import render_latest_results
+from ui.navigation import ENTITY_WORKSPACE_SELECTED_KEY, open_entity_in_workspace
+from ui.workspace_cards import render_mode_explainer
 from utils.entity_pivot import (
     build_pivot_recommendations,
     filter_operations_for_entity,
@@ -39,9 +44,17 @@ from utils.entity_pivot import (
 )
 from utils.module_compatibility import build_operation_plan, get_incompatible_reason
 from utils.nmap_options import PROFILE_STANDARD, default_options_for_profile
+from utils.operating_context import (
+    CLIENT_ENGAGEMENT,
+    PASSIVE_RESEARCH,
+    PERSONAL_LAB,
+    PERSONAL_LAB_CONFIRMATION_TEXT,
+    enrich_operation_plan_with_preflight,
+    list_operating_contexts,
+    operating_context_label,
+)
 
 PIVOT_QUEUE_KEY = "pivot_queue"
-ENTITY_WORKSPACE_SELECTED_KEY = "entity_workspace_selected_id"
 
 
 def _migrate_session_pivot_queue(case_id: int) -> None:
@@ -210,7 +223,14 @@ def _render_observations_section(observations: list[dict]) -> None:
                     st.code(observation["raw_output"])
 
 
-def _render_findings_section(case_id: int, findings: list[dict], entity: dict) -> None:
+def _render_findings_section(
+    case_id: int,
+    findings: list[dict],
+    entity: dict,
+    *,
+    entity_lookup: dict,
+    entity_values: dict[int, str],
+) -> None:
     st.subheader("Findings")
     if not findings:
         st.info("No findings linked to this entity.")
@@ -219,19 +239,52 @@ def _render_findings_section(case_id: int, findings: list[dict], entity: dict) -
         title = finding.get("title") or "Finding"
         severity = finding.get("severity") or "info"
         with st.expander(f"[{severity}] {title}", expanded=False):
-            st.markdown(f"**Module:** `{finding.get('module_id', '-')}`")
-            st.markdown(f"**Status:** {finding.get('status', 'open')}")
-            if finding.get("explanation"):
-                st.write(finding.get("explanation"))
-            if st.button(
-                "Add entity to pivot queue",
-                key=f"finding_queue_{finding['id']}",
-                width="stretch",
-            ):
-                if queue_entity_for_case(case_id, entity["id"]):
-                    st.success("Entity added to pivot queue.")
-                st.rerun()
-            render_finding_review_controls(finding)
+            render_finding_detail(
+                finding,
+                entity_lookup,
+                evidence_items=None,
+                entity_values=entity_values,
+            )
+
+
+def _render_evidence_section(case_id: int, entity_id: int) -> None:
+    st.subheader("Evidence artefacts")
+    conn = get_db_conn()
+    try:
+        items = list_evidence_items(case_id=case_id, entity_id=entity_id, conn=conn)
+    finally:
+        conn.close()
+    if not items:
+        st.info("No evidence artefacts linked to this entity.")
+        return
+    for item in items[:20]:
+        header = item.get("title") or "Evidence item"
+        module = item.get("module_id") or "unknown"
+        with st.expander(f"{header} · {module}", expanded=False):
+            render_evidence_item_detail(item)
+
+
+def _render_network_section(
+    case_id: int,
+    entity: dict,
+    outgoing: list[dict],
+    incoming: list[dict],
+    entity_lookup: dict,
+) -> None:
+    st.subheader("Network context")
+    graph_col1, graph_col2 = st.columns([1, 2])
+    with graph_col1:
+        if st.button("Open in Graph", key=f"entity_open_graph_{entity['id']}", width="stretch"):
+            st.session_state.graph_focus_entity = int(entity["id"])
+            st.session_state.nav_page = "Graph"
+            st.rerun()
+    with graph_col2:
+        st.caption("View neighbours and pivot from the case relationship graph.")
+    st.divider()
+    st.markdown("**Relationships from this entity**")
+    _render_relationship_rows(case_id, outgoing, entity_lookup, direction="from")
+    st.markdown("**Relationships to this entity**")
+    _render_relationship_rows(case_id, incoming, entity_lookup, direction="to")
 
 
 def _run_modules_for_entities(
@@ -239,6 +292,8 @@ def _run_modules_for_entities(
     entities_to_run: list[dict],
     module_ids: list[str],
     *,
+    operating_context: str,
+    personal_lab_confirmed: bool,
     authorisation_confirmed: bool,
 ) -> None:
     if not module_ids:
@@ -282,17 +337,30 @@ def _run_modules_for_entities(
                     module = get_module(module_id)
                     if module is None:
                         continue
-                    if module.requires_authorisation and not authorisation_confirmed:
+                    auth_ok = True
+                    if module.requires_authorisation:
+                        if operating_context == PASSIVE_RESEARCH:
+                            auth_ok = False
+                        elif operating_context == PERSONAL_LAB:
+                            auth_ok = personal_lab_confirmed
+                        elif operating_context == CLIENT_ENGAGEMENT:
+                            auth_ok = authorisation_confirmed
+                        else:
+                            auth_ok = authorisation_confirmed
+                    if not auth_ok:
                         continue
-                    options = {}
+                    options: dict = {
+                        "operating_context": operating_context,
+                        "personal_lab_confirmed": personal_lab_confirmed,
+                    }
                     if module_id == "infra_nmap":
-                        options = {"nmap_options": nmap_options}
+                        options["nmap_options"] = nmap_options
                     result = execute_module(
                         module_id,
                         target_value,
                         options=options,
                         db_context=conn,
-                        authorisation_confirmed=authorisation_confirmed,
+                        authorisation_confirmed=authorisation_confirmed or personal_lab_confirmed,
                         case_id=case_id,
                         entity_id=entity_row["id"],
                         run_mode_id="custom",
@@ -417,24 +485,91 @@ def _render_pivot_actions(
         for module_id in selected_ids
         if get_module(module_id) is not None
     )
-    authorisation_confirmed = False
-    if auth_required:
-        authorisation_confirmed = st.checkbox(
-            "I confirm I am authorised to run active checks against this target.",
-            key=f"entity_pivot_auth_{entity['id']}",
-        )
-        st.caption("Required for active modules such as Network Service Check.")
 
-    plan = build_operation_plan(
-        case_name=case_name,
-        case_id=case_id,
-        target=pivot["execution_target"],
-        selected_module_ids=selected_ids,
-        authorisation_confirmed=authorisation_confirmed,
-        run_mode_id="custom",
-        run_mode_label="Entity Workspace pivot",
-        recommendation_reason="Pivot from Entity Workspace",
-    )
+    st.session_state.setdefault("operating_context", PASSIVE_RESEARCH)
+    linked_engagement = get_engagement_for_case(case_id)
+    context_choices = [mode_id for mode_id, _ in list_operating_contexts()]
+    if not linked_engagement:
+        context_choices = [mode for mode in context_choices if mode != CLIENT_ENGAGEMENT]
+    operating_context = st.session_state.get("operating_context", PASSIVE_RESEARCH)
+    if operating_context not in context_choices:
+        operating_context = PASSIVE_RESEARCH
+
+    with st.container(border=True):
+        st.markdown("**Readiness**")
+        operating_context = st.radio(
+            "Operating context",
+            options=context_choices,
+            index=context_choices.index(operating_context),
+            format_func=operating_context_label,
+            key=f"entity_operating_context_{entity['id']}",
+            horizontal=True,
+        )
+        st.session_state.operating_context = operating_context
+        render_mode_explainer(operating_context)
+
+        personal_lab_confirmed = st.session_state.get("personal_lab_confirmed", False)
+        authorisation_confirmed = st.session_state.get("authorisation_confirmed", False)
+        if auth_required and operating_context == PERSONAL_LAB:
+            personal_lab_confirmed = st.checkbox(
+                PERSONAL_LAB_CONFIRMATION_TEXT,
+                value=personal_lab_confirmed,
+                key=f"entity_personal_lab_{entity['id']}",
+            )
+            st.session_state.personal_lab_confirmed = personal_lab_confirmed
+        elif auth_required and operating_context == CLIENT_ENGAGEMENT:
+            authorisation_confirmed = st.checkbox(
+                "I confirm authorisation under the linked client engagement.",
+                value=authorisation_confirmed,
+                key=f"entity_client_auth_{entity['id']}",
+            )
+            st.session_state.authorisation_confirmed = authorisation_confirmed
+
+        passive_count = sum(
+            1
+            for module_id in selected_ids
+            if (module := get_module(module_id)) and module.mode == "passive"
+        )
+        active_count = len(selected_ids) - passive_count
+
+        plan_conn = get_db_conn()
+        try:
+            plan = enrich_operation_plan_with_preflight(
+                build_operation_plan(
+                    case_name=case_name,
+                    case_id=case_id,
+                    target=pivot["execution_target"],
+                    selected_module_ids=selected_ids,
+                    authorisation_confirmed=(
+                        personal_lab_confirmed
+                        if operating_context == PERSONAL_LAB
+                        else authorisation_confirmed
+                    )
+                    if auth_required
+                    else True,
+                    run_mode_id="custom",
+                    run_mode_label="Entity Workspace pivot",
+                    recommendation_reason="Pivot from Entity Workspace",
+                ),
+                target=pivot["execution_target"],
+                case_id=case_id,
+                selected_module_ids=selected_ids,
+                operating_context=operating_context,
+                personal_lab_confirmed=personal_lab_confirmed,
+                authorisation_confirmed=authorisation_confirmed,
+                nmap_options=st.session_state.get("nmap_options", {}),
+                conn=plan_conn,
+            )
+        finally:
+            plan_conn.close()
+
+        preflight_status = render_compact_preflight(
+            operating_context=operating_context,
+            module_preflights=plan.get("module_preflights") or [],
+            selected_module_ids=selected_ids,
+            passive_count=passive_count,
+            active_count=active_count,
+        )
 
     if plan.get("incompatible_modules"):
         for line in plan["incompatible_modules"]:
@@ -445,8 +580,16 @@ def _render_pivot_actions(
         launch_blocked = "Select at least one compatible module."
     elif plan.get("incompatible_modules"):
         launch_blocked = "Remove incompatible modules from the selection."
-    elif auth_required and not authorisation_confirmed:
-        launch_blocked = "Confirm authorisation for active modules."
+    elif auth_required and operating_context == PASSIVE_RESEARCH:
+        launch_blocked = "Select Personal Lab or Client Engagement for active checks."
+    elif auth_required and operating_context == PERSONAL_LAB and not personal_lab_confirmed:
+        launch_blocked = "Confirm Personal Lab authorisation."
+    elif auth_required and operating_context == CLIENT_ENGAGEMENT and not authorisation_confirmed:
+        launch_blocked = "Confirm client engagement authorisation."
+    elif plan.get("engagement_blocked_modules") and operating_context != PERSONAL_LAB:
+        launch_blocked = "Resolve preflight items before running."
+    elif preflight_status.get("has_active") and not preflight_status.get("ready"):
+        launch_blocked = "Complete active check preflight before running."
 
     if st.button(
         "Run compatible modules",
@@ -459,6 +602,8 @@ def _render_pivot_actions(
             case_id,
             [entity],
             selected_ids,
+            operating_context=operating_context,
+            personal_lab_confirmed=personal_lab_confirmed,
             authorisation_confirmed=authorisation_confirmed,
         )
     if launch_blocked:
@@ -499,8 +644,8 @@ def render_entity_workspace_page(case_id: int, metrics: dict, *, case_name: str 
     st.title("Entity Workspace")
     render_compact_metrics(metrics)
     st.caption(
-        "Inspect entities from the active case, review linked intelligence, edit analyst notes, "
-        "and launch compatible follow-up modules."
+        "Entity-centric investigation shell — review findings, evidence, and network context, "
+        "then launch compatible follow-up modules."
     )
     st.divider()
 
@@ -511,13 +656,18 @@ def render_entity_workspace_page(case_id: int, metrics: dict, *, case_name: str 
         entities = list_entities(case_id=case_id, conn=conn)
         if not entities:
             st.info(
-                "No entities in this case yet. Run modules from **Run Operation** to populate entities."
+                "No entities in this case yet. Run modules from **Assessment Workspace** to populate entities."
             )
             return
 
         entity_by_id = {entity["id"]: entity for entity in entities}
         entity_lookup = _entity_lookup(entities)
         entities_by_value = _entities_by_value(entities)
+
+        entity_values = {
+            row["id"]: row.get("value") or row.get("label") or str(row["id"])
+            for row in entities
+        }
 
         if ENTITY_WORKSPACE_SELECTED_KEY in st.session_state:
             preselected = st.session_state.pop(ENTITY_WORKSPACE_SELECTED_KEY)
@@ -583,29 +733,40 @@ def render_entity_workspace_page(case_id: int, metrics: dict, *, case_name: str 
     finally:
         conn.close()
 
-    detail_tab, intel_tab, pivot_tab, queue_tab = st.tabs(
-        ["Details", "Related intelligence", "Pivot actions", "Pivot queue"]
+    overview_tab, findings_tab, evidence_tab, network_tab, pivot_tab, queue_tab = st.tabs(
+        ["Overview", "Findings", "Evidence", "Network", "Pivot", "Queue"]
     )
 
-    with detail_tab:
+    with overview_tab:
         _render_entity_details(entity)
         _render_entity_edit_form(entity)
-
-    with intel_tab:
-        _render_findings_section(case_id, findings, entity)
         st.divider()
+        st.subheader("Observations")
         _render_observations_section(observations)
-        st.divider()
-        st.subheader("Relationships from this entity")
-        _render_relationship_rows(case_id, outgoing, entity_lookup, direction="from")
-        st.subheader("Relationships to this entity")
-        _render_relationship_rows(case_id, incoming, entity_lookup, direction="to")
         st.divider()
         st.subheader("Operations")
         if related_operations:
             st.dataframe(pd.DataFrame(related_operations), width="stretch", hide_index=True)
         else:
             st.caption("No operations recorded for this entity value.")
+
+    with findings_tab:
+        _render_findings_section(
+            case_id,
+            findings,
+            entity,
+            entity_lookup=entity_lookup,
+            entity_values=entity_values,
+        )
+
+    with evidence_tab:
+        _render_evidence_section(case_id, selected_id)
+        st.divider()
+        st.subheader("Module observations")
+        _render_observations_section(observations)
+
+    with network_tab:
+        _render_network_section(case_id, entity, outgoing, incoming, entity_lookup)
 
     with pivot_tab:
         st.markdown(
@@ -623,11 +784,6 @@ def render_entity_workspace_page(case_id: int, metrics: dict, *, case_name: str 
     latest_target = st.session_state.get("latest_run_target", pivot["execution_target"])
     if latest_results:
         st.divider()
-        st.subheader("Latest results from Entity Workspace")
-        render_latest_results(latest_results, target=latest_target)
+        from ui.concise_results import render_workspace_results
 
-
-def open_entity_in_workspace(entity_id: int) -> None:
-    """Navigate to Entity Workspace with a pre-selected entity."""
-    st.session_state[ENTITY_WORKSPACE_SELECTED_KEY] = entity_id
-    st.session_state.nav_page = "Entity Workspace"
+        render_workspace_results(latest_results, target=latest_target, case_id=case_id)

@@ -21,8 +21,10 @@ from ui.findings_page import render_findings_page
 from ui.metrics import load_case_metrics
 from ui.roadmap import render_roadmap_page
 from ui.engagements_page import render_engagements_page
+from ui.packet_capture_page import render_packet_capture_page
 from ui.run_operation import render_run_operation_page
 from ui.sidebar import render_sidebar
+from utils.case_session import ensure_case_session
 from utils.local_auth import render_local_auth_gate
 from utils.report_scheduler import maybe_run_scheduled_exports
 
@@ -37,7 +39,9 @@ if "case_id" not in st.session_state:
     st.session_state.case_id = get_or_create_default_case()["id"]
 
 if "nav_page" not in st.session_state:
-    st.session_state.nav_page = "Run Operation"
+    st.session_state.nav_page = "Assessment Workspace"
+
+ensure_case_session(st.session_state.case_id)
 
 render_local_auth_gate()
 
@@ -62,9 +66,13 @@ with st.sidebar:
     nav_page = render_sidebar()
 
 current_case = get_current_case()
-metrics = load_case_metrics(st.session_state.case_id)
+metrics = (
+    {}
+    if nav_page in {"Settings", "Roadmap"}
+    else load_case_metrics(st.session_state.case_id)
+)
 
-if nav_page == "Run Operation":
+if nav_page in {"Assessment Workspace", "Run Operation"}:
     render_run_operation_page(current_case, metrics)
 elif nav_page == "Client Engagements":
     render_engagements_page(current_case)
@@ -84,6 +92,8 @@ elif nav_page == "Observations":
     render_observations_page(st.session_state.case_id, metrics)
 elif nav_page == "Evidence Locker":
     render_evidence_page(st.session_state.case_id, metrics)
+elif nav_page == "Packet Capture":
+    render_packet_capture_page(current_case)
 elif nav_page == "Operations":
     render_operations_page(st.session_state.case_id, metrics)
 elif nav_page == "Graph":

@@ -119,6 +119,8 @@ def render_finding_detail(
     finding: dict,
     entity_lookup: dict,
     evidence_items: list[dict] | None = None,
+    *,
+    entity_values: dict[int, str] | None = None,
 ) -> None:
     entity_label = entity_lookup.get(finding.get("entity_id"), finding.get("entity_id") or "-")
     st.markdown(f"**Title:** {finding.get('title', 'Finding')}")
@@ -162,6 +164,36 @@ def render_finding_detail(
     if finding.get("analyst_notes"):
         st.markdown("**Analyst notes**")
         st.write(finding.get("analyst_notes"))
+
+    entity_value = None
+    entity_id = finding.get("entity_id")
+    if entity_id:
+        if entity_values:
+            entity_value = entity_values.get(int(entity_id))
+        elif entity_lookup:
+            entity_value = entity_lookup.get(entity_id)
+
+    if entity_id or finding.get("module_id"):
+        from ui.action_cards import render_action_cards
+        from utils.next_actions import suggest_finding_detail_actions
+
+        actions = suggest_finding_detail_actions(
+            finding,
+            case_id=st.session_state.get("case_id", 0),
+            entity_value=entity_value if isinstance(entity_value, str) else None,
+            operating_context=st.session_state.get("operating_context", "passive_research"),
+            personal_lab_confirmed=bool(st.session_state.get("personal_lab_confirmed")),
+            authorisation_confirmed=bool(st.session_state.get("authorisation_confirmed")),
+        )
+        if actions:
+            render_action_cards(
+                actions,
+                case_id=st.session_state.get("case_id", 0),
+                title="Next steps",
+                limit=3,
+                key_prefix=f"finding_detail_{finding['id']}",
+            )
+
     render_finding_review_controls(finding)
 
 
@@ -176,23 +208,44 @@ def render_findings_page(case_id: int, metrics: dict) -> None:
         entity["id"]: entity.get("label") or entity.get("value", entity["id"])
         for entity in entities
     }
-    findings = list_findings(case_id=case_id, conn=conn)
-    linked_evidence_map = {
-        int(finding["id"]): list_evidence_for_finding(finding, conn=conn) for finding in findings
+    entity_values = {
+        entity["id"]: entity.get("value") or entity.get("label") or str(entity["id"])
+        for entity in entities
     }
+    findings = list_findings(case_id=case_id, conn=conn)
     conn.close()
 
-    def linked_evidence_for_finding(finding: dict) -> list[dict]:
-        return linked_evidence_map.get(int(finding["id"]), [])
+    focus_id = st.session_state.get("findings_focus_id")
+    evidence_cache_key = f"finding_evidence_cache_{case_id}"
+    evidence_cache: dict[int, list[dict]] = st.session_state.setdefault(evidence_cache_key, {})
+
+    def linked_evidence_for_finding(finding: dict, *, load: bool = False) -> list[dict]:
+        finding_id = int(finding["id"])
+        if load or finding_id in evidence_cache:
+            if finding_id not in evidence_cache:
+                load_conn = get_db_conn()
+                try:
+                    evidence_cache[finding_id] = list_evidence_for_finding(finding, conn=load_conn)
+                finally:
+                    load_conn.close()
+            return evidence_cache[finding_id]
+        return []
 
     st.caption(
         f"Showing findings for case #{case_id}. "
         "Findings are analyst aids, not final proof of risk."
     )
 
-    focus_id = st.session_state.pop("findings_focus_id", None)
     if focus_id is not None:
-        st.info(f"Focused finding #{focus_id} from workspace action.")
+        focus_row = next((row for row in findings if int(row["id"]) == int(focus_id)), None)
+        if focus_row:
+            st.info(
+                f"Focused: **{focus_row.get('title', 'Finding')}** "
+                f"({effective_finding_severity(focus_row)}) — scroll to details below."
+            )
+        else:
+            st.warning(f"Finding #{focus_id} is not in this case or was removed.")
+            st.session_state.pop("findings_focus_id", None)
 
     module_options = sorted({finding.get("module_id") for finding in findings if finding.get("module_id")})
     filter_col1, filter_col2, filter_col3 = st.columns(3)
@@ -269,12 +322,28 @@ def render_findings_page(case_id: int, metrics: dict) -> None:
         ]
     if evidence_link_filter == "With linked evidence":
         filtered_findings = [
-            finding for finding in filtered_findings if linked_evidence_for_finding(finding)
+            finding
+            for finding in filtered_findings
+            if linked_evidence_for_finding(finding, load=True)
         ]
     elif evidence_link_filter == "Without linked evidence":
         filtered_findings = [
-            finding for finding in filtered_findings if not linked_evidence_for_finding(finding)
+            finding
+            for finding in filtered_findings
+            if not linked_evidence_for_finding(finding, load=True)
         ]
+
+    if focus_id is not None:
+        focus_int = int(focus_id)
+        if any(int(row["id"]) == focus_int for row in filtered_findings):
+            filtered_findings = sorted(
+                filtered_findings,
+                key=lambda row: 0 if int(row["id"]) == focus_int else 1,
+            )
+        else:
+            focus_row = next((row for row in findings if int(row["id"]) == focus_int), None)
+            if focus_row is not None:
+                filtered_findings = [focus_row, *filtered_findings]
 
     if not filtered_findings:
         st.info("No findings match the current filters.")
@@ -315,5 +384,14 @@ def render_findings_page(case_id: int, metrics: dict) -> None:
                 f"[{effective_finding_severity(finding).upper()}] {finding.get('title', 'Finding')} · "
                 f"{finding.get('module_id')} · {entity_label} · {status_text}"
             )
-            with st.expander(expander_label, expanded=False):
-                render_finding_detail(finding, entity_lookup, linked_evidence_for_finding(finding))
+            is_focused = focus_id is not None and int(finding["id"]) == int(focus_id)
+            with st.expander(expander_label, expanded=is_focused):
+                render_finding_detail(
+                    finding,
+                    entity_lookup,
+                    linked_evidence_for_finding(finding, load=is_focused),
+                    entity_values=entity_values,
+                )
+
+    if focus_id is not None:
+        st.session_state.pop("findings_focus_id", None)

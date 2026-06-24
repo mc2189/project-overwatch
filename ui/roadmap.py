@@ -12,8 +12,8 @@ ROADMAP_SECTIONS: tuple[dict[str, object], ...] = (
     {
         "title": "Active now",
         "description": (
-            "Implemented modules available on Run Operation when compatible with the target. "
-            "Choose an operating context on Run Operation: **Passive Research** for passive OSINT, "
+            "Implemented modules available on Assessment Workspace when compatible with the target. "
+            "Choose an operating context on Assessment Workspace: **Passive Research** for passive OSINT, "
             "**Personal Lab** for self-owned / authorised lab testing with confirmation, or "
             "**Client Engagement** for formal client work with full scope and ROE controls."
         ),
@@ -31,6 +31,21 @@ ROADMAP_SECTIONS: tuple[dict[str, object], ...] = (
             "infra_nmap",
             "infra_tls_review",
             "infra_http_security",
+            "net_pcap_review",
+            "net_live_capture",
+        ),
+    },
+    {
+        "title": "Future network capture modules",
+        "description": (
+            "Planned live-capture and wireless review capabilities requiring Personal Lab or Client Engagement "
+            "context, explicit authorisation, and additional safety design."
+        ),
+        "bullets": (
+            "Bounded Personal Lab Packet Capture — active now (Packet Capture page)",
+            "Wi-Fi Environment Survey — future, higher caution",
+            "Wireless Security Review / monitor mode — future, not enabled",
+            "Packet Decryption / Password Recovery — not enabled by default",
         ),
     },
     {

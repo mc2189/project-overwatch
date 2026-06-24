@@ -20,6 +20,7 @@ GOAL_EXTERNAL_EXPOSURE = "external_exposure_review"
 GOAL_THREAT_REPUTATION = "threat_reputation_review"
 GOAL_LOCAL_NETWORK = "local_network_check"
 GOAL_EVIDENCE_REVIEW = "uploaded_evidence_review"
+GOAL_LIVE_CAPTURE = "live_packet_capture"
 GOAL_FULL_CLIENT = "full_client_assessment"
 GOAL_CUSTOM = "custom_module_selection"
 
@@ -31,6 +32,7 @@ GOAL_ORDER: tuple[str, ...] = (
     GOAL_THREAT_REPUTATION,
     GOAL_LOCAL_NETWORK,
     GOAL_EVIDENCE_REVIEW,
+    GOAL_LIVE_CAPTURE,
     GOAL_FULL_CLIENT,
     GOAL_CUSTOM,
 )
@@ -43,6 +45,7 @@ GOAL_LABELS: dict[str, str] = {
     GOAL_THREAT_REPUTATION: "Threat reputation review",
     GOAL_LOCAL_NETWORK: "Local network check",
     GOAL_EVIDENCE_REVIEW: "Uploaded evidence review",
+    GOAL_LIVE_CAPTURE: "Live packet capture",
     GOAL_FULL_CLIENT: "Full client-style assessment",
     GOAL_CUSTOM: "Custom module selection",
 }
@@ -54,7 +57,8 @@ GOAL_DESCRIPTIONS: dict[str, str] = {
     GOAL_EXTERNAL_EXPOSURE: "Internet exposure context from Shodan, subdomains, and supporting passive checks.",
     GOAL_THREAT_REPUTATION: "Third-party reputation and malware URL intelligence where API keys allow.",
     GOAL_LOCAL_NETWORK: "Conservative network service check for a private or local IPv4 address.",
-    GOAL_EVIDENCE_REVIEW: "Review uploaded artefacts in Evidence Locker — no live target checks.",
+    GOAL_EVIDENCE_REVIEW: "Upload and review a .pcap or .pcapng packet capture locally — no live network capture.",
+    GOAL_LIVE_CAPTURE: "Start a bounded Personal Lab packet capture from the Packet Capture page — no client engagement required.",
     GOAL_FULL_CLIENT: "Broader passive footprint plus optional active TLS/HTTP checks when authorised.",
     GOAL_CUSTOM: "Choose any compatible module manually (advanced).",
 }
@@ -73,7 +77,7 @@ _GOAL_MODULE_SETS: dict[str, tuple[str, ...]] = {
         "infra_domain_intel",
     ),
     GOAL_EXTERNAL_EXPOSURE: (
-        "infra_shodan",
+        "intel_shodan",
         "infra_cert_subdomain",
         "infra_domain_intel",
         "infra_whois_rdap",
@@ -115,6 +119,9 @@ SUGGESTED_GOALS_BY_TARGET: dict[str, tuple[str, ...]] = {
         GOAL_QUICK_SAFETY,
     ),
     "email": (GOAL_EMAIL_SPOOFING, GOAL_QUICK_SAFETY),
+    "pcap": (GOAL_EVIDENCE_REVIEW,),
+    "pcapng": (GOAL_EVIDENCE_REVIEW,),
+    "file": (GOAL_EVIDENCE_REVIEW,),
     "unknown": (GOAL_QUICK_SAFETY,),
 }
 
@@ -174,7 +181,9 @@ def get_modules_for_goal(
 ) -> list[str]:
     """Return recommended module IDs for an assessment goal and target."""
     if goal_id == GOAL_EVIDENCE_REVIEW:
-        return []
+        return ["net_pcap_review"]
+    if goal_id == GOAL_LIVE_CAPTURE:
+        return ["net_live_capture"]
     if goal_id == GOAL_CUSTOM:
         return []
     run_mode = GOAL_TO_RUN_MODE.get(goal_id)

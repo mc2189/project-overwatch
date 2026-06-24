@@ -384,6 +384,71 @@ def render_result_summary_tab(result: dict) -> None:
         if api.get("error") and not parsed_data.get("private_local_ip"):
             st.caption(f"URLhaus note: {api['error']}")
 
+    if result["module_id"] == "net_pcap_review" and parsed_data:
+        st.caption(
+            "Local review of the supplied capture only — not live network capture. "
+            "Raw packet payloads are not shown by default."
+        )
+        st.markdown(f"**File:** {parsed_data.get('filename') or '—'}")
+        if parsed_data.get("sha256"):
+            st.markdown(f"**SHA-256:** `{parsed_data['sha256']}`")
+        if parsed_data.get("file_size_bytes") is not None:
+            st.markdown(f"**Size:** {parsed_data['file_size_bytes']:,} bytes")
+        if parsed_data.get("packets_analysed") is not None:
+            st.markdown(f"**Packets analysed:** {parsed_data['packets_analysed']:,}")
+        if parsed_data.get("duration_seconds") is not None:
+            st.markdown(f"**Duration:** {parsed_data['duration_seconds']}s")
+        if parsed_data.get("protocols"):
+            proto_text = ", ".join(
+                str(item.get("protocol", "")).upper()
+                for item in parsed_data["protocols"][:10]
+                if item.get("protocol")
+            )
+            st.markdown(f"**Protocols observed:** {proto_text or '—'}")
+        if parsed_data.get("cleartext_protocols"):
+            st.markdown(
+                f"**Cleartext indicators:** {', '.join(parsed_data['cleartext_protocols'])}"
+            )
+        if not parsed_data.get("parser_available"):
+            st.info(
+                "Deep parsing unavailable — install pyshark and Wireshark/tshark for full analysis."
+            )
+        if parsed_data.get("top_source_ips"):
+            with st.expander("Top talkers (source IPs)", expanded=False):
+                st.dataframe(
+                    pd.DataFrame(parsed_data["top_source_ips"]),
+                    width="stretch",
+                    hide_index=True,
+                )
+        if parsed_data.get("top_conversations"):
+            with st.expander("Top conversations", expanded=False):
+                st.dataframe(
+                    pd.DataFrame(parsed_data["top_conversations"]),
+                    width="stretch",
+                    hide_index=True,
+                )
+        if parsed_data.get("dns_queries"):
+            with st.expander("DNS details", expanded=False):
+                st.dataframe(
+                    pd.DataFrame(parsed_data["dns_queries"]),
+                    width="stretch",
+                    hide_index=True,
+                )
+        if parsed_data.get("http_entries"):
+            with st.expander("HTTP details", expanded=False):
+                st.dataframe(
+                    pd.DataFrame(parsed_data["http_entries"]),
+                    width="stretch",
+                    hide_index=True,
+                )
+        if parsed_data.get("tls_sni"):
+            with st.expander("TLS / SNI details", expanded=False):
+                st.dataframe(
+                    pd.DataFrame(parsed_data["tls_sni"]),
+                    width="stretch",
+                    hide_index=True,
+                )
+
     if result["module_id"] == "infra_website_metadata" and parsed_data:
         homepage = parsed_data.get("homepage") or {}
         if homepage.get("page_title"):
@@ -801,6 +866,10 @@ def render_result_structured_tab(result: dict) -> None:
         parsed_data = {key: value for key, value in parsed_data.items() if key != "raw_response"}
     if result["module_id"] == "intel_urlhaus" and isinstance(parsed_data, dict):
         parsed_data = {key: value for key, value in parsed_data.items() if key != "raw_response"}
+    if result["module_id"] == "net_pcap_review" and isinstance(parsed_data, dict):
+        from utils.security import redact_secrets_from_dict
+
+        parsed_data = redact_secrets_from_dict(parsed_data)
     payload = {
         "selected_options": result.get("selected_options"),
         "parsed_data": parsed_data,

@@ -166,6 +166,20 @@ MODULE_EVIDENCE_DEFAULTS: dict[str, dict[str, Any]] = {
         "reliability": RELIABILITY_MEDIUM,
         "collection_method": "api_malware_url_lookup",
     },
+    "net_pcap_review": {
+        "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
+        "source_name": "uploaded_pcap",
+        "source_url": None,
+        "reliability": RELIABILITY_HIGH,
+        "collection_method": "local_packet_capture_review",
+    },
+    "net_live_capture": {
+        "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
+        "source_name": "personal_lab_packet_capture",
+        "source_url": None,
+        "reliability": RELIABILITY_HIGH,
+        "collection_method": "controlled_live_packet_capture",
+    },
 }
 
 RELATIONSHIP_EVIDENCE_DEFAULTS: dict[tuple[str, str], dict[str, Any]] = {
@@ -272,6 +286,18 @@ RELATIONSHIP_EVIDENCE_DEFAULTS: dict[tuple[str, str], dict[str, Any]] = {
     ("intel_urlhaus", "associated_with"): {
         "evidence_type": EVIDENCE_THIRD_PARTY_SOURCE,
         "reliability": RELIABILITY_MEDIUM,
+    },
+    ("net_pcap_review", "communicated_with"): {
+        "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
+        "reliability": RELIABILITY_HIGH,
+    },
+    ("net_pcap_review", "queried_domain"): {
+        "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
+        "reliability": RELIABILITY_HIGH,
+    },
+    ("net_pcap_review", "connected_to_service"): {
+        "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
+        "reliability": RELIABILITY_HIGH,
     },
 }
 

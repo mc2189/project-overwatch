@@ -2451,6 +2451,386 @@ def _check_shodan_module() -> None:
         raise AssertionError("shodan URL key redaction failed in smoke path")
 
 
+def _check_pcap_module() -> None:
+    import importlib.util
+    from pathlib import Path
+
+    registry = __import__(
+        "modules.module_registry",
+        fromlist=["get_module", "is_executable"],
+    )
+    module = registry.get_module("net_pcap_review")
+    if module is None or not registry.is_executable(module):
+        raise AssertionError("net_pcap_review should be registered and executable")
+
+    module_path = Path(__file__).resolve().parent.parent / "modules" / "5_network_analysis" / "net_pcap_review.py"
+    spec = importlib.util.spec_from_file_location("net_pcap_review_smoke", module_path)
+    if spec is None or spec.loader is None:
+        raise AssertionError("could not load net_pcap_review module")
+    pcap_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pcap_mod)
+
+    blocked = pcap_mod.run_pcap_review(
+        "notes.txt",
+        options={"pcap_filename": "notes.txt"},
+    )
+    if blocked.get("status") != "blocked":
+        raise AssertionError("unsupported file type should return blocked status")
+    if blocked.get("success"):
+        raise AssertionError("unsupported file type should not succeed")
+
+    mock_parsed = {
+        "filename": "lab.pcap",
+        "parser_available": True,
+        "packets_analysed": 2400,
+        "packet_count": 2400,
+        "duration_seconds": 240,
+        "protocols": [{"protocol": "dns", "count": 10}, {"protocol": "tls", "count": 50}],
+        "dns_queries": [{"query": "example.com"}],
+        "http_entries": [{"host": "example.com", "method": "GET", "status_code": "200"}],
+        "tls_sni": [{"server_name": "example.com", "version": ""}],
+        "cleartext_protocols": ["http"],
+        "entities_preview": {"ips": ["10.0.0.1"], "domains": ["example.com"], "services": []},
+    }
+    mock_result = pcap_mod.run_pcap_review(
+        "lab.pcap",
+        options={"mock_parsed_data": mock_parsed},
+    )
+    if not mock_result.get("success"):
+        raise AssertionError("mock PCAP review should succeed")
+    if "PCAP analysed" not in (mock_result.get("summary") or ""):
+        raise AssertionError("mock PCAP summary missing analysed wording")
+
+    interpreter = __import__(
+        "utils.pcap_interpreter",
+        fromlist=["interpret_pcap_results"],
+    )
+    findings = interpreter.interpret_pcap_results(mock_parsed)
+    if not findings:
+        raise AssertionError("pcap interpreter should return findings")
+
+    findings_registry = __import__(
+        "utils.findings_registry",
+        fromlist=["interpret_module_findings", "module_has_findings_pipeline"],
+    )
+    if not findings_registry.module_has_findings_pipeline("net_pcap_review"):
+        raise AssertionError("net_pcap_review should have findings pipeline")
+    pipeline_findings = findings_registry.interpret_module_findings("net_pcap_review", mock_parsed)
+    if not pipeline_findings:
+        raise AssertionError("findings pipeline returned no pcap findings")
+
+    executor = __import__(
+        "modules.executor",
+        fromlist=["is_runtime_ready", "execute_module"],
+    )
+    if not executor.is_runtime_ready("net_pcap_review"):
+        raise AssertionError("net_pcap_review runtime should be ready")
+
+    partial = pcap_mod.run_pcap_review(
+        "lab.pcap",
+        options={
+            "pcap_filename": "lab.pcap",
+            "mock_parsed_data": {
+                "filename": "lab.pcap",
+                "parser_available": False,
+                "sha256": "abc",
+                "file_size_bytes": 12,
+            },
+            "mock_status": "partial",
+        },
+    )
+    if partial.get("success") is not True:
+        raise AssertionError("parser-missing mock should still return success partial metadata")
+    summary_lower = (partial.get("summary") or "").lower()
+    if "tshark" not in summary_lower and "pyshark" not in summary_lower:
+        raise AssertionError("parser-missing summary should mention tshark or pyshark")
+
+    pcap_analysis = __import__(
+        "utils.pcap_analysis",
+        fromlist=["analyze_pcap_file", "parser_available"],
+    )
+    if pcap_analysis.parser_available():
+        import tempfile
+
+        empty_pcap = tempfile.NamedTemporaryFile(suffix=".pcap", delete=False)
+        empty_pcap.write(b"")
+        empty_pcap.close()
+        try:
+            fallback = pcap_analysis.analyze_pcap_file(
+                Path(empty_pcap.name),
+                filename="empty.pcap",
+                file_hash="0" * 64,
+                file_size=0,
+            )
+            if fallback.get("status") not in {"partial", "error", "completed", "completed_with_warnings"}:
+                raise AssertionError("analyze_pcap_file should return a structured status")
+        finally:
+            Path(empty_pcap.name).unlink(missing_ok=True)
+
+
+def _check_live_capture_module() -> None:
+    import importlib.util
+    from pathlib import Path
+
+    registry = __import__(
+        "modules.module_registry",
+        fromlist=["get_module", "is_executable"],
+    )
+    module = registry.get_module("net_live_capture")
+    if module is None or not registry.is_executable(module):
+        raise AssertionError("net_live_capture should be registered and executable")
+    if module.mode != "local-capture":
+        raise AssertionError("net_live_capture mode should be local-capture")
+
+    live_capture_utils = __import__(
+        "utils.live_capture",
+        fromlist=[
+            "build_tshark_command",
+            "capture_backend_status",
+            "validate_duration",
+            "validate_packet_cap",
+            "build_bpf_filter",
+        ],
+    )
+    status = live_capture_utils.capture_backend_status()
+    if not isinstance(status.get("tshark_available"), bool):
+        raise AssertionError("capture_backend_status missing tshark flag")
+
+    duration, duration_err = live_capture_utils.validate_duration(30)
+    if duration != 30 or duration_err:
+        raise AssertionError("validate_duration(30) should pass")
+    capped_duration, _ = live_capture_utils.validate_duration(999)
+    if capped_duration != 120:
+        raise AssertionError("validate_duration should cap at 120")
+
+    packet_cap, cap_err = live_capture_utils.validate_packet_cap(1000)
+    if packet_cap != 1000 or cap_err:
+        raise AssertionError("validate_packet_cap(1000) should pass")
+    capped_cap, _ = live_capture_utils.validate_packet_cap(99999)
+    if capped_cap != 10000:
+        raise AssertionError("validate_packet_cap should cap at 10000")
+
+    bpf, bpf_err = live_capture_utils.build_bpf_filter("web_traffic")
+    if bpf_err or "tcp port 80" not in bpf:
+        raise AssertionError("web_traffic bpf preset failed")
+    _, host_err = live_capture_utils.build_bpf_filter("target_host", target_host="")
+    if not host_err:
+        raise AssertionError("target_host without value should error")
+
+    cmd = live_capture_utils.build_tshark_command(
+        interface_id="en0",
+        output_path=Path("/tmp/smoke_capture.pcap"),
+        duration_seconds=30,
+        packet_cap=1000,
+        bpf_filter="port 53",
+    )
+    if "shell" in " ".join(cmd):
+        pass
+    if cmd[0] != "tshark" or "-i" not in cmd:
+        raise AssertionError("tshark command malformed")
+
+    module_path = PROJECT_ROOT / "modules" / "5_network_analysis" / "net_live_capture.py"
+    spec = importlib.util.spec_from_file_location("net_live_capture_smoke", module_path)
+    if spec is None or spec.loader is None:
+        raise AssertionError("could not load net_live_capture module")
+    live_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(live_mod)
+
+    blocked = live_mod.run_live_capture(
+        "live-capture:en0",
+        options={"personal_lab_confirmed": False},
+    )
+    if blocked.get("success"):
+        raise AssertionError("live capture without confirmation should not succeed")
+
+    dry = live_mod.run_live_capture(
+        "live-capture:en0",
+        options={
+            "personal_lab_confirmed": True,
+            "dry_run": True,
+            "interface_id": "en0",
+            "interfaces": [{"id": "en0", "label": "en0"}],
+        },
+    )
+    if not dry.get("success") or not (dry.get("parsed_data") or {}).get("dry_run"):
+        raise AssertionError("dry_run should succeed without real capture")
+    if "&&" in (dry.get("raw_output") or ""):
+        raise AssertionError("command should not use shell chaining")
+
+    mock = {
+        "capture_success": True,
+        "analysis_success": True,
+        "capture": {
+            "backend": "tshark",
+            "interface": "en0",
+            "duration_seconds": 30,
+            "packet_cap": 100,
+            "filename": "lab.pcap",
+            "sha256": "abc",
+        },
+        "pcap_review": {
+            "parsed_data": {"packets_analysed": 100, "parser_available": True, "protocols": []},
+        },
+    }
+    mock_result = live_mod.run_live_capture(
+        "live-capture:en0",
+        options={"mock_capture_result": mock},
+    )
+    if not mock_result.get("success"):
+        raise AssertionError("mock live capture should succeed")
+
+    findings_registry = __import__(
+        "utils.findings_registry",
+        fromlist=["interpret_module_findings", "module_has_findings_pipeline"],
+    )
+    if not findings_registry.module_has_findings_pipeline("net_live_capture"):
+        raise AssertionError("net_live_capture should have findings pipeline")
+
+    executor = __import__("modules.executor", fromlist=["is_runtime_ready"])
+    if not executor.is_runtime_ready("net_live_capture"):
+        raise AssertionError("net_live_capture runtime should be ready")
+
+    from utils.pcap_triage import actionable_cleartext, build_triage_report, rank_investigation_entities
+    from utils.pcap_fingerprint import build_capture_fingerprint, diff_fingerprints
+
+    sample_parsed = {
+        "filename": "lab.pcap",
+        "packets_analysed": 500,
+        "duration_seconds": 20,
+        "cleartext_protocols": ["dns"],
+        "protocols": [{"protocol": "tls", "count": 400}, {"protocol": "quic", "count": 80}],
+        "entities_preview": {"domains": ["api.example.com"], "ips": ["192.168.1.10", "8.8.8.8"], "services": []},
+        "top_source_ips": [{"ip": "192.168.1.10", "packets": 200}, {"ip": "8.8.8.8", "packets": 50}],
+        "top_destination_ips": [{"ip": "192.168.1.10", "packets": 200}],
+        "tls_sni": [{"server_name": "api.example.com"}],
+    }
+    if actionable_cleartext(["dns"]):
+        raise AssertionError("dns alone should not be actionable cleartext")
+    triage = build_triage_report(sample_parsed, workspace_target="192.168.1.10")
+    if not triage.get("narrative"):
+        raise AssertionError("triage should produce narrative")
+    ranked = rank_investigation_entities(sample_parsed)
+    if not ranked:
+        raise AssertionError("rank_investigation_entities should return items")
+    fp1 = build_capture_fingerprint(sample_parsed)
+    fp2 = build_capture_fingerprint({**sample_parsed, "entities_preview": {"domains": ["new.example.com"], "ips": [], "services": []}})
+    delta = diff_fingerprints(fp2, fp1)
+    if "new.example.com" not in (delta.get("new_domains") or []):
+        raise AssertionError("fingerprint diff should detect new domain")
+
+    from utils.pcap_triage import bucket_ip_talkers, build_network_picture, resolve_org_bucket
+
+    if resolve_org_bucket("142.250.129.132") != "Google":
+        raise AssertionError("Google IP should bucket as Google")
+    buckets = bucket_ip_talkers(sample_parsed)
+    if not buckets:
+        raise AssertionError("bucket_ip_talkers should return buckets")
+    picture = build_network_picture(sample_parsed, ranked=ranked, encrypted_ratio=0.9)
+    if "one_liner" not in picture:
+        raise AssertionError("network picture should include one_liner")
+
+    from utils.pcap_resilience import resilience_notes_for_triage
+
+    notes = resilience_notes_for_triage(triage)
+    if not notes:
+        raise AssertionError("resilience notes should be returned for triage")
+
+    from utils.pcap_synthesis import build_capture_followup_synthesis
+
+    synthesis = build_capture_followup_synthesis(
+        sample_parsed,
+        [
+            {
+                "module_id": "intel_abuseipdb",
+                "target": "8.8.8.8",
+                "status": "completed",
+                "summary": "clean reputation 0 malicious",
+            }
+        ],
+    )
+    if not synthesis:
+        raise AssertionError("synthesis should link capture entity to follow-up module")
+
+    from utils.pcap_next_actions import suggest_pcap_investigation_actions
+
+    actions = suggest_pcap_investigation_actions(
+        {"module_id": "net_live_capture", "success": True, "parsed_data": {"pcap_review": {"parsed_data": sample_parsed}, "capture": {}, "triage": triage}},
+        case_id=1,
+        workspace_target="192.168.1.10",
+    )
+    if not actions:
+        raise AssertionError("pcap investigation actions should not be empty")
+
+    from utils.pcap_followup_runner import (
+        build_recon_progress_summary,
+        runnable_modules_for_entity,
+    )
+
+    ranked_item = ranked[0] if ranked else None
+    if ranked_item:
+        runnable = runnable_modules_for_entity(ranked_item)
+        if not runnable:
+            raise AssertionError("runnable_modules_for_entity should return modules for ranked item")
+    summary = build_recon_progress_summary(
+        {"summary": "test capture"},
+        [{"module_id": "intel_abuseipdb", "target": "8.8.8.8", "success": True, "interpreter_findings": [{}]}],
+    )
+    if summary.get("modules_completed") != 1:
+        raise AssertionError("build_recon_progress_summary completed count mismatch")
+
+    from utils.pcap_next_actions import suggest_post_followup_actions
+
+    post = suggest_post_followup_actions(
+        [
+            {
+                "success": True,
+                "module_id": "infra_nmap",
+                "target": "192.168.1.10",
+                "parsed_data": {"parsed_ports": [{"port": 443}]},
+            }
+        ],
+        case_id=1,
+    )
+    if not post:
+        raise AssertionError("suggest_post_followup_actions should suggest TLS/HTTP after nmap")
+
+    from utils.pcap_device_map import merge_device_observations
+
+    devices = merge_device_observations(
+        [
+            {"type": "dhcp", "ip": "192.168.1.20", "mac": "aa:bb:cc:dd:ee:01", "hostname": "living-room-tv"},
+            {"type": "arp", "ip": "192.168.1.20", "mac": "aa:bb:cc:dd:ee:01"},
+            {"type": "mdns", "ip": "192.168.1.20", "hostname": "living-room-tv", "service": "_googlecast._tcp.local"},
+        ]
+    )
+    if not devices or devices[0].get("ip") != "192.168.1.20":
+        raise AssertionError("merge_device_observations should merge DHCP/ARP/mDNS rows")
+
+    from utils.pcap_iot_heuristics import enrich_devices_with_roles
+
+    enriched = enrich_devices_with_roles(devices)
+    if enriched[0].get("role") not in {"smart_tv", "iot_unknown", "unknown"}:
+        raise AssertionError("IoT role heuristic should classify cast-like device")
+
+    from utils.pcap_recon_artifact import build_capture_recon_artifact
+
+    artifact = build_capture_recon_artifact(
+        {"summary": "capture ok", "parsed_data": {"triage": triage, "pcap_review": {"parsed_data": {**sample_parsed, "lan_devices": enriched}}}},
+        followup_results=[{"module_id": "intel_abuseipdb", "target": "8.8.8.8", "success": True, "status": "completed", "summary": "clean"}],
+        case_id=1,
+    )
+    if not artifact.get("progress"):
+        raise AssertionError("build_capture_recon_artifact should include progress")
+
+    parsed = live_capture_utils._parse_interface_line(
+        "2.en0 [Up, Running, Wireless, Associated]"
+    )
+    if not parsed or parsed.get("id") != "en0":
+        raise AssertionError("macOS tcpdump interface line parse failed")
+
+    __import__("ui.packet_capture_page", fromlist=["render_packet_capture_page"])
+
+
 def _check_urlhaus_module() -> None:
     import importlib.util
     import json
@@ -3180,6 +3560,106 @@ def _check_workspace_ui_helpers() -> None:
         raise AssertionError("action_cards should expose render_action_cards")
 
 
+def _check_assessment_goal_modules_registered() -> None:
+    from modules.module_registry import get_module
+    from utils.assessment_goals import GOAL_ORDER, get_modules_for_goal
+
+    target_types = ("domain", "ipv4", "url", "email")
+    seen: set[str] = set()
+    for goal_id in GOAL_ORDER:
+        for target_type in target_types:
+            for module_id in get_modules_for_goal(goal_id, target_type, target="example.com"):
+                if module_id in seen:
+                    continue
+                seen.add(module_id)
+                if get_module(module_id) is None:
+                    raise AssertionError(f"goal {goal_id} references unknown module {module_id}")
+    if "infra_shodan" in seen:
+        raise AssertionError("infra_shodan should be intel_shodan in goal module sets")
+
+
+def _check_executor_dispatch_registry() -> None:
+    from modules.executor_dispatch import get_dispatch_entry, list_registered_module_ids
+    from modules.module_registry import MODULES, is_executable
+
+    registered = set(list_registered_module_ids())
+    for module in MODULES:
+        if not is_executable(module):
+            continue
+        if module.module_id not in registered:
+            raise AssertionError(f"executable module {module.module_id} missing dispatch registration")
+        entry = get_dispatch_entry(module.module_id)
+        if entry is None or entry.execute is None:
+            raise AssertionError(f"dispatch entry incomplete for {module.module_id}")
+
+
+def _check_case_workflow_helpers() -> None:
+    from database.db_setup import get_or_create_default_case
+    from utils.case_workflow import STAGE_TARGET, assess_case_workflow
+
+    case = get_or_create_default_case()
+    workflow = assess_case_workflow(case["id"])
+    if STAGE_TARGET not in workflow.get("completed", {}):
+        raise AssertionError("case workflow should include target stage")
+
+
+def _check_case_session_helpers() -> None:
+    import streamlit as st
+    from utils import case_session as cs
+
+    store: dict = {}
+
+    class _SessionState:
+        def get(self, key, default=None):
+            return store.get(key, default)
+
+        def __contains__(self, key):
+            return key in store
+
+        def __getitem__(self, key):
+            return store[key]
+
+        def __setitem__(self, key, value):
+            store[key] = value
+
+        def __delitem__(self, key):
+            del store[key]
+
+        def __getattr__(self, key):
+            try:
+                return store[key]
+            except KeyError as exc:
+                raise AttributeError(key) from exc
+
+        def __setattr__(self, key, value):
+            if key == "store":
+                object.__setattr__(self, key, value)
+            else:
+                store[key] = value
+
+        def pop(self, key, *args):
+            return store.pop(key, *args)
+
+        def setdefault(self, key, default):
+            if key not in store:
+                store[key] = default
+            return store[key]
+
+    st.session_state = _SessionState()
+    st.session_state.operation_target = "acme.test"
+    cs.persist_case_session(7)
+    st.session_state.operation_target = ""
+    cs.load_case_session(7)
+    if st.session_state.get("operation_target") != "acme.test":
+        raise AssertionError("case session roundtrip failed")
+
+    st.session_state = _SessionState()
+    st.session_state.operation_target = "keep.me"
+    cs.ensure_case_session(3)
+    if st.session_state.get("operation_target") != "keep.me":
+        raise AssertionError("case session upgrade seed failed")
+
+
 def _check_guided_workspace_helpers() -> None:
     from utils.assessment_goals import GOAL_QUICK_SAFETY, get_modules_for_goal, list_assessment_goals
     from utils.journey_planner import build_assessment_journey
@@ -3415,6 +3895,16 @@ def main() -> int:
     )
 
     run(
+        "pcap module",
+        lambda: _check_pcap_module(),
+    )
+
+    run(
+        "live capture module",
+        lambda: _check_live_capture_module(),
+    )
+
+    run(
         "api module helpers",
         lambda: _check_api_module_helpers(),
     )
@@ -3457,6 +3947,26 @@ def main() -> int:
     run(
         "next actions schema",
         lambda: _check_next_actions_schema(),
+    )
+
+    run(
+        "executor dispatch registry",
+        lambda: _check_executor_dispatch_registry(),
+    )
+
+    run(
+        "case workflow helpers",
+        lambda: _check_case_workflow_helpers(),
+    )
+
+    run(
+        "case session helpers",
+        lambda: _check_case_session_helpers(),
+    )
+
+    run(
+        "assessment goal modules",
+        lambda: _check_assessment_goal_modules_registered(),
     )
 
     run(

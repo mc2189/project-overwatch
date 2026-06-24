@@ -7,6 +7,8 @@ from typing import Any, Callable
 from utils.greynoise_interpreter import interpret_greynoise_results
 from utils.shodan_interpreter import interpret_shodan_results
 from utils.urlhaus_interpreter import interpret_urlhaus_results
+from utils.live_capture_interpreter import interpret_live_capture_results
+from utils.pcap_interpreter import interpret_pcap_results
 from utils.abuseipdb_interpreter import interpret_abuseipdb_results
 from utils.cert_subdomain_interpreter import interpret_cert_subdomain_results
 from utils.domain_intel_interpreter import interpret_domain_intel_results
@@ -27,6 +29,14 @@ def _interpret_cert_subdomain(parsed_data: dict[str, Any], _options: dict[str, A
 
 def _interpret_domain_intel(parsed_data: dict[str, Any], _options: dict[str, Any]) -> list[dict[str, Any]]:
     return interpret_domain_intel_results(parsed_data)
+
+
+def _interpret_live_capture(parsed_data: dict[str, Any], _options: dict[str, Any]) -> list[dict[str, Any]]:
+    return interpret_live_capture_results(parsed_data)
+
+
+def _interpret_pcap(parsed_data: dict[str, Any], _options: dict[str, Any]) -> list[dict[str, Any]]:
+    return interpret_pcap_results(parsed_data)
 
 
 def _interpret_urlhaus(parsed_data: dict[str, Any], _options: dict[str, Any]) -> list[dict[str, Any]]:
@@ -87,6 +97,8 @@ MODULE_FINDING_INTERPRETERS: dict[str, InterpreterFn] = {
     "intel_greynoise": _interpret_greynoise,
     "intel_shodan": _interpret_shodan,
     "intel_urlhaus": _interpret_urlhaus,
+    "net_pcap_review": _interpret_pcap,
+    "net_live_capture": _interpret_live_capture,
 }
 
 

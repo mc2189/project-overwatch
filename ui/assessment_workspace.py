@@ -9,6 +9,8 @@ from database.engagements import get_engagement_for_case
 from modules.executor import execute_module
 from modules.module_registry import get_module, is_executable
 from ui.action_cards import render_action_cards
+from ui.case_workflow_banner import render_case_workflow_strip
+from ui.scroll_helpers import scroll_to_anchor
 from ui.compact_preflight import render_compact_preflight
 from ui.concise_results import render_workspace_results
 from ui.constants import IMPLEMENTED_MODULE_IDS, MODULE_CARD_TITLES
@@ -26,6 +28,7 @@ from ui.workspace_cards import (
 from utils.assessment_goals import (
     GOAL_CUSTOM,
     GOAL_EVIDENCE_REVIEW,
+    GOAL_LIVE_CAPTURE,
     GOAL_QUICK_SAFETY,
     get_modules_for_goal,
     goal_label,
@@ -55,6 +58,8 @@ from utils.run_modes import (
     quick_check_supports_port_scan_option,
     sync_run_mode_from_case,
 )
+from utils.pcap_storage import store_pcap_upload
+from utils.pcap_analysis import is_supported_pcap_filename
 from utils.target_detection import get_target_type
 from utils.target_profile import build_target_profile
 from utils.web_port_planner import (
@@ -65,6 +70,7 @@ from utils.web_port_planner import (
 
 PREV_GOAL_KEY = "workspace_prev_goal"
 RUN_GOAL_SESSION_KEY = "assessment_goal"
+PCAP_UPLOAD_SESSION_KEY = "pcap_upload"
 
 
 def _init_module_selection() -> None:
@@ -150,6 +156,15 @@ def _execute_modules(
                     "scheme_override": http_opts.get("scheme_override"),
                     "requested_url": http_opts.get("requested_url"),
                     "target_source": http_opts.get("target_source", "default_assumption"),
+                }
+            elif module_id == "net_pcap_review":
+                pcap_upload = st.session_state.get(PCAP_UPLOAD_SESSION_KEY) or {}
+                options = {
+                    "pcap_file_path": pcap_upload.get("storage_path"),
+                    "pcap_filename": pcap_upload.get("filename") or target_value,
+                    "pcap_sha256": pcap_upload.get("sha256"),
+                    "pcap_size": pcap_upload.get("size_bytes"),
+                    "case_id": current_case["id"],
                 }
             options["operating_context"] = operating_context
             options["personal_lab_confirmed"] = personal_lab_confirmed
@@ -242,32 +257,15 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
             st.session_state.startup_notice_dismissed = True
             st.rerun()
 
-    if st.session_state.get("workspace_focus_run_panel"):
-        st.session_state.workspace_focus_run_panel = False
+    if st.session_state.pop("workspace_focus_run_panel", False):
+        st.session_state.workspace_scroll_to_readiness = True
+
+    render_case_workflow_strip(current_case["id"])
 
     main_col, side_col = st.columns([3, 2], gap="large")
 
     with main_col:
         section_heading("Target")
-        target = st.text_input(
-            "Investigation target",
-            value=st.session_state.operation_target,
-            placeholder="IPv4, domain, URL, email, or username",
-            key="workspace_target_input",
-            label_visibility="collapsed",
-        )
-        st.session_state.operation_target = target
-        target_type = get_target_type(target or "")
-
-        conn = get_db_conn()
-        try:
-            profile = build_target_profile(current_case["id"], target.strip(), conn=conn)
-        finally:
-            conn.close()
-        suggested = suggested_goals_for_target(target_type, target)
-        render_target_profile_card(profile, suggested_goals=suggested)
-
-        section_heading("Goal")
         goal_ids = [goal_id for goal_id, _ in list_assessment_goals()]
         current_goal = st.session_state.get(RUN_GOAL_SESSION_KEY, GOAL_QUICK_SAFETY)
         if current_goal not in goal_ids:
@@ -282,6 +280,64 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
         )
         st.session_state[RUN_GOAL_SESSION_KEY] = goal_id
         render_goal_card(goal_id)
+
+        if goal_id == GOAL_LIVE_CAPTURE:
+            st.info(
+                "Live capture runs on the dedicated **Packet Capture** page — "
+                "no client engagement or scope setup required."
+            )
+            if st.button("Open Packet Capture", type="primary", width="stretch"):
+                st.session_state.nav_page = "Packet Capture"
+                st.rerun()
+
+        pcap_upload = st.session_state.get(PCAP_UPLOAD_SESSION_KEY)
+        if goal_id == GOAL_EVIDENCE_REVIEW:
+            section_heading("Capture file")
+            uploaded = st.file_uploader(
+                "Upload PCAP evidence",
+                type=["pcap", "pcapng"],
+                key="workspace_pcap_uploader",
+                help="Local .pcap or .pcapng file only — no live capture in this version.",
+            )
+            if uploaded is not None:
+                data = uploaded.getvalue()
+                stored = store_pcap_upload(
+                    current_case["id"],
+                    uploaded.name,
+                    data,
+                )
+                st.session_state[PCAP_UPLOAD_SESSION_KEY] = stored
+                st.session_state.operation_target = stored["filename"]
+                pcap_upload = stored
+                st.caption(
+                    f"**{stored['filename']}** · {stored['size_bytes']:,} bytes · "
+                    f"SHA-256 `{stored['sha256'][:16]}…`"
+                )
+            elif pcap_upload:
+                st.caption(
+                    f"Using **{pcap_upload['filename']}** · SHA-256 `{pcap_upload['sha256'][:16]}…`"
+                )
+            target = st.session_state.operation_target or (pcap_upload or {}).get("filename", "")
+        else:
+            target = st.text_input(
+                "Investigation target",
+                value=st.session_state.operation_target,
+                placeholder="IPv4, domain, URL, email, or username",
+                key="workspace_target_input",
+                label_visibility="collapsed",
+            )
+            st.session_state.operation_target = target
+
+        target_type = get_target_type(target or "")
+
+        conn = get_db_conn()
+        try:
+            profile = build_target_profile(current_case["id"], target.strip(), conn=conn)
+        finally:
+            conn.close()
+        suggested = suggested_goals_for_target(target_type, target)
+        if goal_id != GOAL_EVIDENCE_REVIEW:
+            render_target_profile_card(profile, suggested_goals=suggested)
 
         include_port_scan = False
         if goal_id == GOAL_QUICK_SAFETY and quick_check_supports_port_scan_option(target_type):
@@ -371,6 +427,10 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
         active_count = len(selected_ids) - passive_count
 
         section_heading("Readiness")
+        st.markdown('<div id="workspace-readiness"></div>', unsafe_allow_html=True)
+        if st.session_state.pop("workspace_scroll_to_readiness", False):
+            st.info("Module pre-selected from a workspace action — review readiness below and run when ready.")
+            scroll_to_anchor("workspace-readiness")
         with st.container(border=True):
             operating_context = st.radio(
                 "Operating context",
@@ -437,8 +497,13 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
             )
 
             launch_blocked = None
-            if goal_id == GOAL_EVIDENCE_REVIEW:
-                launch_blocked = "Use Evidence Locker for uploaded artefact review."
+            if goal_id == GOAL_LIVE_CAPTURE:
+                launch_blocked = "Use the Packet Capture page in the sidebar for live capture."
+            elif goal_id == GOAL_EVIDENCE_REVIEW:
+                if not pcap_upload or not is_supported_pcap_filename(
+                    (pcap_upload or {}).get("filename", "")
+                ):
+                    launch_blocked = "Upload a .pcap or .pcapng capture file to review."
             elif not target.strip():
                 launch_blocked = "Enter a target."
             elif not selected_ids:

@@ -1,6 +1,14 @@
-# Project Overwatch v2.16
+# Project Overwatch v2.21
 
 Project Overwatch is a **local** Python/Streamlit intelligence, OSINT, security testing and resilience advisory dashboard for **private internal use** supporting future client assessments.
+
+**v2.21** adds executor dispatch registry, module contributor checklist, case workflow stages, and an entity-centric investigation shell in Entity Workspace.
+
+**v2.20** polishes navigation (grouped sidebar, **Assessment Workspace** naming), case-scoped session state, findings deep-links, unified result cards, and next-step actions on Findings and Evidence.
+
+**v2.18** adds **Personal Lab Packet Capture** — bounded in-app capture with automatic PCAP analysis.
+
+**v2.17** adds **PCAP Evidence Review** — local analysis of uploaded `.pcap` / `.pcapng` captures with bounded summaries and redaction.
 
 **v2.16** polishes the **Assessment Workspace** — clearer sections, compact cards, summarised readiness, and collapsed advanced detail.
 
@@ -16,11 +24,11 @@ See [SECURITY.md](SECURITY.md) for secret handling, active module rules, and aud
 
 ## Navigation
 
-The sidebar provides case selection and main navigation:
+The sidebar provides case selection and grouped navigation (**Run**, **Investigate**, **Case**, **Admin**):
 
 | Page | Purpose |
 |------|---------|
-| **Run Operation** | Guided assessment workspace — target profile, goals, journey, run, results |
+| **Assessment Workspace** | Guided assessment — target profile, goals, journey, run, results |
 | **Client Engagements** | Client engagement records, scope assets, rules of engagement, emergency stop |
 | **Findings** | Triage advisory findings |
 | **Entity Workspace** | Inspect entities, pivot to compatible modules, edit analyst notes |
@@ -37,7 +45,7 @@ The sidebar provides case selection and main navigation:
 ## Typical workflow
 
 1. **Select or create a case** in the sidebar.
-2. Open **Run Operation**.
+2. Open **Assessment Workspace**.
 3. **Step 1 — Target:** enter IPv4, domain, URL, email, or username. The app shows detected type and normalised host for URLs.
 4. **Choose a run mode** (“What do you want to do?”): Quick Check, Website / Domain Footprint, Local Device / IP Check, or Custom Module Selection.
 5. **Step 2 — Module Selection:** review recommended modules for your mode and target, or pick modules manually in Custom mode. Planned modules are on the **Roadmap** page only.
@@ -94,6 +102,8 @@ Results appear automatically in Operations, Observations, Findings, Relationship
 - **GreyNoise Internet Noise Intelligence** — passive internet-noise/RIOT lookup for public IPv4 (`GREYNOISE_API_KEY` optional but recommended).
 - **Shodan Internet Exposure Intelligence** — passive Shodan host lookup for public IPv4 (`SHODAN_API_KEY` required; host lookup only, no Shodan scans).
 - **URLhaus Malware URL Intelligence** — passive abuse.ch URLhaus lookup for URL, domain, and public IPv4 (`ABUSECH_AUTH_KEY` required; lookup-only, no submission or payload download).
+- **PCAP Evidence Review** — local-only review of uploaded `.pcap` / `.pcapng` files (optional `pyshark` + Wireshark `tshark`; no live capture).
+- **Personal Lab Packet Capture** — bounded live capture from the **Packet Capture** sidebar page (`tshark` or `tcpdump`; automatic PCAP analysis).
 - **Domain Intelligence** — passive DNS/HTTP/TLS/Wayback for domain or URL.
 - **Domain Email Security Posture** — passive SPF, DMARC, MX, CAA, MTA-STS, TLS-RPT and BIMI DNS review for domain or URL (no email sent).
 - **Certificate & Subdomain Intelligence** — passive certificate transparency names for domain or URL.
@@ -314,6 +324,44 @@ Passive third-party malware URL intelligence for **URL**, **domain**, and **publ
 - **Large host results** — URL lists capped for UI/entities (20 displayed, 50 entity max) with usability warning
 - **Results** — malware URL intelligence is *reported by URLhaus* — not independently confirmed by Overwatch; host matches do not mean every path is malicious
 - **Evidence** — summaries stored in Evidence Locker; download links stripped; raw JSON collapsed in UI
+
+### PCAP Evidence Review (v2.17)
+
+Local-only review of uploaded packet capture files — **no live network capture** in this version.
+
+1. On **Run Operation**, choose goal **Uploaded evidence review**.
+2. Upload a `.pcap` or `.pcapng` file (Wireshark or tcpdump export).
+3. Run **PCAP Evidence Review** — results include file hash, packet counts, protocol summaries, and cautious findings.
+
+**Supported file types:** `.pcap`, `.pcapng` only. Other uploads are blocked cleanly.
+
+**Dependencies:** optional `pyshark` (`pip install pyshark`) plus Wireshark **`tshark`** on PATH for deep parsing. Without them, the module still hashes the file and returns metadata with an operational warning — the app does not crash.
+
+**Privacy / safety:**
+
+- Raw packet payloads are **not** displayed by default
+- Passwords, tokens, cookies, authorisation headers, and session values are **not** shown — sensitive-looking material is redacted and may create a cautious finding
+- Analysis reflects **only the supplied capture** — not current live network state
+- Uploaded files are stored under the case evidence area; UI and reports show filename and SHA-256 only (not full local paths)
+
+**Workspace integration:** discovered IPs and domains can suggest reputation checks, Network Service Check (local IPs), evidence review, and report generation — nothing auto-runs active checks.
+
+### Personal Lab Packet Capture (v2.18)
+
+Bounded live capture for your own system, home network, or lab — **no client engagement or manual scope setup required**.
+
+1. Open **Packet Capture** in the sidebar (uses the current case, or the default Personal Lab case).
+2. Confirm the single Personal Lab capture checkbox.
+3. Select an interface, duration (default 30s, max 120s), packet cap (default 1,000, max 10,000), and a filter preset.
+4. Click **Start capture** — the PCAP is saved, hashed, and passed to PCAP Evidence Review automatically.
+
+**Backends:** prefers **tshark**; falls back to **tcpdump**. Commands use `subprocess` with argument lists (`shell=False`).
+
+**macOS permissions:** packet capture may require granting capture permissions to Terminal/Python or running Wireshark/tshark with suitable local rights. Permission failures show a clear explanation and a manual command you can run.
+
+**Limits:** one sequential capture at a time; no continuous/background capture; no wireless monitor mode; no packet sending.
+
+**Uploaded PCAP review** (`net_pcap_review`) remains available separately under **Uploaded evidence review** on Run Operation.
 
 **SecurityTrails** remains on the **Roadmap** only — planned, not implemented, likely requires paid/API access.
 
@@ -692,7 +740,7 @@ Saved reports go to `reports/` (gitignored). Encrypted exports go to `exports/`.
 ```
 main.py                    Streamlit entry point and navigation router
 ui/                        Run Operation, archive pages, findings, metrics
-version.py                 PROJECT_VERSION = "2.16.0"
+version.py                 PROJECT_VERSION = "2.18.0"
 scripts/smoke_check.py     Local sanity checks
 requirements-optional.txt  kaleido, weasyprint (optional)
 database/db_setup.py       SQLite schema and helpers
@@ -858,7 +906,7 @@ Run `validate_module_registry()` or check **Settings → System status** for met
 python scripts/smoke_check.py
 ```
 
-Smoke checks verify SDK helpers, registry metadata for implemented modules, executor imports, evidence locker integration, Domain Email Security Posture parser/interpreter checks, and VirusTotal/AbuseIPDB/GreyNoise/Shodan/URLhaus mock lookups — no live network required.
+Smoke checks verify SDK helpers, registry metadata for implemented modules, executor imports, evidence locker integration, PCAP Evidence Review and Personal Lab Packet Capture mock paths, and VirusTotal/AbuseIPDB/GreyNoise/Shodan/URLhaus mock lookups — no live network required.
 
 Unit tests live in `tests/test_module_sdk.py`. CI runs both smoke check and unit tests (see `.github/workflows/smoke_check.yml`).
 

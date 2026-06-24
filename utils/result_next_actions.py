@@ -112,6 +112,32 @@ def suggest_result_action(result: dict[str, Any], *, target: str) -> dict[str, A
                 button_label="Add note",
             )
 
+    if module_id == "net_pcap_review":
+        from utils.pcap_next_actions import suggest_pcap_primary_action
+
+        return suggest_pcap_primary_action(result, case_id=0, workspace_target=target)
+
+    if module_id == "net_live_capture":
+        from utils.pcap_next_actions import suggest_pcap_primary_action
+
+        if parsed.get("capture", {}).get("permission_denied"):
+            return make_action(
+                title="Review capture permission guidance",
+                reason="Local capture permissions are required on this system.",
+                action_type="no_action",
+                priority="high",
+                target=target,
+                module_id=module_id,
+                button_label="Info",
+            )
+        triage = parsed.get("triage") or {}
+        return suggest_pcap_primary_action(
+            result,
+            case_id=0,
+            workspace_target=target,
+            triage=triage or None,
+        )
+
     if risk:
         top = risk[0]
         return make_action(

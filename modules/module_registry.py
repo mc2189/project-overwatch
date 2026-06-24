@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 ModuleStatus = Literal["active", "planned", "disabled"]
-ModuleMode = Literal["passive", "active", "analysis"]
+ModuleMode = Literal["passive", "active", "analysis", "local-capture"]
 RiskLevel = Literal["low", "medium", "high"]
 
 # High-risk placeholders quarantined from execution even if accidentally marked implemented.
@@ -51,14 +51,15 @@ CATEGORIES: list[dict[str, str | bool]] = [
     {"key": "Infrastructure", "label": "2. Infrastructure", "default_expanded": True},
     {"key": "Vulnerability", "label": "3. Vulnerability", "default_expanded": False},
     {"key": "Threat Intel", "label": "4. Threat Intel", "default_expanded": False},
-    {"key": "Dark Web", "label": "5. Dark Web", "default_expanded": False},
-    {"key": "Financial", "label": "6. Financial", "default_expanded": False},
-    {"key": "GEOINT and Media", "label": "7. GEOINT and Media", "default_expanded": False},
-    {"key": "Corporate Networks", "label": "8. Corporate Networks", "default_expanded": False},
-    {"key": "Cloud Recon", "label": "9. Cloud Recon", "default_expanded": False},
-    {"key": "Document Forensics", "label": "10. Document Forensics", "default_expanded": False},
-    {"key": "Historical Web", "label": "11. Historical Web", "default_expanded": False},
-    {"key": "Data Brokers", "label": "12. Data Brokers", "default_expanded": False},
+    {"key": "Network Analysis", "label": "5. Network Analysis", "default_expanded": False},
+    {"key": "Dark Web", "label": "6. Dark Web", "default_expanded": False},
+    {"key": "Financial", "label": "7. Financial", "default_expanded": False},
+    {"key": "GEOINT and Media", "label": "8. GEOINT and Media", "default_expanded": False},
+    {"key": "Corporate Networks", "label": "9. Corporate Networks", "default_expanded": False},
+    {"key": "Cloud Recon", "label": "10. Cloud Recon", "default_expanded": False},
+    {"key": "Document Forensics", "label": "11. Document Forensics", "default_expanded": False},
+    {"key": "Historical Web", "label": "12. Historical Web", "default_expanded": False},
+    {"key": "Data Brokers", "label": "13. Data Brokers", "default_expanded": False},
 ]
 
 MODULES: list[ModuleEntry] = [
@@ -622,6 +623,78 @@ MODULES: list[ModuleEntry] = [
             "No malware payloads are downloaded and no URLs are submitted.",
             "No active verification or fetching of malicious URLs is performed.",
             "Auth-Key must remain in .env only — never commit or paste into case notes.",
+        ),
+    ),
+    ModuleEntry(
+        module_id="net_pcap_review",
+        display_name="PCAP Evidence Review",
+        category="Network Analysis",
+        description="Local-only review of uploaded packet capture files with bounded traffic summaries.",
+        status="active",
+        mode="analysis",
+        risk_level="low",
+        requires_authorisation=False,
+        requires_api_key=False,
+        implemented=True,
+        accepted_target_types=("file", "pcap", "pcapng"),
+        config_notes=(
+            "Local file analysis only — upload a .pcap or .pcapng file. "
+            "Optional pyshark plus Wireshark/tshark for deeper parsing. "
+            "No live capture, wireless monitor mode, payload display, or decryption in this release."
+        ),
+        rate_limit_notes="Not applicable — analysis runs against uploaded files only.",
+        short_help="Review an uploaded .pcap/.pcapng capture with bounded protocol and flow summaries.",
+        detailed_help=(
+            "Analyses a supplied packet capture locally to produce traffic summaries, DNS/HTTP/TLS metadata, "
+            "cautious findings, and evidence items. Sensitive-looking values are redacted. "
+            "Raw packet payloads are not displayed by default. "
+            "Results reflect only the uploaded capture — not live network state."
+        ),
+        example_inputs=("lab-traffic.pcap", "incident-capture.pcapng"),
+        output_summary=(
+            "File hash, packet counts, duration, protocol summaries, top talkers/conversations, "
+            "DNS/HTTP/TLS samples, cleartext indicators, and advisory findings."
+        ),
+        caution_notes=(
+            "Supplied-capture-only analysis — not live network capture.",
+            "Install pyshark and tshark for full parsing; metadata-only fallback otherwise.",
+            "Passwords, tokens, cookies, and raw payloads are not shown by default.",
+            "Findings are analyst aids based on the supplied capture only.",
+        ),
+    ),
+    ModuleEntry(
+        module_id="net_live_capture",
+        display_name="Personal Lab Packet Capture",
+        category="Network Analysis",
+        description="Bounded live packet capture for Personal Lab with automatic PCAP Evidence Review handoff.",
+        status="active",
+        mode="local-capture",
+        risk_level="medium",
+        requires_authorisation=True,
+        requires_api_key=False,
+        implemented=True,
+        accepted_target_types=("unknown", "ipv4", "domain", "url"),
+        config_notes=(
+            "Personal Lab capture only — requires single confirmation checkbox. "
+            "Uses tshark or tcpdump subprocess capture with duration and packet caps. "
+            "No wireless monitor mode, packet sending, or continuous capture."
+        ),
+        rate_limit_notes="Sequential captures only — one bounded run at a time.",
+        short_help="Capture packets on a selected interface for a short bounded window, then analyse automatically.",
+        detailed_help=(
+            "Lists local interfaces, runs a capped live capture to a controlled case folder, "
+            "hashes the PCAP, and hands off to PCAP Evidence Review. "
+            "Requires Personal Lab confirmation. macOS may require capture permissions."
+        ),
+        example_inputs=("live-capture:en0",),
+        output_summary=(
+            "Capture metadata, file hash, bounded PCAP analysis summary, and cautious findings."
+        ),
+        caution_notes=(
+            "Capture only on systems and networks you own or are authorised to monitor.",
+            "Short duration and packet caps are enforced.",
+            "Permission issues are explained with a manual command suggestion.",
+            "Raw payloads and sensitive values are not displayed by default.",
         ),
     ),
     ModuleEntry(

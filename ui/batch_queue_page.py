@@ -470,31 +470,30 @@ def _render_run_controls(case_id: int, items: list[dict]) -> None:
         st.rerun()
 
 
-def _render_latest_results() -> None:
-    from utils.result_status import status_label
+def _render_latest_results(case_id: int) -> None:
+    from ui.concise_results import render_concise_result_card
 
     results = st.session_state.get(SESSION_RESULTS_KEY) or []
     if not results:
         return
     st.subheader("Latest queue results")
-    for row in results:
+    for index, row in enumerate(results):
         item = row["queue_item"]
         result = row.get("result")
-        title = (
-            f"{item.get('entity_value')} · {item.get('module_display_name')} · "
-            f"{item.get('status')}"
-        )
-        with st.expander(title, expanded=False):
-            st.markdown(f"**Summary:** {item.get('summary') or '-'}")
-            if result:
-                st.markdown(f"**Run status:** {status_label(result.get('status'))}")
-                if result.get("warnings"):
-                    st.markdown("**Warnings**")
-                    for warning in result["warnings"]:
-                        st.warning(warning)
-                if result.get("raw_output"):
-                    with st.expander("Raw output", expanded=False):
-                        st.code(result["raw_output"])
+        if result:
+            render_concise_result_card(
+                result,
+                target=item.get("entity_value") or "",
+                case_id=case_id,
+                card_index=index,
+            )
+        else:
+            title = (
+                f"{item.get('entity_value')} · {item.get('module_display_name')} · "
+                f"{item.get('status')}"
+            )
+            with st.expander(title, expanded=False):
+                st.markdown(f"**Summary:** {item.get('summary') or '-'}")
 
 
 def render_batch_queue_page(case_id: int, metrics: dict) -> None:
@@ -550,7 +549,7 @@ def render_batch_queue_page(case_id: int, metrics: dict) -> None:
     st.divider()
     _render_run_controls(case_id, items)
     st.divider()
-    _render_latest_results()
+    _render_latest_results(case_id)
 
     recent_runs = load_recent_batch_runs(case_id, limit=5)
     if recent_runs:

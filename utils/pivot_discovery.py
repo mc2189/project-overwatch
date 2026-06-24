@@ -149,6 +149,76 @@ def discover_pivots_from_results(results: list[dict[str, Any]]) -> list[dict[str
                     }
                 )
 
+        if module_id == "net_pcap_review":
+            preview = parsed.get("entities_preview") or {}
+            for domain in (preview.get("domains") or [])[:12]:
+                pivots.append(
+                    {
+                        "pivot_type": "domain",
+                        "value": str(domain),
+                        "source_module": module_id,
+                        "suggested_checks": ["infra_domain_intel", "intel_urlhaus"],
+                    }
+                )
+            for ip_value in (preview.get("ips") or [])[:12]:
+                ip_text = str(ip_value)
+                checks = (
+                    ["infra_nmap", "intel_abuseipdb"]
+                    if _IPV4_RE.search(ip_text)
+                    else ["infra_whois_rdap"]
+                )
+                pivots.append(
+                    {
+                        "pivot_type": "ip",
+                        "value": ip_text,
+                        "source_module": module_id,
+                        "suggested_checks": checks,
+                    }
+                )
+
+        if module_id == "net_live_capture":
+            pcap_parsed = (parsed.get("pcap_review") or {}).get("parsed_data") or {}
+            preview = pcap_parsed.get("entities_preview") or {}
+            for domain in (preview.get("domains") or [])[:12]:
+                pivots.append(
+                    {
+                        "pivot_type": "domain",
+                        "value": str(domain),
+                        "source_module": module_id,
+                        "suggested_checks": ["infra_domain_intel", "intel_urlhaus", "infra_tls_review"],
+                    }
+                )
+            for ip_value in (preview.get("ips") or [])[:12]:
+                ip_text = str(ip_value)
+                if not _IPV4_RE.search(ip_text):
+                    continue
+                if ip_text.startswith(("10.", "192.168.", "172.")):
+                    checks = ["infra_nmap", "infra_tls_review", "infra_http_security"]
+                else:
+                    checks = ["intel_abuseipdb", "intel_greynoise", "intel_shodan"]
+                pivots.append(
+                    {
+                        "pivot_type": "ip",
+                        "value": ip_text,
+                        "source_module": module_id,
+                        "suggested_checks": checks,
+                    }
+                )
+            for item in (pcap_parsed.get("triage") or {}).get("ranked_entities") or []:
+                if item.get("tier") != "investigate":
+                    continue
+                value = str(item.get("value") or "")
+                if not value:
+                    continue
+                pivots.append(
+                    {
+                        "pivot_type": item.get("entity_type", "unknown"),
+                        "value": value,
+                        "source_module": module_id,
+                        "suggested_checks": item.get("suggested_modules") or [],
+                    }
+                )
+
     deduped: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     for pivot in pivots:

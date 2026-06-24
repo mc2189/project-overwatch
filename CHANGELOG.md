@@ -2,6 +2,47 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.23.0 — LAN device map and capture recon artifact
+
+- **`utils/pcap_device_map.py`** — infer LAN devices from DHCP, ARP, and mDNS in PCAP parsing
+- **`utils/pcap_iot_heuristics.py`** — lightweight device-role guesses (TV, speaker, phone, IoT, etc.)
+- **`utils/pcap_recon_artifact.py`** — unified capture recon result from triage, devices, follow-ups, and synthesis
+- **Packet Capture page** — LAN devices table, capture recon result panel, ranked-entity fallback, clearer follow-up failures
+- **Triage** — device hints on ranked LAN IPs and LAN device summary in narrative
+
+## v2.22.0 — Capture follow-up automation
+
+- **`utils/pcap_followup_runner.py`** — run or queue suggested triage tests in bulk; per-entity runs; recon progress summary
+- **Packet Capture page** — interactive priority follow-ups: Run all suggested, Queue all passive, Scan all LAN IPs (Nmap), per-row actions
+- **Post-follow-up suggestions** — after Nmap/intel runs, suggest TLS/HTTP/VirusTotal checks and run them in one click
+- **Recon progress** — aggregates follow-up module results into a capture recon snapshot on the page
+- **Triage** — promote active LAN talkers (≥8 packets) to investigate tier for bulk automation
+
+## v2.18.0 — Personal Lab Packet Capture
+
+- **`net_live_capture`** — bounded live packet capture with automatic PCAP Evidence Review handoff
+- **`utils/live_capture.py`** — tshark/tcpdump backend detection, interface listing, BPF presets, safe subprocess capture
+- **`ui/packet_capture_page.py`** — dedicated **Packet Capture** sidebar page with simple Personal Lab workflow
+- **Capture limits** — default 30s / 1,000 packets; max 120s / 10,000 packets; sequential captures only
+- **Filter presets** — all traffic, target host, web, DNS, ARP/DHCP, ICMP, optional custom BPF (advanced)
+- **Permission handling** — clear macOS permission guidance and manual command suggestion on failure
+- **Evidence / findings** — capture settings, file hash, backend, PCAP analysis summary; cautious findings only
+- **Guided workspace goal** — Live packet capture (links to Packet Capture page)
+- Uploaded PCAP Evidence Review (`net_pcap_review`) unchanged
+
+## v2.17.0 — PCAP Evidence Review
+
+- **`net_pcap_review`** — local-only analysis of uploaded `.pcap` / `.pcapng` files with bounded traffic summaries
+- **`utils/pcap_analysis.py`** — pyshark/tshark parsing with packet caps, metadata fallback, and secret redaction
+- **`utils/pcap_interpreter.py`** — cautious findings for DNS, HTTP, TLS, cleartext, high-volume flows, and parser warnings
+- **`utils/pcap_storage.py`** — safe case-scoped upload storage with SHA-256 hashing (no full paths in UI/reports)
+- **Guided workspace** — Uploaded evidence review goal with PCAP file uploader and PCAP Evidence Review module
+- **Evidence locker** — capture summary, protocol, DNS/HTTP/TLS, parser warning, and redaction evidence items
+- **Reports** — dedicated PCAP Evidence Summary section with supplied-capture-only caveat
+- **Next actions / pivots** — cleartext review, domain entities, IP reputation, Nmap on local IPs, evidence and report
+- **Roadmap** — future live capture, Wi-Fi survey, wireless review, and decryption items documented as not enabled
+- Smoke check covers PCAP imports, registry, unsupported types, and graceful missing-parser paths
+
 ## v2.16.0 — Workspace UI Polish and Readability Pass
 
 - **Visual hierarchy** — Assessment Workspace sections: Target, Goal, Readiness, Recommended checks, Results, Next steps

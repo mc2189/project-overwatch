@@ -8,6 +8,7 @@ from utils.nmap_options import PROFILE_DETAILED, SCRIPT_VULN
 
 TestingLevel = Literal[
     "passive_lookup",
+    "local_evidence_review",
     "safe_active_check",
     "intrusive_active_check",
     "high_risk_manual_only",
@@ -16,6 +17,8 @@ TestingLevel = Literal[
 
 TESTING_LEVEL_LABELS: dict[str, str] = {
     "passive_lookup": "Passive lookup",
+    "local_evidence_review": "Local evidence review",
+    "personal_lab_capture": "Personal Lab capture",
     "safe_active_check": "Safe active check",
     "intrusive_active_check": "Intrusive active check",
     "high_risk_manual_only": "High-risk manual only",
@@ -34,6 +37,8 @@ MODULE_TESTING_LEVELS: dict[str, TestingLevel] = {
     "intel_greynoise": "passive_lookup",
     "intel_shodan": "passive_lookup",
     "intel_urlhaus": "passive_lookup",
+    "net_pcap_review": "local_evidence_review",
+    "net_live_capture": "personal_lab_capture",
     # Active
     "infra_nmap": "safe_active_check",
     "infra_tls_review": "safe_active_check",
@@ -76,6 +81,8 @@ PROHIBITED_MODULE_IDS: frozenset[str] = frozenset(
 
 LEVEL_RANK: dict[str, int] = {
     "passive_lookup": 0,
+    "local_evidence_review": 0,
+    "personal_lab_capture": 1,
     "safe_active_check": 1,
     "intrusive_active_check": 2,
     "high_risk_manual_only": 3,

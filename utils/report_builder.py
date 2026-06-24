@@ -525,6 +525,46 @@ def build_case_report(
                 )
             lines.append("")
 
+        pcap_observations = [
+            observation
+            for observation in observations
+            if observation.get("module_id") in {"net_pcap_review", "net_live_capture"}
+        ]
+        if pcap_observations:
+            lines.extend(["## PCAP Evidence Summary", ""])
+            lines.append(
+                "_Analysis based only on the supplied packet capture file(s). "
+                "Not live network capture. Sensitive payloads and credentials are not included._"
+            )
+            lines.append("")
+            for observation in pcap_observations:
+                entity = _entity_display(
+                    entity_by_id.get(observation.get("entity_id")),
+                    observation.get("entity_id"),
+                )
+                lines.append(f"### {observation.get('title', 'PCAP review')}")
+                lines.append("")
+                lines.append(f"- Entity: {entity}")
+                lines.append(f"- Summary: {observation.get('summary') or '_No summary._'}")
+                triage_text = None
+                data_json = observation.get("data_json")
+                if data_json:
+                    try:
+                        payload = json.loads(data_json) if isinstance(data_json, str) else data_json
+                        triage_text = payload.get("triage_narrative")
+                        investigate = payload.get("investigate_entities") or []
+                        if investigate:
+                            lines.append(f"- Priority follow-ups: {', '.join(investigate)}")
+                    except (TypeError, json.JSONDecodeError):
+                        triage_text = None
+                if triage_text:
+                    lines.append(f"- Triage: {triage_text}")
+                network_picture = payload.get("network_picture")
+                if network_picture:
+                    lines.append(f"- Network picture: {network_picture}")
+                lines.append(f"- Created: {observation.get('created_at', '-')}")
+                lines.append("")
+
         lines.extend(["## Observations", ""])
         if not observations:
             lines.append("_No observations recorded for this case._")

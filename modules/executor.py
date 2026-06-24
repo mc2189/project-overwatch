@@ -7,7 +7,7 @@ import json
 import shutil
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from database.db_setup import (
     create_observation,
@@ -48,6 +48,8 @@ ABUSEIPDB_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "in
 GREYNOISE_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_greynoise.py"
 SHODAN_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_shodan.py"
 URLHAUS_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_urlhaus.py"
+PCAP_REVIEW_MODULE_PATH = PROJECT_ROOT / "modules" / "5_network_analysis" / "net_pcap_review.py"
+LIVE_CAPTURE_MODULE_PATH = PROJECT_ROOT / "modules" / "5_network_analysis" / "net_live_capture.py"
 
 _nmap_handlers: tuple[Any, Any] | None = None
 _nmap_load_error: str | None = None
@@ -88,6 +90,12 @@ _shodan_load_attempted = False
 _urlhaus_handler: Any | None = None
 _urlhaus_load_error: str | None = None
 _urlhaus_load_attempted = False
+_pcap_review_handler: Any | None = None
+_pcap_review_load_error: str | None = None
+_pcap_review_load_attempted = False
+_live_capture_handler: Any | None = None
+_live_capture_load_error: str | None = None
+_live_capture_load_attempted = False
 
 
 def _observation_evidence_kwargs(module_id: str, result: dict[str, Any]) -> dict[str, Any]:
@@ -463,101 +471,68 @@ def _load_urlhaus_handler() -> None:
         _urlhaus_load_error = str(exc)
 
 
+def _load_pcap_review_handler() -> None:
+    global _pcap_review_handler, _pcap_review_load_error, _pcap_review_load_attempted
+
+    if _pcap_review_load_attempted:
+        return
+
+    _pcap_review_load_attempted = True
+
+    if not PCAP_REVIEW_MODULE_PATH.is_file():
+        _pcap_review_load_error = f"Module file not found: {PCAP_REVIEW_MODULE_PATH}"
+        return
+
+    try:
+        spec = importlib.util.spec_from_file_location("net_pcap_review", PCAP_REVIEW_MODULE_PATH)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load module spec from {PCAP_REVIEW_MODULE_PATH}")
+        net_pcap_review = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(net_pcap_review)
+        _pcap_review_handler = net_pcap_review.run_pcap_review
+    except Exception as exc:
+        _pcap_review_load_error = str(exc)
+
+
+def _load_live_capture_handler() -> None:
+    global _live_capture_handler, _live_capture_load_error, _live_capture_load_attempted
+
+    if _live_capture_load_attempted:
+        return
+
+    _live_capture_load_attempted = True
+
+    if not LIVE_CAPTURE_MODULE_PATH.is_file():
+        _live_capture_load_error = f"Module file not found: {LIVE_CAPTURE_MODULE_PATH}"
+        return
+
+    try:
+        spec = importlib.util.spec_from_file_location("net_live_capture", LIVE_CAPTURE_MODULE_PATH)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load module spec from {LIVE_CAPTURE_MODULE_PATH}")
+        net_live_capture = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(net_live_capture)
+        _live_capture_handler = net_live_capture.run_live_capture
+    except Exception as exc:
+        _live_capture_load_error = str(exc)
+
+
 def _nmap_binary_available() -> bool:
     return shutil.which("nmap") is not None
 
 
 def is_runtime_ready(module_id: str) -> bool:
     """Return True when a module's backend is loaded and ready to run."""
-    if module_id == "infra_nmap":
-        _load_nmap_handlers()
-        return _nmap_handlers is not None and _nmap_binary_available()
-    if module_id == "infra_domain_intel":
-        _load_domain_intel_handler()
-        return _domain_intel_handler is not None
-    if module_id == "infra_cert_subdomain":
-        _load_cert_subdomain_handler()
-        return _cert_subdomain_handler is not None
-    if module_id == "infra_website_metadata":
-        _load_website_metadata_handler()
-        return _website_metadata_handler is not None
-    if module_id == "infra_email_security":
-        _load_email_security_handler()
-        return _email_security_handler is not None
-    if module_id == "infra_tls_review":
-        _load_tls_review_handler()
-        return _tls_review_handler is not None
-    if module_id == "infra_http_security":
-        _load_http_security_handler()
-        return _http_security_handler is not None
-    if module_id == "infra_whois_rdap":
-        _load_whois_rdap_handler()
-        return _whois_rdap_handler is not None
-    if module_id == "intel_virustotal":
-        _load_virustotal_handler()
-        return _virustotal_handler is not None
-    if module_id == "intel_abuseipdb":
-        _load_abuseipdb_handler()
-        return _abuseipdb_handler is not None
-    if module_id == "intel_greynoise":
-        _load_greynoise_handler()
-        return _greynoise_handler is not None
-    if module_id == "intel_shodan":
-        _load_shodan_handler()
-        return _shodan_handler is not None
-    if module_id == "intel_urlhaus":
-        _load_urlhaus_handler()
-        return _urlhaus_handler is not None
-    return False
+    from modules.executor_dispatch import is_dispatch_ready
+
+    return is_dispatch_ready(module_id)
 
 
 def get_runtime_error(module_id: str) -> str | None:
     """Return a load-time error message for a module, if any."""
-    if module_id == "infra_nmap":
-        _load_nmap_handlers()
-        if not _nmap_binary_available():
-            return (
-                "Nmap is not installed or not on your PATH. "
-                "Install from https://nmap.org/download.html and restart the app."
-            )
-        return _nmap_load_error
-    if module_id == "infra_domain_intel":
-        _load_domain_intel_handler()
-        return _domain_intel_load_error
-    if module_id == "infra_cert_subdomain":
-        _load_cert_subdomain_handler()
-        return _cert_subdomain_load_error
-    if module_id == "infra_website_metadata":
-        _load_website_metadata_handler()
-        return _website_metadata_load_error
-    if module_id == "infra_email_security":
-        _load_email_security_handler()
-        return _email_security_load_error
-    if module_id == "infra_tls_review":
-        _load_tls_review_handler()
-        return _tls_review_load_error
-    if module_id == "infra_http_security":
-        _load_http_security_handler()
-        return _http_security_load_error
-    if module_id == "infra_whois_rdap":
-        _load_whois_rdap_handler()
-        return _whois_rdap_load_error
-    if module_id == "intel_virustotal":
-        _load_virustotal_handler()
-        return _virustotal_load_error
-    if module_id == "intel_abuseipdb":
-        _load_abuseipdb_handler()
-        return _abuseipdb_load_error
-    if module_id == "intel_greynoise":
-        _load_greynoise_handler()
-        return _greynoise_load_error
-    if module_id == "intel_shodan":
-        _load_shodan_handler()
-        return _shodan_load_error
-    if module_id == "intel_urlhaus":
-        _load_urlhaus_handler()
-        return _urlhaus_load_error
-    return None
+    from modules.executor_dispatch import get_dispatch_error
+
+    return get_dispatch_error(module_id)
 
 
 def _save_recon_output(conn: sqlite3.Connection, target: str, raw_output: str) -> None:
@@ -2528,6 +2503,303 @@ def _persist_urlhaus_entities(
         )
 
 
+def _persist_pcap_records(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    module_id: str,
+    target: str,
+    result: dict[str, Any],
+    authorisation_confirmed: bool,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> None:
+    """Save PCAP review operations, observations, findings, and entities."""
+    result = _prepare_module_result(result)
+    create_operation_log(
+        case_id,
+        module_id,
+        target,
+        result["status"],
+        authorisation_confirmed=authorisation_confirmed,
+        summary=result["summary"],
+        run_mode_id=run_mode_id,
+        run_mode_label=run_mode_label,
+        conn=conn,
+    )
+
+    if not should_persist_observation(result["status"]):
+        return
+
+    parsed_data = result.get("parsed_data") or {}
+    observation = create_observation(
+        case_id,
+        entity_id,
+        module_id,
+        "packet_capture_review",
+        "PCAP evidence review",
+        summary=result["summary"],
+        data_json=json.dumps(
+            {
+                "module_id": module_id,
+                "success": result["success"],
+                "status": result["status"],
+                "filename": parsed_data.get("filename"),
+                "sha256": parsed_data.get("sha256"),
+                "file_size_bytes": parsed_data.get("file_size_bytes"),
+                "packet_count": parsed_data.get("packet_count"),
+                "packets_analysed": parsed_data.get("packets_analysed"),
+                "duration_seconds": parsed_data.get("duration_seconds"),
+                "protocols": parsed_data.get("protocols"),
+                "parser_available": parsed_data.get("parser_available"),
+                "analysis_capped": parsed_data.get("analysis_capped"),
+                "interpreter_findings": result.get("interpreter_findings", []),
+                "warnings": result.get("warnings", []),
+            }
+        ),
+        raw_output=result["raw_output"],
+        **_observation_evidence_kwargs(module_id, result),
+        conn=conn,
+    )
+
+    _persist_observation_evidence(
+        conn,
+        case_id=case_id,
+        entity_id=entity_id,
+        observation_id=observation["id"],
+        module_id=module_id,
+        result=result,
+    )
+
+    interpreter_findings = result.get("interpreter_findings") or []
+    if interpreter_findings:
+        _persist_module_findings(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation["id"],
+            module_id=module_id,
+            interpreter_findings=interpreter_findings,
+        )
+
+    _persist_pcap_entities(
+        conn,
+        case_id=case_id,
+        file_entity_id=entity_id,
+        module_id=module_id,
+        parsed_data=parsed_data,
+    )
+
+
+def _persist_pcap_entities(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    file_entity_id: int,
+    module_id: str,
+    parsed_data: dict[str, Any],
+) -> None:
+    """Create IP/domain/service entities from bounded PCAP previews."""
+    preview = parsed_data.get("entities_preview") or {}
+    ip_ids: dict[str, int] = {}
+
+    for ip_value in preview.get("ips") or []:
+        ip_text = str(ip_value).strip()
+        if not ip_text:
+            continue
+        entity = create_or_get_entity(
+            case_id,
+            "ip_address",
+            ip_text,
+            label=ip_text,
+            source=module_id,
+            confidence=70,
+            conn=conn,
+        )
+        ip_ids[ip_text] = entity["id"]
+
+    for domain_value in preview.get("domains") or []:
+        domain_text = str(domain_value).strip().lower().rstrip(".")
+        if not domain_text:
+            continue
+        domain_entity = create_or_get_entity(
+            case_id,
+            "domain",
+            domain_text,
+            label=domain_text,
+            source=module_id,
+            confidence=65,
+            conn=conn,
+        )
+        src_ip = None
+        for dns in parsed_data.get("dns_queries") or []:
+            if dns.get("query") == domain_text:
+                for candidate in preview.get("ips") or []:
+                    src_ip = str(candidate)
+                    break
+                break
+        if src_ip and src_ip in ip_ids:
+            create_relationship(
+                case_id,
+                ip_ids[src_ip],
+                "queried_domain",
+                domain_entity["id"],
+                source_module=module_id,
+                confidence=60,
+                conn=conn,
+            )
+
+    for service_value in preview.get("services") or []:
+        service_text = str(service_value).strip()
+        if not service_text:
+            continue
+        service_entity = create_or_get_entity(
+            case_id,
+            "service",
+            service_text,
+            label=service_text,
+            source=module_id,
+            confidence=60,
+            conn=conn,
+        )
+        host_part = service_text.split(":", 1)[0]
+        if host_part in ip_ids:
+            create_relationship(
+                case_id,
+                ip_ids[host_part],
+                "connected_to_service",
+                service_entity["id"],
+                source_module=module_id,
+                confidence=60,
+                conn=conn,
+            )
+
+    conversations = parsed_data.get("top_conversations") or []
+    for item in conversations[:15]:
+        conv = str(item.get("conversation") or "")
+        if "->" not in conv:
+            continue
+        left, _right = conv.split("->", 1)
+        src = left.split(":", 1)[0].strip()
+        dst = _right.split(":", 1)[0].strip()
+        if src in ip_ids and dst in ip_ids and src != dst:
+            create_relationship(
+                case_id,
+                ip_ids[src],
+                "communicated_with",
+                ip_ids[dst],
+                source_module=module_id,
+                confidence=55,
+                conn=conn,
+            )
+
+
+def _persist_live_capture_records(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    module_id: str,
+    target: str,
+    result: dict[str, Any],
+    authorisation_confirmed: bool,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> None:
+    """Save live capture operations, observations, findings, and PCAP-derived entities."""
+    result = _prepare_module_result(result)
+    create_operation_log(
+        case_id,
+        module_id,
+        target,
+        result["status"],
+        authorisation_confirmed=authorisation_confirmed,
+        summary=result["summary"],
+        run_mode_id=run_mode_id,
+        run_mode_label=run_mode_label,
+        conn=conn,
+    )
+
+    if not should_persist_observation(result["status"]):
+        return
+
+    parsed_data = result.get("parsed_data") or {}
+    capture = parsed_data.get("capture") or {}
+    pcap_review = parsed_data.get("pcap_review") or {}
+    pcap_parsed = pcap_review.get("parsed_data") or {}
+
+    observation = create_observation(
+        case_id,
+        entity_id,
+        module_id,
+        "live_packet_capture",
+        "Personal Lab packet capture",
+        summary=result["summary"],
+        data_json=json.dumps(
+            {
+                "module_id": module_id,
+                "success": result["success"],
+                "status": result["status"],
+                "capture": {
+                    "backend": capture.get("backend"),
+                    "interface": capture.get("interface"),
+                    "duration_seconds": capture.get("duration_seconds"),
+                    "packet_cap": capture.get("packet_cap"),
+                    "filter_preset": capture.get("filter_preset"),
+                    "filename": capture.get("filename"),
+                    "sha256": capture.get("sha256"),
+                    "file_size_bytes": capture.get("file_size_bytes"),
+                },
+                "pcap_review_summary": pcap_review.get("summary"),
+                "packets_analysed": pcap_parsed.get("packets_analysed"),
+                "protocols": pcap_parsed.get("protocols"),
+                "triage_narrative": (parsed_data.get("triage") or {}).get("narrative_text"),
+                "network_picture": ((parsed_data.get("triage") or {}).get("network_picture") or {}).get("one_liner"),
+                "investigate_entities": [
+                    item.get("value")
+                    for item in ((parsed_data.get("triage") or {}).get("ranked_entities") or [])
+                    if item.get("tier") == "investigate"
+                ][:10],
+                "interpreter_findings": result.get("interpreter_findings", []),
+                "warnings": result.get("warnings", []),
+            }
+        ),
+        raw_output=result["raw_output"],
+        **_observation_evidence_kwargs(module_id, result),
+        conn=conn,
+    )
+
+    _persist_observation_evidence(
+        conn,
+        case_id=case_id,
+        entity_id=entity_id,
+        observation_id=observation["id"],
+        module_id=module_id,
+        result=result,
+    )
+
+    interpreter_findings = result.get("interpreter_findings") or []
+    if interpreter_findings:
+        _persist_module_findings(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation["id"],
+            module_id=module_id,
+            interpreter_findings=interpreter_findings,
+        )
+
+    if pcap_parsed:
+        _persist_pcap_entities(
+            conn,
+            case_id=case_id,
+            file_entity_id=entity_id,
+            module_id=module_id,
+            parsed_data=pcap_parsed,
+        )
+
+
 def _scan_output_text(scan_data: dict[str, Any]) -> str:
     parts = [
         scan_data.get("raw_output", ""),
@@ -3853,6 +4125,201 @@ def _execute_urlhaus(
     return result
 
 
+def _execute_pcap_review(
+    module_id: str,
+    target: str,
+    options: dict[str, Any],
+    db_context: sqlite3.Connection | None,
+    authorisation_confirmed: bool,
+    case_id: int | None,
+    entity_id: int | None,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> dict[str, Any]:
+    _load_pcap_review_handler()
+    if _pcap_review_handler is None:
+        error_message = _pcap_review_load_error or "PCAP Evidence Review module is not available."
+        return make_result(
+            module_id,
+            success=False,
+            status="error",
+            summary="PCAP Evidence Review module is not available.",
+            errors=[error_message],
+        )
+
+    target_type = get_target_type(target)
+    module = get_module(module_id)
+    if module and not module_accepts_target(module, target_type):
+        reason = get_incompatible_reason(module, target_type)
+        return make_result(
+            module_id,
+            success=False,
+            status=STATUS_BLOCKED,
+            summary=reason or "Target type is not supported for PCAP review.",
+            errors=[reason or "incompatible_target"],
+        )
+
+    run_options = dict(options or {})
+    run_options.setdefault("pcap_filename", target)
+    run_options.setdefault("target_type", target_type)
+    if case_id is not None:
+        run_options.setdefault("case_id", case_id)
+
+    review_data = _pcap_review_handler(target, options=run_options)
+    status = review_data.get("status") or STATUS_ERROR
+    parsed_data = review_data.get("parsed_data") or {}
+    filename = parsed_data.get("filename") or target
+    interpreter_findings = review_data.get("interpreter_findings")
+    if interpreter_findings is None:
+        interpreter_findings = interpret_module_findings(module_id, parsed_data)
+    warnings = list(review_data.get("warnings") or [])
+    errors = list(review_data.get("errors") or [])
+
+    if not review_data.get("success"):
+        summary = review_data.get("summary") or (errors[0] if errors else "PCAP review failed.")
+        result = make_result(
+            module_id,
+            success=False,
+            status=status,
+            summary=summary,
+            raw_output=review_data.get("raw_output", ""),
+            errors=errors,
+            parsed_data=parsed_data,
+            warnings=warnings,
+            interpreter_findings=interpreter_findings,
+        )
+        if db_context is not None and case_id is not None:
+            create_operation_log(
+                case_id,
+                module_id,
+                filename,
+                result["status"],
+                authorisation_confirmed=authorisation_confirmed,
+                summary=summary,
+                run_mode_id=run_mode_id,
+                run_mode_label=run_mode_label,
+                conn=db_context,
+            )
+        return result
+
+    summary = review_data.get("summary") or f"PCAP evidence review completed for {filename}."
+    result = make_result(
+        module_id,
+        success=True,
+        status=status,
+        summary=summary,
+        raw_output=review_data.get("raw_output", ""),
+        warnings=warnings,
+        parsed_data=parsed_data,
+        interpreter_findings=interpreter_findings,
+    )
+
+    if db_context is not None and case_id is not None and entity_id is not None:
+        _persist_pcap_records(
+            db_context,
+            case_id=case_id,
+            entity_id=entity_id,
+            module_id=module_id,
+            target=filename,
+            result=result,
+            authorisation_confirmed=authorisation_confirmed,
+            run_mode_id=run_mode_id,
+            run_mode_label=run_mode_label,
+        )
+
+    return result
+
+
+def _execute_live_capture(
+    module_id: str,
+    target: str,
+    options: dict[str, Any],
+    db_context: sqlite3.Connection | None,
+    authorisation_confirmed: bool,
+    case_id: int | None,
+    entity_id: int | None,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> dict[str, Any]:
+    _load_live_capture_handler()
+    if _live_capture_handler is None:
+        error_message = _live_capture_load_error or "Personal Lab Packet Capture module is not available."
+        return make_result(
+            module_id,
+            success=False,
+            status="error",
+            summary="Personal Lab Packet Capture module is not available.",
+            errors=[error_message],
+        )
+
+    run_options = dict(options or {})
+    if case_id is not None:
+        run_options.setdefault("case_id", case_id)
+
+    capture_data = _live_capture_handler(target, options=run_options)
+    status = capture_data.get("status") or STATUS_ERROR
+    parsed_data = capture_data.get("parsed_data") or {}
+    interpreter_findings = capture_data.get("interpreter_findings")
+    if interpreter_findings is None:
+        interpreter_findings = interpret_module_findings(module_id, parsed_data)
+    warnings = list(capture_data.get("warnings") or [])
+    errors = list(capture_data.get("errors") or [])
+
+    if not capture_data.get("success"):
+        summary = capture_data.get("summary") or (errors[0] if errors else "Live capture failed.")
+        result = make_result(
+            module_id,
+            success=False,
+            status=status,
+            summary=summary,
+            raw_output=capture_data.get("raw_output", ""),
+            errors=errors,
+            parsed_data=parsed_data,
+            warnings=warnings,
+            interpreter_findings=interpreter_findings,
+        )
+        if db_context is not None and case_id is not None:
+            create_operation_log(
+                case_id,
+                module_id,
+                target,
+                result["status"],
+                authorisation_confirmed=authorisation_confirmed,
+                summary=summary,
+                run_mode_id=run_mode_id,
+                run_mode_label=run_mode_label,
+                conn=db_context,
+            )
+        return result
+
+    summary = capture_data.get("summary") or "Personal Lab packet capture completed."
+    result = make_result(
+        module_id,
+        success=True,
+        status=status,
+        summary=summary,
+        raw_output=capture_data.get("raw_output", ""),
+        warnings=warnings,
+        parsed_data=parsed_data,
+        interpreter_findings=interpreter_findings,
+    )
+
+    if db_context is not None and case_id is not None and entity_id is not None:
+        _persist_live_capture_records(
+            db_context,
+            case_id=case_id,
+            entity_id=entity_id,
+            module_id=module_id,
+            target=target,
+            result=result,
+            authorisation_confirmed=authorisation_confirmed,
+            run_mode_id=run_mode_id,
+            run_mode_label=run_mode_label,
+        )
+
+    return result
+
+
 def execute_module(
     module_id: str,
     target: str,
@@ -4054,290 +4521,32 @@ def execute_module(
             errors=preflight["errors"],
         )
 
-    if module_id == "infra_nmap":
-        if not is_runtime_ready(module_id):
-            error_message = get_runtime_error(module_id) or "Nmap runtime is not ready."
-            return make_result(
-                module_id,
-                success=False,
-                status="error",
-                summary="Nmap module is not available.",
-                errors=[error_message],
-            )
-        return _execute_nmap(
+    from modules.executor_dispatch import run_dispatch
+
+    def _unavailable(module_id: str, *, summary: str, error_message: str) -> dict[str, Any]:
+        return make_result(
             module_id,
-            target,
-            options,
-            db_context,
-            authorisation_confirmed,
-            case_id,
-            entity_id,
-            run_mode_id,
-            run_mode_label,
+            success=False,
+            status="error",
+            summary=summary,
+            errors=[error_message],
         )
 
-    if module_id == "infra_domain_intel":
-        if not is_runtime_ready(module_id):
-            error_message = get_runtime_error(module_id) or "Domain Intelligence runtime is not ready."
-            return make_result(
-                module_id,
-                success=False,
-                status="error",
-                summary="Domain Intelligence module is not available.",
-                errors=[error_message],
-            )
-        return _execute_domain_intel(
-            module_id,
-            target,
-            db_context,
-            authorisation_confirmed,
-            case_id,
-            entity_id,
-            run_mode_id,
-            run_mode_label,
-        )
+    dispatched = run_dispatch(
+        module_id,
+        target,
+        options,
+        db_context,
+        authorisation_confirmed,
+        case_id,
+        entity_id,
+        run_mode_id,
+        run_mode_label,
+        make_unavailable_result=_unavailable,
+    )
+    if dispatched is not None:
+        return dispatched
 
-    if module_id == "infra_cert_subdomain":
-        if not is_runtime_ready(module_id):
-            error_message = get_runtime_error(module_id) or "Certificate & Subdomain Intelligence runtime is not ready."
-            return make_result(
-                module_id,
-                success=False,
-                status="error",
-                summary="Certificate & Subdomain Intelligence module is not available.",
-                errors=[error_message],
-            )
-        return _execute_cert_subdomain(
-            module_id,
-            target,
-            db_context,
-            authorisation_confirmed,
-            case_id,
-            entity_id,
-            run_mode_id,
-            run_mode_label,
-        )
-
-    if module_id == "infra_website_metadata":
-        if not is_runtime_ready(module_id):
-            error_message = get_runtime_error(module_id) or "Website Metadata Review runtime is not ready."
-            return make_result(
-                module_id,
-                success=False,
-                status="error",
-                summary="Website Metadata Review module is not available.",
-                errors=[error_message],
-            )
-        return _execute_website_metadata(
-            module_id,
-            target,
-            db_context,
-            authorisation_confirmed,
-            case_id,
-            entity_id,
-            run_mode_id,
-            run_mode_label,
-        )
-
-    if module_id == "infra_email_security":
-        if not is_runtime_ready(module_id):
-            error_message = get_runtime_error(module_id) or "Domain Email Security Posture runtime is not ready."
-            return make_result(
-                module_id,
-                success=False,
-                status="error",
-                summary="Domain Email Security Posture module is not available.",
-                errors=[error_message],
-            )
-        return _execute_email_security(
-            module_id,
-            target,
-            options,
-            db_context,
-            authorisation_confirmed,
-            case_id,
-            entity_id,
-            run_mode_id,
-            run_mode_label,
-        )
-
-    if module_id == "infra_tls_review":
-        if not is_runtime_ready(module_id):
-            error_message = get_runtime_error(module_id) or "SSL / TLS Configuration Review runtime is not ready."
-            return make_result(
-                module_id,
-                success=False,
-                status="error",
-                summary="SSL / TLS Configuration Review module is not available.",
-                errors=[error_message],
-            )
-        return _execute_tls_review(
-            module_id,
-            target,
-            options,
-            db_context,
-            authorisation_confirmed,
-            case_id,
-            entity_id,
-            run_mode_id,
-            run_mode_label,
-        )
-
-    if module_id == "infra_http_security":
-        if not is_runtime_ready(module_id):
-            error_message = get_runtime_error(module_id) or "HTTP Security Header Review runtime is not ready."
-            return make_result(
-                module_id,
-                success=False,
-                status="error",
-                summary="HTTP Security Header Review module is not available.",
-                errors=[error_message],
-            )
-        return _execute_http_security(
-            module_id,
-            target,
-            options,
-            db_context,
-            authorisation_confirmed,
-            case_id,
-            entity_id,
-            run_mode_id,
-            run_mode_label,
-        )
-
-    if module_id == "infra_whois_rdap":
-        if not is_runtime_ready(module_id):
-            error_message = get_runtime_error(module_id) or "WHOIS/RDAP Intelligence runtime is not ready."
-            return make_result(
-                module_id,
-                success=False,
-                status="error",
-                summary="WHOIS/RDAP Intelligence module is not available.",
-                errors=[error_message],
-            )
-        return _execute_whois_rdap(
-            module_id,
-            target,
-            options,
-            db_context,
-            authorisation_confirmed,
-            case_id,
-            entity_id,
-            run_mode_id,
-            run_mode_label,
-        )
-
-    if module_id == "intel_virustotal":
-        if not is_runtime_ready(module_id):
-            error_message = get_runtime_error(module_id) or "VirusTotal runtime is not ready."
-            return make_result(
-                module_id,
-                success=False,
-                status="error",
-                summary="VirusTotal module is not available.",
-                errors=[error_message],
-            )
-        return _execute_virustotal(
-            module_id,
-            target,
-            options,
-            db_context,
-            authorisation_confirmed,
-            case_id,
-            entity_id,
-            run_mode_id,
-            run_mode_label,
-        )
-
-    if module_id == "intel_abuseipdb":
-        if not is_runtime_ready(module_id):
-            error_message = get_runtime_error(module_id) or "AbuseIPDB runtime is not ready."
-            return make_result(
-                module_id,
-                success=False,
-                status="error",
-                summary="AbuseIPDB module is not available.",
-                errors=[error_message],
-            )
-        return _execute_abuseipdb(
-            module_id,
-            target,
-            options,
-            db_context,
-            authorisation_confirmed,
-            case_id,
-            entity_id,
-            run_mode_id,
-            run_mode_label,
-        )
-
-    if module_id == "intel_greynoise":
-        if not is_runtime_ready(module_id):
-            error_message = get_runtime_error(module_id) or "GreyNoise runtime is not ready."
-            return make_result(
-                module_id,
-                success=False,
-                status="error",
-                summary="GreyNoise module is not available.",
-                errors=[error_message],
-            )
-        return _execute_greynoise(
-            module_id,
-            target,
-            options,
-            db_context,
-            authorisation_confirmed,
-            case_id,
-            entity_id,
-            run_mode_id,
-            run_mode_label,
-        )
-
-    if module_id == "intel_shodan":
-        if not is_runtime_ready(module_id):
-            error_message = get_runtime_error(module_id) or "Shodan runtime is not ready."
-            return make_result(
-                module_id,
-                success=False,
-                status="error",
-                summary="Shodan module is not available.",
-                errors=[error_message],
-            )
-        return _execute_shodan(
-            module_id,
-            target,
-            options,
-            db_context,
-            authorisation_confirmed,
-            case_id,
-            entity_id,
-            run_mode_id,
-            run_mode_label,
-        )
-
-    if module_id == "intel_urlhaus":
-        if not is_runtime_ready(module_id):
-            error_message = get_runtime_error(module_id) or "URLhaus runtime is not ready."
-            return make_result(
-                module_id,
-                success=False,
-                status="error",
-                summary="URLhaus module is not available.",
-                errors=[error_message],
-            )
-        return _execute_urlhaus(
-            module_id,
-            target,
-            options,
-            db_context,
-            authorisation_confirmed,
-            case_id,
-            entity_id,
-            run_mode_id,
-            run_mode_label,
-        )
-
-    # Additional modules: register an interpreter in utils/findings_registry.py and wire execution here.
     return make_result(
         module_id,
         success=False,
@@ -4345,3 +4554,189 @@ def execute_module(
         summary=f"{module.display_name} is registered but not wired in the executor yet.",
         errors=["not_wired"],
     )
+
+
+def _register_executor_dispatch() -> None:
+    """Wire all module handlers into the central dispatch registry."""
+    from modules.executor_dispatch import ExecuteFn, ModuleDispatchEntry, register_executor
+
+    def _module_ready(load_fn: Callable[[], None], handler_getter: Callable[[], Any]) -> Callable[[], bool]:
+        def _ready() -> bool:
+            load_fn()
+            return handler_getter() is not None
+
+        return _ready
+
+    def _module_error(load_fn: Callable[[], None], error_getter: Callable[[], str | None]) -> Callable[[], str | None]:
+        def _error() -> str | None:
+            load_fn()
+            return error_getter()
+
+        return _error
+
+    def _nmap_ready() -> bool:
+        _load_nmap_handlers()
+        return _nmap_handlers is not None and _nmap_binary_available()
+
+    def _nmap_error() -> str | None:
+        _load_nmap_handlers()
+        if not _nmap_binary_available():
+            return (
+                "Nmap is not installed or not on your PATH. "
+                "Install from https://nmap.org/download.html and restart the app."
+            )
+        return _nmap_load_error
+
+    def _wrap_no_options(execute_fn: ExecuteFn) -> ExecuteFn:
+        def _wrapped(
+            module_id: str,
+            target: str,
+            options: dict[str, Any],
+            db_context: sqlite3.Connection | None,
+            authorisation_confirmed: bool,
+            case_id: int | None,
+            entity_id: int | None,
+            run_mode_id: str | None,
+            run_mode_label: str | None,
+        ) -> dict[str, Any]:
+            return execute_fn(
+                module_id,
+                target,
+                db_context,
+                authorisation_confirmed,
+                case_id,
+                entity_id,
+                run_mode_id,
+                run_mode_label,
+            )
+
+        return _wrapped
+
+    entries = (
+        ModuleDispatchEntry(
+            "infra_nmap",
+            load=_load_nmap_handlers,
+            is_ready=_nmap_ready,
+            get_error=_nmap_error,
+            execute=_execute_nmap,
+            unavailable_label="Network Service Check",
+            persist_hook=_persist_nmap_services_and_relationships,
+        ),
+        ModuleDispatchEntry(
+            "infra_domain_intel",
+            load=_load_domain_intel_handler,
+            is_ready=_module_ready(_load_domain_intel_handler, lambda: _domain_intel_handler),
+            get_error=_module_error(_load_domain_intel_handler, lambda: _domain_intel_load_error),
+            execute=_wrap_no_options(_execute_domain_intel),
+            unavailable_label="Domain Intelligence",
+        ),
+        ModuleDispatchEntry(
+            "infra_cert_subdomain",
+            load=_load_cert_subdomain_handler,
+            is_ready=_module_ready(_load_cert_subdomain_handler, lambda: _cert_subdomain_handler),
+            get_error=_module_error(_load_cert_subdomain_handler, lambda: _cert_subdomain_load_error),
+            execute=_wrap_no_options(_execute_cert_subdomain),
+            unavailable_label="Certificate & Subdomain Intelligence",
+        ),
+        ModuleDispatchEntry(
+            "infra_website_metadata",
+            load=_load_website_metadata_handler,
+            is_ready=_module_ready(_load_website_metadata_handler, lambda: _website_metadata_handler),
+            get_error=_module_error(_load_website_metadata_handler, lambda: _website_metadata_load_error),
+            execute=_wrap_no_options(_execute_website_metadata),
+            unavailable_label="Website Metadata Review",
+        ),
+        ModuleDispatchEntry(
+            "infra_email_security",
+            load=_load_email_security_handler,
+            is_ready=_module_ready(_load_email_security_handler, lambda: _email_security_handler),
+            get_error=_module_error(_load_email_security_handler, lambda: _email_security_load_error),
+            execute=_execute_email_security,
+            unavailable_label="Domain Email Security Posture",
+        ),
+        ModuleDispatchEntry(
+            "infra_tls_review",
+            load=_load_tls_review_handler,
+            is_ready=_module_ready(_load_tls_review_handler, lambda: _tls_review_handler),
+            get_error=_module_error(_load_tls_review_handler, lambda: _tls_review_load_error),
+            execute=_execute_tls_review,
+            unavailable_label="SSL / TLS Configuration Review",
+        ),
+        ModuleDispatchEntry(
+            "infra_http_security",
+            load=_load_http_security_handler,
+            is_ready=_module_ready(_load_http_security_handler, lambda: _http_security_handler),
+            get_error=_module_error(_load_http_security_handler, lambda: _http_security_load_error),
+            execute=_execute_http_security,
+            unavailable_label="HTTP Security Header Review",
+        ),
+        ModuleDispatchEntry(
+            "infra_whois_rdap",
+            load=_load_whois_rdap_handler,
+            is_ready=_module_ready(_load_whois_rdap_handler, lambda: _whois_rdap_handler),
+            get_error=_module_error(_load_whois_rdap_handler, lambda: _whois_rdap_load_error),
+            execute=_execute_whois_rdap,
+            unavailable_label="WHOIS/RDAP Intelligence",
+        ),
+        ModuleDispatchEntry(
+            "intel_virustotal",
+            load=_load_virustotal_handler,
+            is_ready=_module_ready(_load_virustotal_handler, lambda: _virustotal_handler),
+            get_error=_module_error(_load_virustotal_handler, lambda: _virustotal_load_error),
+            execute=_execute_virustotal,
+            unavailable_label="VirusTotal",
+        ),
+        ModuleDispatchEntry(
+            "intel_abuseipdb",
+            load=_load_abuseipdb_handler,
+            is_ready=_module_ready(_load_abuseipdb_handler, lambda: _abuseipdb_handler),
+            get_error=_module_error(_load_abuseipdb_handler, lambda: _abuseipdb_load_error),
+            execute=_execute_abuseipdb,
+            unavailable_label="AbuseIPDB",
+        ),
+        ModuleDispatchEntry(
+            "intel_greynoise",
+            load=_load_greynoise_handler,
+            is_ready=_module_ready(_load_greynoise_handler, lambda: _greynoise_handler),
+            get_error=_module_error(_load_greynoise_handler, lambda: _greynoise_load_error),
+            execute=_execute_greynoise,
+            unavailable_label="GreyNoise",
+        ),
+        ModuleDispatchEntry(
+            "intel_shodan",
+            load=_load_shodan_handler,
+            is_ready=_module_ready(_load_shodan_handler, lambda: _shodan_handler),
+            get_error=_module_error(_load_shodan_handler, lambda: _shodan_load_error),
+            execute=_execute_shodan,
+            unavailable_label="Shodan",
+        ),
+        ModuleDispatchEntry(
+            "intel_urlhaus",
+            load=_load_urlhaus_handler,
+            is_ready=_module_ready(_load_urlhaus_handler, lambda: _urlhaus_handler),
+            get_error=_module_error(_load_urlhaus_handler, lambda: _urlhaus_load_error),
+            execute=_execute_urlhaus,
+            unavailable_label="URLhaus",
+        ),
+        ModuleDispatchEntry(
+            "net_pcap_review",
+            load=_load_pcap_review_handler,
+            is_ready=_module_ready(_load_pcap_review_handler, lambda: _pcap_review_handler),
+            get_error=_module_error(_load_pcap_review_handler, lambda: _pcap_review_load_error),
+            execute=_execute_pcap_review,
+            unavailable_label="PCAP Evidence Review",
+        ),
+        ModuleDispatchEntry(
+            "net_live_capture",
+            load=_load_live_capture_handler,
+            is_ready=_module_ready(_load_live_capture_handler, lambda: _live_capture_handler),
+            get_error=_module_error(_load_live_capture_handler, lambda: _live_capture_load_error),
+            execute=_execute_live_capture,
+            unavailable_label="Personal Lab Packet Capture",
+        ),
+    )
+    for entry in entries:
+        register_executor(entry)
+
+
+_register_executor_dispatch()

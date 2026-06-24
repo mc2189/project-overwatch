@@ -7,7 +7,12 @@ import socket
 from typing import Any
 
 from utils.security import is_private_or_local_ip
-from utils.service_discovery import build_http_url, load_discovered_services, web_tls_service_rows
+from utils.service_discovery import (
+    build_http_url,
+    build_service_recommendation_table,
+    load_discovered_services,
+    web_tls_service_rows,
+)
 from utils.target_detection import get_target_type
 
 DEFAULT_COMMON_WEB_PORTS: tuple[int, ...] = (80, 443, 8080, 8443, 8000, 8888)

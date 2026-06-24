@@ -47,6 +47,7 @@ ACTION_TYPES = frozenset(
         "add_note",
         "no_action",
         "try_common_web_ports",
+        "open_graph",
     }
 )
 
@@ -70,6 +71,7 @@ _DEFAULT_BUTTON_LABELS: dict[str, str] = {
     "add_note": "Add note",
     "no_action": "Info",
     "try_common_web_ports": "Try common web ports",
+    "open_graph": "Open graph",
 }
 
 
@@ -292,6 +294,52 @@ def suggest_next_actions(
     entity_id = target_profile.get("entity_id")
     actions: list[dict[str, Any]] = []
 
+    if goal_id == GOAL_EVIDENCE_REVIEW:
+        pcap_results = [
+            result
+            for result in latest_results
+            if result.get("module_id") == "net_pcap_review" and result.get("success")
+        ]
+        live_results = [
+            result
+            for result in latest_results
+            if result.get("module_id") == "net_live_capture" and result.get("success")
+        ]
+        evidence_actions: list[dict[str, Any]] = []
+        source_result = pcap_results[0] if pcap_results else (live_results[0] if live_results else None)
+        if source_result:
+            if source_result.get("module_id") == "net_live_capture":
+                parsed = ((source_result.get("parsed_data") or {}).get("pcap_review") or {}).get("parsed_data") or {}
+            else:
+                parsed = source_result.get("parsed_data") or {}
+            from utils.pcap_next_actions import suggest_pcap_investigation_actions
+
+            evidence_actions.extend(
+                suggest_pcap_investigation_actions(
+                    source_result,
+                    case_id=case_id,
+                    workspace_target=cleaned,
+                )[:10]
+            )
+        else:
+            evidence_actions.append(
+                make_action(
+                    title="Upload a PCAP or run live capture",
+                    reason="Upload a capture via Uploaded evidence review or use Packet Capture.",
+                    action_type="no_action",
+                    priority="high",
+                    button_label="Capture required",
+                )
+            )
+        return finalize_actions(
+            evidence_actions,
+            case_id=case_id,
+            operating_context=operating_context,
+            personal_lab_confirmed=personal_lab_confirmed,
+            authorisation_confirmed=authorisation_confirmed,
+            conn=conn,
+        )
+
     if not cleaned:
         return finalize_actions(
             [
@@ -300,24 +348,6 @@ def suggest_next_actions(
                     reason="The workspace needs a target before it can recommend checks.",
                     action_type="no_action",
                     priority="high",
-                )
-            ],
-            case_id=case_id,
-            operating_context=operating_context,
-            personal_lab_confirmed=personal_lab_confirmed,
-            authorisation_confirmed=authorisation_confirmed,
-            conn=conn,
-        )
-
-    if goal_id == GOAL_EVIDENCE_REVIEW:
-        return finalize_actions(
-            [
-                make_action(
-                    title="Open Evidence Locker",
-                    reason="Review uploaded artefacts from the Evidence Locker.",
-                    action_type="review_evidence",
-                    priority="high",
-                    button_label="Open evidence",
                 )
             ],
             case_id=case_id,
@@ -504,7 +534,7 @@ def suggest_next_actions(
         "infra_email_security": (GOAL_EMAIL_SPOOFING, "Review email security posture"),
         "infra_http_security": (GOAL_WEBSITE_POSTURE, "Run HTTP header review"),
         "infra_tls_review": (GOAL_WEBSITE_POSTURE, "Run TLS configuration review"),
-        "infra_shodan": (GOAL_EXTERNAL_EXPOSURE, "Run Shodan exposure lookup"),
+        "intel_shodan": (GOAL_EXTERNAL_EXPOSURE, "Run Shodan exposure lookup"),
         "infra_domain_intel": (GOAL_WEBSITE_POSTURE, "Run domain intelligence"),
         "infra_website_metadata": (GOAL_WEBSITE_POSTURE, "Run website metadata review"),
         "infra_cert_subdomain": (GOAL_WEBSITE_POSTURE, "Review certificate subdomains"),
@@ -715,4 +745,114 @@ def suggest_next_actions(
         personal_lab_confirmed=personal_lab_confirmed,
         authorisation_confirmed=authorisation_confirmed,
         conn=conn,
+    )
+
+
+def suggest_finding_detail_actions(
+    finding: dict[str, Any],
+    *,
+    case_id: int,
+    entity_value: str | None = None,
+    operating_context: str = PASSIVE_RESEARCH,
+    personal_lab_confirmed: bool = False,
+    authorisation_confirmed: bool = False,
+) -> list[dict[str, Any]]:
+    """Next-step actions for a single finding detail view."""
+    actions: list[dict[str, Any]] = []
+    entity_id = finding.get("entity_id")
+    module_id = finding.get("module_id")
+
+    if entity_id:
+        actions.append(
+            make_action(
+                title="Open entity in workspace",
+                reason="Review intelligence and run follow-up modules for this entity.",
+                action_type="open_entity",
+                priority="high",
+                entity_id=int(entity_id),
+                target=entity_value,
+            )
+        )
+    if module_id and entity_value:
+        module = get_module(str(module_id))
+        if module and is_executable(module):
+            actions.append(
+                make_action(
+                    title=f"Re-run {MODULE_CARD_TITLES.get(str(module_id), module.display_name)}",
+                    reason="Re-execute the module that produced this finding.",
+                    action_type="run_module",
+                    priority="medium",
+                    module_id=str(module_id),
+                    target=entity_value,
+                    entity_id=int(entity_id) if entity_id else None,
+                )
+            )
+    actions.append(
+        make_action(
+            title="Review related evidence",
+            reason="Confirm source artefacts and provenance in Evidence Locker.",
+            action_type="review_evidence",
+            priority="medium",
+        )
+    )
+    return finalize_actions(
+        actions,
+        case_id=case_id,
+        operating_context=operating_context,
+        personal_lab_confirmed=personal_lab_confirmed,
+        authorisation_confirmed=authorisation_confirmed,
+    )
+
+
+def suggest_evidence_item_actions(
+    item: dict[str, Any],
+    *,
+    case_id: int,
+    operating_context: str = PASSIVE_RESEARCH,
+    personal_lab_confirmed: bool = False,
+    authorisation_confirmed: bool = False,
+) -> list[dict[str, Any]]:
+    """Next-step actions for a single evidence locker item."""
+    actions: list[dict[str, Any]] = []
+    finding_id = item.get("finding_id")
+    entity_id = item.get("entity_id")
+    if finding_id:
+        actions.append(
+            make_action(
+                title="Open linked finding",
+                reason="Triage the finding associated with this artefact.",
+                action_type="open_finding",
+                priority="high",
+                finding_id=int(finding_id),
+                entity_id=int(entity_id) if entity_id else None,
+            )
+        )
+    if entity_id:
+        actions.append(
+            make_action(
+                title="Open linked entity",
+                reason="Pivot from the entity tied to this evidence.",
+                action_type="open_entity",
+                priority="medium",
+                entity_id=int(entity_id),
+            )
+        )
+    module_id = item.get("module_id")
+    if module_id and entity_id:
+        actions.append(
+            make_action(
+                title="Re-run source module",
+                reason=f"Re-execute `{module_id}` if you need fresh output.",
+                action_type="run_module",
+                priority="low",
+                module_id=str(module_id),
+                entity_id=int(entity_id),
+            )
+        )
+    return finalize_actions(
+        actions,
+        case_id=case_id,
+        operating_context=operating_context,
+        personal_lab_confirmed=personal_lab_confirmed,
+        authorisation_confirmed=authorisation_confirmed,
     )

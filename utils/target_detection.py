@@ -5,7 +5,17 @@ from __future__ import annotations
 import re
 from urllib.parse import urlparse
 
-TARGET_TYPES: tuple[str, ...] = ("ipv4", "domain", "url", "email", "username", "unknown")
+TARGET_TYPES: tuple[str, ...] = (
+    "ipv4",
+    "domain",
+    "url",
+    "email",
+    "username",
+    "file",
+    "pcap",
+    "pcapng",
+    "unknown",
+)
 
 IPv4_PATTERN = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$")
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -20,6 +30,9 @@ TARGET_TYPE_LABELS: dict[str, str] = {
     "url": "URL",
     "email": "Email address",
     "username": "Username-like value",
+    "file": "File",
+    "pcap": "PCAP capture",
+    "pcapng": "PCAPNG capture",
     "unknown": "Unknown",
 }
 
@@ -29,6 +42,9 @@ ENTITY_TYPE_BY_TARGET: dict[str, str] = {
     "url": "domain",
     "email": "email",
     "username": "username",
+    "file": "artefact",
+    "pcap": "artefact",
+    "pcapng": "artefact",
     "unknown": "unknown",
 }
 
@@ -54,6 +70,11 @@ def get_target_type(value: str) -> str:
 
     if USERNAME_PATTERN.match(cleaned):
         return "username"
+
+    if lowered.endswith(".pcapng"):
+        return "pcapng"
+    if lowered.endswith(".pcap"):
+        return "pcap"
 
     return "unknown"
 

@@ -45,8 +45,10 @@ def load_case_metrics(case_id: int) -> dict[str, int]:
     }
 
 
-def render_compact_metrics(metrics: dict[str, int], *, minimal: bool = False) -> None:
+def render_compact_metrics(metrics: dict[str, int] | None = None, *, minimal: bool = False) -> None:
     """Render a compact metrics row for archive pages."""
+    if not metrics:
+        return
     if minimal:
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Entities", metrics["entities"])

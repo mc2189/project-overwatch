@@ -7,9 +7,11 @@ from typing import Any
 import streamlit as st
 
 from database.db_setup import get_db_conn, list_entities, list_evidence_items, list_findings
+from ui.action_cards import render_action_cards
 from ui.metrics import render_compact_metrics
 from utils.evidence_model import evidence_type_label, reliability_label
 from utils.evidence_storage import read_spilled_content
+from utils.next_actions import suggest_evidence_item_actions
 
 CONTENT_PREVIEW_LIMIT = 500
 CONTENT_EXPAND_LIMIT = 12000
@@ -120,3 +122,18 @@ def render_evidence_page(case_id: int, metrics: dict[str, int]) -> None:
             if item.get("content_hash"):
                 st.markdown(f"**Content hash:** `{item['content_hash']}`")
             render_evidence_item_detail(item)
+            actions = suggest_evidence_item_actions(
+                item,
+                case_id=case_id,
+                operating_context=st.session_state.get("operating_context", "passive_research"),
+                personal_lab_confirmed=bool(st.session_state.get("personal_lab_confirmed")),
+                authorisation_confirmed=bool(st.session_state.get("authorisation_confirmed")),
+            )
+            if actions:
+                render_action_cards(
+                    actions,
+                    case_id=case_id,
+                    title="Next steps",
+                    limit=3,
+                    key_prefix=f"evidence_{item.get('id', header)}",
+                )

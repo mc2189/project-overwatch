@@ -1564,6 +1564,374 @@ def capture_urlhaus_evidence(
     return items
 
 
+def capture_pcap_evidence(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    observation_id: int,
+    module_id: str,
+    result: dict[str, Any],
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    parsed_data = result.get("parsed_data") or {}
+    filename = parsed_data.get("filename") or "capture"
+
+    items.append(
+        _create_item(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            title="PCAP capture file summary",
+            summary="Metadata for the supplied packet capture file (hash and size only).",
+            content_text=_text_summary(
+                {
+                    "filename": filename,
+                    "sha256": parsed_data.get("sha256"),
+                    "file_size_bytes": parsed_data.get("file_size_bytes"),
+                    "packets_analysed": parsed_data.get("packets_analysed"),
+                    "duration_seconds": parsed_data.get("duration_seconds"),
+                }
+            ),
+            content_type="application/json",
+            evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+            source_name="uploaded_pcap",
+            collection_method="local_packet_capture_review",
+            reliability=RELIABILITY_HIGH,
+        )
+    )
+
+    if not parsed_data.get("parser_available"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="PCAP parser dependency unavailable",
+                summary="Deep packet parsing was not available during this run.",
+                content_text=_text_summary(
+                    {
+                        "parser_available": False,
+                        "note": "Install pyshark and Wireshark/tshark for deeper parsing.",
+                    }
+                ),
+                content_type="application/json",
+                evidence_type=EVIDENCE_UNAVAILABLE_SOURCE,
+                source_name="uploaded_pcap",
+                collection_method="local_packet_capture_review",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+        return items
+
+    if parsed_data.get("protocols"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Protocol summary",
+                summary="Protocols observed in the supplied capture (bounded sample).",
+                content_text=_text_summary({"protocols": parsed_data.get("protocols")}),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="uploaded_pcap",
+                collection_method="local_packet_capture_review",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    if parsed_data.get("top_conversations"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Top conversations summary",
+                summary="Highest-volume endpoint conversations in the supplied capture.",
+                content_text=_text_summary({"top_conversations": parsed_data.get("top_conversations")}),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="uploaded_pcap",
+                collection_method="local_packet_capture_review",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    if parsed_data.get("dns_queries"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="DNS query summary",
+                summary="Sampled DNS queries from the supplied capture.",
+                content_text=_text_summary({"dns_queries": parsed_data.get("dns_queries")}),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="uploaded_pcap",
+                collection_method="local_packet_capture_review",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    if parsed_data.get("http_entries"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="HTTP traffic summary",
+                summary="Sampled HTTP hosts/methods/status codes — no raw payloads stored.",
+                content_text=_text_summary({"http_entries": parsed_data.get("http_entries")}),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="uploaded_pcap",
+                collection_method="local_packet_capture_review",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    if parsed_data.get("tls_sni"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="TLS / SNI summary",
+                summary="Sampled TLS server names from the supplied capture.",
+                content_text=_text_summary({"tls_sni": parsed_data.get("tls_sni")}),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="uploaded_pcap",
+                collection_method="local_packet_capture_review",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    if parsed_data.get("analysis_capped"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Packet analysis capped",
+                summary="Analysis stopped at the configured packet cap.",
+                content_text=_text_summary(
+                    {
+                        "analysis_capped": True,
+                        "packets_analysed": parsed_data.get("packets_analysed"),
+                    }
+                ),
+                content_type="application/json",
+                evidence_type=EVIDENCE_SYSTEM_GENERATED,
+                source_name="uploaded_pcap",
+                collection_method="local_packet_capture_review",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    if parsed_data.get("sensitive_values_redacted"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Sensitive value redaction note",
+                summary="Sensitive-looking HTTP material was detected and redacted from stored output.",
+                content_text=_text_summary(
+                    {
+                        "sensitive_values_redacted": True,
+                        "note": "Inspect the original capture offline under controlled conditions if required.",
+                    }
+                ),
+                content_type="application/json",
+                evidence_type=EVIDENCE_SYSTEM_GENERATED,
+                source_name="uploaded_pcap",
+                collection_method="local_packet_capture_review",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    for warning in result.get("warnings") or []:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="PCAP parser warning",
+                summary=str(warning)[:200],
+                content_text=str(warning),
+                content_type="text/plain",
+                evidence_type=EVIDENCE_SYSTEM_GENERATED,
+                source_name="uploaded_pcap",
+                collection_method="local_packet_capture_review",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    return items
+
+
+def capture_live_capture_evidence(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    observation_id: int,
+    module_id: str,
+    result: dict[str, Any],
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    parsed_data = result.get("parsed_data") or {}
+    capture = parsed_data.get("capture") or {}
+    pcap_review = parsed_data.get("pcap_review") or {}
+    pcap_parsed = pcap_review.get("parsed_data") or {}
+
+    items.append(
+        _create_item(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            title="Live capture settings",
+            summary="Bounded Personal Lab capture parameters used for this run.",
+            content_text=_text_summary(
+                {
+                    "backend": capture.get("backend"),
+                    "interface": capture.get("interface"),
+                    "duration_seconds": capture.get("duration_seconds"),
+                    "packet_cap": capture.get("packet_cap"),
+                    "filter_preset": capture.get("filter_preset"),
+                    "bpf_filter": capture.get("bpf_filter"),
+                }
+            ),
+            content_type="application/json",
+            evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+            source_name="personal_lab_packet_capture",
+            collection_method="controlled_live_packet_capture",
+            reliability=RELIABILITY_HIGH,
+        )
+    )
+
+    if capture.get("filename"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Capture file metadata",
+                summary="Saved PCAP file metadata from the live capture.",
+                content_text=_text_summary(
+                    {
+                        "filename": capture.get("filename"),
+                        "sha256": capture.get("sha256"),
+                        "file_size_bytes": capture.get("file_size_bytes"),
+                    }
+                ),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="personal_lab_packet_capture",
+                collection_method="controlled_live_packet_capture",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    if capture.get("backend"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Capture backend used",
+                summary=f"Capture backend: {capture.get('backend')}",
+                content_text=_text_summary({"backend": capture.get("backend")}),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="personal_lab_packet_capture",
+                collection_method="controlled_live_packet_capture",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    if pcap_parsed:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="PCAP analysis summary",
+                summary="Bounded PCAP Evidence Review summary for the captured file.",
+                content_text=_text_summary(
+                    {
+                        "packets_analysed": pcap_parsed.get("packets_analysed"),
+                        "protocols": pcap_parsed.get("protocols"),
+                        "top_source_ips": pcap_parsed.get("top_source_ips"),
+                        "dns_queries": (pcap_parsed.get("dns_queries") or [])[:20],
+                    }
+                ),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="personal_lab_packet_capture",
+                collection_method="controlled_live_packet_capture",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    if capture.get("permission_denied"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Capture permission issue",
+                summary="Live capture failed due to local permission restrictions.",
+                content_text=_text_summary(
+                    {
+                        "manual_command": capture.get("manual_command"),
+                        "permission_denied": True,
+                    }
+                ),
+                content_type="application/json",
+                evidence_type=EVIDENCE_UNAVAILABLE_SOURCE,
+                source_name="personal_lab_packet_capture",
+                collection_method="controlled_live_packet_capture",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    return items
+
+
 def capture_whois_rdap_evidence(
     conn: sqlite3.Connection,
     *,
@@ -1780,6 +2148,24 @@ def capture_module_evidence(
         )
     elif module_id == "intel_urlhaus":
         items = capture_urlhaus_evidence(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            result=result,
+        )
+    elif module_id == "net_pcap_review":
+        items = capture_pcap_evidence(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            result=result,
+        )
+    elif module_id == "net_live_capture":
+        items = capture_live_capture_evidence(
             conn,
             case_id=case_id,
             entity_id=entity_id,

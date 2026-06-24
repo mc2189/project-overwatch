@@ -59,6 +59,55 @@ def _scope_match(target: str, case_id: int, conn: Any) -> dict[str, Any] | None:
     return resolve_scope_match(target, items)
 
 
+def _evaluate_personal_lab_capture_readiness(
+    *,
+    personal_lab_confirmed: bool,
+) -> dict[str, Any]:
+    """Packet capture only needs Personal Lab enabled + confirmation — no per-target scope."""
+    enabled = personal_lab_enabled()
+    confirmed = personal_lab_confirmed
+    blocked_reason: str | None = None
+    if not enabled:
+        blocked_reason = "Personal Lab Mode is disabled in settings."
+    elif not confirmed:
+        blocked_reason = "Personal Lab capture confirmation is required."
+
+    if not confirmed:
+        result = "needs_confirmation"
+    elif blocked_reason:
+        result = "blocked"
+    else:
+        result = "ready"
+
+    return {
+        "enabled": enabled,
+        "confirmed": confirmed,
+        "in_scope": True,
+        "will_auto_scope_on_run": False,
+        "auto_scope_created": False,
+        "scope_status": "not_required",
+        "scope_label": "not required for packet capture",
+        "testing_level_permitted": "safe_active",
+        "testing_level_ok": True,
+        "allowed": blocked_reason is None,
+        "blocked_reason": blocked_reason,
+        "result": result,
+        "classification": {
+            "target_type": "unknown",
+            "is_private": True,
+            "is_public": False,
+            "hint": "Local interface capture — no target scope entry required.",
+            "warning": None,
+        },
+        "is_private_target": True,
+        "is_public_target": False,
+        "target_hint": "Local interface capture — no target scope entry required.",
+        "target_warning": None,
+        "needs_lab_scope_add": False,
+        "can_auto_scope": False,
+    }
+
+
 def can_auto_scope_testing_level(testing_level: str) -> bool:
     """Auto-scope is only offered for safe active check levels."""
     allowed = SCOPE_LEVEL_ALLOWS.get("safe_active", ())
@@ -109,7 +158,10 @@ def evaluate_personal_lab_readiness(
     Evaluate Personal Lab readiness for one active module.
 
     When apply_auto_scope is True (executor path), scope is created if needed before returning.
-  """
+    """
+    if testing_level == "personal_lab_capture":
+        return _evaluate_personal_lab_capture_readiness(personal_lab_confirmed=personal_lab_confirmed)
+
     classification = classify_personal_lab_target(target)
     enabled = personal_lab_enabled()
     confirmed = personal_lab_confirmed
