@@ -2,6 +2,8 @@
 
 Project Overwatch is a **local** Python/Streamlit intelligence, OSINT, security testing and resilience advisory dashboard for **private internal use** supporting future client assessments.
 
+**v2.24** extracts module execution handlers from the monolithic `modules/executor.py` into `modules/executors/` (infrastructure, threat intelligence, network analysis) with dispatch registration in `modules/executors/registry.py`. The public `execute_module()` API is unchanged.
+
 **v2.21** adds executor dispatch registry, module contributor checklist, case workflow stages, and an entity-centric investigation shell in Entity Workspace.
 
 **v2.20** polishes navigation (grouped sidebar, **Assessment Workspace** naming), case-scoped session state, findings deep-links, unified result cards, and next-step actions on Findings and Evidence.
@@ -372,7 +374,7 @@ Use the shared scaffold when adding Censys or similar modules:
 1. Copy `modules/TEMPLATE_api_module.py` to `modules/4_threat_intelligence/<your_module>.py`
 2. Reuse `utils/api_module_helpers.py` for timeout, User-Agent, HTTP status mapping, missing-key blocked results, and redaction
 3. Reference `intel_virustotal.py`, `intel_abuseipdb.py`, `intel_greynoise.py`, `intel_shodan.py`, or `intel_urlhaus.py` for complete working examples
-4. Register in `module_registry.py`, wire `executor.py`, add interpreter + evidence capture
+4. Register in `module_registry.py`, add handler under `modules/executors/`, register in `modules/executors/registry.py`, add interpreter + evidence capture
 5. Run `python scripts/smoke_check.py` and `python scripts/security_audit.py`
 
 API keys stay in `.env` only — never hard-code or persist full keys.
@@ -746,7 +748,9 @@ requirements-optional.txt  kaleido, weasyprint (optional)
 database/db_setup.py       SQLite schema and helpers
 modules/
   module_registry.py       Module metadata (single source of truth)
-  executor.py              Execution dispatcher
+  executor.py              Public execute_module() entrypoint and guardrails
+  executors/               Per-category handlers, loaders, persistence, registry
+  executor_dispatch.py     Dispatch registry runtime (run_dispatch, is_dispatch_ready)
   2_infrastructure/        Nmap, Domain Intelligence, Certificate & Subdomain backends
 utils/                     Parsers, interpreters, graph, reports
 reports/                   Generated reports (gitignored)

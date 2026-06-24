@@ -3579,10 +3579,50 @@ def _check_assessment_goal_modules_registered() -> None:
 
 
 def _check_executor_dispatch_registry() -> None:
+    import inspect
+
+    from modules import executor as executor_mod
+    from modules import executor_dispatch as dispatch_mod
+    from modules.executors import infrastructure, loaders, network_analysis, registry, threat_intelligence
     from modules.executor_dispatch import get_dispatch_entry, list_registered_module_ids
     from modules.module_registry import MODULES, is_executable
 
+    for mod in (
+        executor_mod,
+        dispatch_mod,
+        loaders,
+        infrastructure,
+        threat_intelligence,
+        network_analysis,
+        registry,
+    ):
+        __import__(mod.__name__)
+
     registered = set(list_registered_module_ids())
+    expected = {
+        "infra_nmap",
+        "infra_domain_intel",
+        "infra_cert_subdomain",
+        "infra_website_metadata",
+        "infra_whois_rdap",
+        "infra_email_security",
+        "infra_tls_review",
+        "infra_http_security",
+        "intel_virustotal",
+        "intel_abuseipdb",
+        "intel_greynoise",
+        "intel_shodan",
+        "intel_urlhaus",
+        "net_pcap_review",
+        "net_live_capture",
+    }
+    if registered != expected:
+        missing = expected - registered
+        extra = registered - expected
+        raise AssertionError(
+            f"dispatch registry mismatch missing={sorted(missing)} extra={sorted(extra)}"
+        )
+
     for module in MODULES:
         if not is_executable(module):
             continue
@@ -3591,6 +3631,17 @@ def _check_executor_dispatch_registry() -> None:
         entry = get_dispatch_entry(module.module_id)
         if entry is None or entry.execute is None:
             raise AssertionError(f"dispatch entry incomplete for {module.module_id}")
+        for attr in ("load", "is_ready", "get_error", "execute"):
+            fn = getattr(entry, attr)
+            if not callable(fn):
+                raise AssertionError(f"dispatch {module.module_id}.{attr} is not callable")
+        if entry.persist_hook is not None and not callable(entry.persist_hook):
+            raise AssertionError(f"dispatch {module.module_id}.persist_hook is not callable")
+
+    if not callable(executor_mod.execute_module):
+        raise AssertionError("execute_module must remain callable on modules.executor")
+    if len(inspect.signature(executor_mod.execute_module).parameters) < 3:
+        raise AssertionError("execute_module signature changed unexpectedly")
 
 
 def _check_case_workflow_helpers() -> None:

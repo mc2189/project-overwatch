@@ -2,6 +2,16 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.24.0 — Executor handler extraction and module architecture cleanup
+
+- **`modules/executors/`** — per-category execution handlers (`infrastructure.py`, `threat_intelligence.py`, `network_analysis.py`)
+- **`modules/executors/registry.py`** — central `ModuleDispatchEntry` registration (moved from `executor.py`)
+- **`modules/executors/persistence.py`** — shared operation/observation/finding/evidence persistence
+- **`modules/executors/loaders.py`** — lazy module handler loading
+- **`modules/executor.py`** — slim public entrypoint (`execute_module`, runtime readiness); ~265 lines vs ~4,700
+- **Smoke checks** — verify handler module imports, dispatch coverage for all 15 executable modules, callable handlers
+- **`docs/MODULE_CONTRIBUTOR_CHECKLIST.md`** — updated contributor workflow for the new executor layout
+
 ## v2.23.0 — LAN device map and capture recon artifact
 
 - **`utils/pcap_device_map.py`** — infer LAN devices from DHCP, ARP, and mDNS in PCAP parsing

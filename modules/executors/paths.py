@@ -1,0 +1,20 @@
+"""Module file paths for lazy executor loading."""
+
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+NMAP_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_nmap.py"
+DOMAIN_INTEL_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_domain_intel.py"
+CERT_SUBDOMAIN_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_cert_subdomain.py"
+WEBSITE_METADATA_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_website_metadata.py"
+EMAIL_SECURITY_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_email_security.py"
+TLS_REVIEW_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_tls_review.py"
+HTTP_SECURITY_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_http_security.py"
+WHOIS_RDAP_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_whois_rdap.py"
+VIRUSTOTAL_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_virustotal.py"
+ABUSEIPDB_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_abuseipdb.py"
+GREYNOISE_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_greynoise.py"
+SHODAN_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_shodan.py"
+URLHAUS_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_urlhaus.py"
+PCAP_REVIEW_MODULE_PATH = PROJECT_ROOT / "modules" / "5_network_analysis" / "net_pcap_review.py"
+LIVE_CAPTURE_MODULE_PATH = PROJECT_ROOT / "modules" / "5_network_analysis" / "net_live_capture.py"

@@ -1,8 +1,8 @@
 """Central dispatch registry for module execution wiring.
 
-New modules register one entry here (via register_executor at the bottom of
-executor.py) instead of adding branches to is_runtime_ready, get_runtime_error,
-and execute_module separately.
+New modules register one entry in modules/executors/registry.py (via
+register_all_executors) instead of adding branches to is_runtime_ready,
+get_runtime_error, and execute_module separately.
 """
 
 from __future__ import annotations
