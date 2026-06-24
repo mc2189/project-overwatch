@@ -707,6 +707,51 @@ def build_case_report(
             lines.append("_No full page bodies are stored in observations or evidence._")
             lines.append("")
 
+        web_path_observations = [
+            observation
+            for observation in observations
+            if observation.get("module_id") == "infra_web_path_review"
+        ]
+        if web_path_observations:
+            lines.extend(["## Web Path Review Summary", ""])
+            lines.append(
+                "_Small curated sequential path review only — not a site map or discovery scan._"
+            )
+            lines.append("")
+            for observation in web_path_observations:
+                entity = _entity_display(
+                    entity_by_id.get(observation.get("entity_id")),
+                    observation.get("entity_id"),
+                )
+                payload: dict[str, Any] = {}
+                data_json = observation.get("data_json")
+                if data_json:
+                    try:
+                        payload = json.loads(data_json) if isinstance(data_json, str) else data_json
+                    except (TypeError, json.JSONDecodeError):
+                        payload = {}
+                path_results = payload.get("path_results") or []
+                notable = [row for row in path_results if row.get("notable")]
+                lines.append(f"### {observation.get('title', 'Web path review')}")
+                lines.append("")
+                lines.append(f"- Entity: {entity}")
+                lines.append(f"- Target: {payload.get('base_url') or payload.get('requested_url') or '—'}")
+                lines.append(f"- Summary: {observation.get('summary') or '_No summary._'}")
+                lines.append(f"- Paths checked: {payload.get('paths_checked', len(path_results))}")
+                lines.append(f"- Notable responses: {payload.get('notable_count', len(notable))}")
+                if notable:
+                    lines.append("- Notable paths:")
+                    for row in notable[:12]:
+                        lines.append(
+                            f"  - {row.get('path')} — status {row.get('status_code')} "
+                            f"({row.get('category_label', row.get('category'))})"
+                        )
+                lines.append("- Limitation: responses are review prompts; validate before claiming exposure.")
+                lines.append(f"- Created: {observation.get('created_at', '-')}")
+                lines.append("")
+            lines.append("_Sensitive-name paths store metadata only — no response bodies retained._")
+            lines.append("")
+
         lines.extend(["## Observations", ""])
         if not observations:
             lines.append("_No observations recorded for this case._")

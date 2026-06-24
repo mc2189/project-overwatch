@@ -105,6 +105,17 @@ def render_result_summary_tab(result: dict) -> None:
         if notes:
             st.caption(" · ".join(notes[:3]))
 
+    if result["module_id"] == "infra_web_path_review" and parsed_data:
+        st.write(f"**Base URL:** {parsed_data.get('base_url') or parsed_data.get('requested_url')}")
+        st.write(f"**Paths checked:** {parsed_data.get('paths_checked', 0)}")
+        st.write(f"**Notable responses:** {parsed_data.get('notable_count', 0)}")
+        categories = parsed_data.get("notable_categories") or []
+        if categories:
+            st.caption(f"Notable categories: {', '.join(categories[:6])}")
+        highest = _highest_severity(result.get("interpreter_findings") or [])
+        if highest:
+            st.caption(f"Highest severity: {highest}")
+
     if result["module_id"] == "infra_cert_subdomain" and parsed_data:
         subdomains = parsed_data.get("subdomains") or []
         st.write(f"**Certificate names returned:** {len(subdomains)}")
@@ -673,6 +684,20 @@ def render_result_summary_tab(result: dict) -> None:
         if parsed_data.get("meta_generator"):
             st.markdown(f"**Meta generator:** {parsed_data['meta_generator']}")
 
+    if result["module_id"] == "infra_web_path_review" and parsed_data:
+        st.markdown(f"**Base URL:** {parsed_data.get('base_url')}")
+        st.markdown(f"**Paths checked:** {parsed_data.get('paths_checked', 0)}")
+        st.markdown(f"**Notable responses:** {parsed_data.get('notable_count', 0)}")
+        path_results = parsed_data.get("path_results") or []
+        if path_results:
+            preview = ", ".join(
+                f"{row.get('path')}:{row.get('status_code')}"
+                for row in path_results
+                if row.get("notable")
+            )[:220]
+            if preview:
+                st.caption(preview)
+
 
 def render_result_interpretation_tab(result: dict) -> None:
     interpreter_findings = result.get("interpreter_findings") or []
@@ -943,6 +968,24 @@ def render_result_module_output_tab(result: dict) -> None:
         if chain:
             with st.expander("Redirect chain", expanded=False):
                 st.dataframe(pd.DataFrame(chain), width="stretch", hide_index=True)
+
+    if result["module_id"] == "infra_web_path_review" and parsed_data:
+        path_results = parsed_data.get("path_results") or []
+        if path_results:
+            display_rows = [
+                {key: value for key, value in row.items() if key not in {"body_preview"}}
+                for row in path_results
+            ]
+            st.markdown("**Path review table**")
+            st.dataframe(pd.DataFrame(display_rows), width="stretch", hide_index=True)
+        notable = [row for row in path_results if row.get("notable")]
+        if notable:
+            with st.expander("Notable path responses", expanded=False):
+                st.dataframe(
+                    pd.DataFrame([{k: v for k, v in row.items() if k != "body_preview"} for row in notable]),
+                    width="stretch",
+                    hide_index=True,
+                )
 
 
 def render_result_raw_tab(result: dict) -> None:

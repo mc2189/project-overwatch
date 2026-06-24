@@ -12,6 +12,8 @@ from utils.web_port_planner import is_private_ipv4_target
 def _http_tls_unreachable(result: dict[str, Any]) -> bool:
     module_id = result.get("module_id") or ""
     parsed = result.get("parsed_data") or {}
+    if module_id == "infra_web_path_review":
+        return not parsed.get("reachable")
     if module_id in {"infra_http_security", "infra_web_stack_identifier"}:
         return not (parsed.get("response") or {}).get("success")
     if module_id == "infra_tls_review":
@@ -30,7 +32,7 @@ def suggest_result_action(result: dict[str, Any], *, target: str) -> dict[str, A
 
         return suggest_primary_nmap_action(result, target=target)
 
-    if module_id in {"infra_http_security", "infra_tls_review", "infra_web_stack_identifier"} and _http_tls_unreachable(result):
+    if module_id in {"infra_http_security", "infra_tls_review", "infra_web_stack_identifier", "infra_web_path_review"} and _http_tls_unreachable(result):
         host = parsed.get("host") or target
         port = parsed.get("port") or (443 if module_id == "infra_tls_review" else 80)
         if is_private_ipv4_target(target):
@@ -180,6 +182,66 @@ def suggest_result_action(result: dict[str, Any], *, target: str) -> dict[str, A
                     module_id=module_id,
                     button_label="Review findings",
                 )
+
+    if module_id == "infra_web_path_review" and result.get("success") and parsed.get("reachable"):
+        from utils.web_path_catalog import (
+            CATEGORY_API_DOCS,
+            CATEGORY_CMS,
+            CATEGORY_LOGIN_ADMIN,
+            CATEGORY_SENSITIVE,
+        )
+
+        path_results = parsed.get("path_results") or []
+        notable = [row for row in path_results if row.get("notable")]
+        if any((row.get("category") or "") == CATEGORY_SENSITIVE for row in notable):
+            return make_action(
+                title="Add sensitive path finding to report",
+                reason="Sensitive-name path responded — manual validation and reporting recommended.",
+                action_type="create_report",
+                priority="high",
+                target=target,
+                button_label="Generate report",
+            )
+        if any((row.get("category") or "") == CATEGORY_LOGIN_ADMIN for row in notable):
+            return make_action(
+                title="Review access control expectations",
+                reason="Login/admin path observed — review whether public reachability is expected.",
+                action_type="open_finding",
+                priority="medium",
+                target=target,
+                module_id=module_id,
+                button_label="Review findings",
+            )
+        if any((row.get("category") or "") == CATEGORY_API_DOCS for row in notable):
+            return make_action(
+                title="Plan API surface inventory",
+                reason="API documentation path observed — consider API surface inventory later.",
+                action_type="add_note",
+                priority="medium",
+                target=target,
+                module_id=module_id,
+                button_label="Add note",
+            )
+        if any((row.get("category") or "") == CATEGORY_CMS for row in notable):
+            return make_action(
+                title="Run Web Stack Identifier",
+                reason="CMS-specific paths observed — stack identification may add context.",
+                action_type="run_module",
+                priority="medium",
+                target=target,
+                module_id="infra_web_stack_identifier",
+                button_label="Web stack ID",
+            )
+        if notable:
+            return make_action(
+                title="Review path findings",
+                reason=f"{len(notable)} notable path response(s) observed.",
+                action_type="open_finding",
+                priority="low",
+                target=target,
+                module_id=module_id,
+                button_label="Review findings",
+            )
 
     if module_id == "infra_tls_review":
         cert = parsed.get("certificate") or {}

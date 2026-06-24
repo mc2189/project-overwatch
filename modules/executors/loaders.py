@@ -23,6 +23,7 @@ from modules.executors.paths import (
     URLHAUS_MODULE_PATH,
     VIRUSTOTAL_MODULE_PATH,
     WEB_STACK_MODULE_PATH,
+    WEB_PATH_MODULE_PATH,
     WEBSITE_METADATA_MODULE_PATH,
     WHOIS_RDAP_MODULE_PATH,
 )
@@ -54,6 +55,9 @@ _remote_access_load_attempted = False
 _web_stack_handler: Any | None = None
 _web_stack_load_error: str | None = None
 _web_stack_load_attempted = False
+_web_path_handler: Any | None = None
+_web_path_load_error: str | None = None
+_web_path_load_attempted = False
 _whois_rdap_handler: Any | None = None
 _whois_rdap_load_error: str | None = None
 _whois_rdap_load_attempted = False
@@ -359,6 +363,29 @@ def _load_web_stack_handler() -> None:
         _web_stack_handler = infra_web_stack_identifier.run_web_stack_identifier
     except Exception as exc:
         _web_stack_load_error = str(exc)
+
+
+def _load_web_path_handler() -> None:
+    global _web_path_handler, _web_path_load_error, _web_path_load_attempted
+
+    if _web_path_load_attempted:
+        return
+
+    _web_path_load_attempted = True
+
+    if not WEB_PATH_MODULE_PATH.is_file():
+        _web_path_load_error = f"Module file not found: {WEB_PATH_MODULE_PATH}"
+        return
+
+    try:
+        spec = importlib.util.spec_from_file_location("infra_web_path_review", WEB_PATH_MODULE_PATH)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load module spec from {WEB_PATH_MODULE_PATH}")
+        infra_web_path_review = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(infra_web_path_review)
+        _web_path_handler = infra_web_path_review.run_web_path_review
+    except Exception as exc:
+        _web_path_load_error = str(exc)
 
 
 def _load_whois_rdap_handler() -> None:

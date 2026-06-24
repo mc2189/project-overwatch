@@ -267,6 +267,41 @@ MODULES: list[ModuleEntry] = [
         ),
     ),
     ModuleEntry(
+        module_id="infra_web_path_review",
+        display_name="Controlled Web Path Review",
+        category="Infrastructure",
+        description="Sequential review of a small curated list of common public web paths on an authorised target.",
+        status="active",
+        mode="active",
+        risk_level="medium",
+        requires_authorisation=True,
+        requires_api_key=False,
+        implemented=True,
+        accepted_target_types=("domain", "url", "ipv4"),
+        config_notes=(
+            "No API key required. Checks up to 24 curated paths sequentially with short timeouts. "
+            "Sensitive-name paths use HEAD only — no body content stored."
+        ),
+        rate_limit_notes="Active sequential HTTP requests — one path at a time; no wordlists or path mutations.",
+        short_help="Check a small curated set of common web paths for posture review on an authorised target.",
+        detailed_help=(
+            "Performs a controlled, sequential review of common informational, admin/login, API/docs, "
+            "status/health, CMS, and sensitive-name paths. Uses GET or HEAD only — does not submit forms, "
+            "log in, follow discovered links, or browse the full site. Findings are cautious review prompts."
+        ),
+        example_inputs=("example.com", "https://example.com", "8.8.8.8"),
+        output_summary=(
+            "Path table with status codes, categories, redirect targets, capped previews, and advisory findings."
+        ),
+        caution_notes=(
+            "This module performs live HTTP requests to multiple paths — use only on owned or authorised assets.",
+            "Authorisation and engagement/scope controls apply before execution.",
+            "Not a discovery tool — curated list only, no wordlists or mutations.",
+            "Sensitive-name paths store response metadata only, not body content.",
+            "A response does not confirm exposure unless content clearly supports it.",
+        ),
+    ),
+    ModuleEntry(
         module_id="infra_domain_intel",
         display_name="Domain Intelligence",
         category="Infrastructure",

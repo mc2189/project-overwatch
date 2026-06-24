@@ -140,6 +140,14 @@ def register_all_executors() -> None:
             unavailable_label="Web Stack Identifier",
         ),
         ModuleDispatchEntry(
+            "infra_web_path_review",
+            load=loaders._load_web_path_handler,
+            is_ready=_module_ready(loaders._load_web_path_handler, lambda: loaders._web_path_handler),
+            get_error=_module_error(loaders._load_web_path_handler, lambda: loaders._web_path_load_error),
+            execute=infrastructure._execute_web_path_review,
+            unavailable_label="Controlled Web Path Review",
+        ),
+        ModuleDispatchEntry(
             "infra_whois_rdap",
             load=loaders._load_whois_rdap_handler,
             is_ready=_module_ready(loaders._load_whois_rdap_handler, lambda: loaders._whois_rdap_handler),

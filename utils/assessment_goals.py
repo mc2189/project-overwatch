@@ -81,6 +81,7 @@ _GOAL_MODULE_SETS: dict[str, tuple[str, ...]] = {
         "infra_cert_subdomain",
         "infra_domain_intel",
         "infra_whois_rdap",
+        "infra_web_path_review",
     ),
     GOAL_THREAT_REPUTATION: (
         "intel_virustotal",
@@ -98,6 +99,7 @@ _GOAL_MODULE_SETS: dict[str, tuple[str, ...]] = {
         "infra_tls_review",
         "infra_http_security",
         "infra_web_stack_identifier",
+        "infra_web_path_review",
     ),
 }
 

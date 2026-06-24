@@ -52,6 +52,7 @@ from modules.executors.persistence import (
     _persist_http_security_records,
     _persist_remote_access_records,
     _persist_web_stack_records,
+    _persist_web_path_records,
     _persist_investigation_records,
     _persist_nmap_services_and_relationships,
     _persist_tls_review_records,
@@ -869,6 +870,107 @@ def _execute_web_stack_identifier(
             conn=db_context,
         )
         _persist_web_stack_records(
+            db_context,
+            case_id=case_id,
+            host_entity_id=host_entity["id"],
+            module_id=module_id,
+            target=target,
+            result=result,
+            authorisation_confirmed=authorisation_confirmed,
+            run_mode_id=run_mode_id,
+            run_mode_label=run_mode_label,
+        )
+
+    return result
+
+
+def _execute_web_path_review(
+    module_id: str,
+    target: str,
+    options: dict[str, Any],
+    db_context: sqlite3.Connection | None,
+    authorisation_confirmed: bool,
+    case_id: int | None,
+    entity_id: int | None,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> dict[str, Any]:
+    web_path_handler, web_path_load_error = loaders.loaded_handler(
+        loaders._load_web_path_handler, "_web_path_handler", "_web_path_load_error"
+    )
+    if web_path_handler is None:
+        error_message = web_path_load_error or "Controlled Web Path Review module is not available."
+        return make_result(
+            module_id,
+            success=False,
+            status="error",
+            summary="Controlled Web Path Review module is not available.",
+            errors=[error_message],
+        )
+
+    path_data = web_path_handler(target, options=options)
+    status = path_data.get("status", "error")
+    if status == "blocked":
+        errors = path_data.get("errors") or [path_data.get("summary") or "Web path review blocked."]
+        return make_result(
+            module_id,
+            success=False,
+            status="blocked",
+            summary=errors[0],
+            raw_output=path_data.get("raw_output", ""),
+            errors=errors,
+            parsed_data=path_data.get("data"),
+            warnings=path_data.get("warnings", []),
+        )
+
+    if not path_data.get("success"):
+        errors = path_data.get("errors") or path_data.get("warnings") or ["Web path review failed."]
+        return make_result(
+            module_id,
+            success=False,
+            status=status,
+            summary=errors[0] if errors else "Web path review failed.",
+            raw_output=path_data.get("raw_output", ""),
+            errors=errors if isinstance(errors, list) else [str(errors)],
+            parsed_data=path_data.get("data"),
+            warnings=path_data.get("warnings", []),
+        )
+
+    parsed_data = path_data.get("data") or {}
+    host = parsed_data.get("host") or target
+    interpreter_findings = interpret_module_findings(module_id, parsed_data, options)
+    result = make_result(
+        module_id,
+        success=True,
+        status=path_data.get("status", "completed"),
+        summary=path_data.get("summary", f"Web path review completed for {host}."),
+        raw_output=path_data.get("raw_output", ""),
+        findings=path_data.get("findings", []),
+        warnings=path_data.get("warnings", []),
+        parsed_data=parsed_data,
+        interpreter_findings=interpreter_findings,
+    )
+
+    if db_context is not None and case_id is not None:
+        from database.db_setup import create_or_get_entity
+        from utils.target_detection import ENTITY_TYPE_BY_TARGET, get_target_type
+
+        target_type = parsed_data.get("target_type") or get_target_type(target)
+        host_entity_type = ENTITY_TYPE_BY_TARGET.get(target_type, "domain")
+        if target_type in {"domain", "url"}:
+            host_entity_type = "domain"
+        elif target_type == "ipv4":
+            host_entity_type = "ipv4"
+
+        host_entity = create_or_get_entity(
+            case_id,
+            host_entity_type,
+            host,
+            label=host,
+            source=module_id,
+            conn=db_context,
+        )
+        _persist_web_path_records(
             db_context,
             case_id=case_id,
             host_entity_id=host_entity["id"],

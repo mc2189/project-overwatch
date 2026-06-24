@@ -18,6 +18,7 @@ from utils.tls_review_interpreter import interpret_tls_review_results
 from utils.nmap_interpreter import interpret_nmap_results
 from utils.remote_access_interpreter import interpret_remote_access_results
 from utils.web_stack_interpreter import interpret_web_stack_results
+from utils.web_path_interpreter import interpret_web_path_results
 from utils.virustotal_interpreter import interpret_virustotal_results
 from utils.website_metadata_interpreter import interpret_website_metadata_results
 from utils.whois_rdap_interpreter import interpret_whois_rdap_results
@@ -89,6 +90,10 @@ def _interpret_web_stack(parsed_data: dict[str, Any], _options: dict[str, Any]) 
     return interpret_web_stack_results(parsed_data)
 
 
+def _interpret_web_path(parsed_data: dict[str, Any], _options: dict[str, Any]) -> list[dict[str, Any]]:
+    return interpret_web_path_results(parsed_data)
+
+
 def _interpret_nmap(parsed_data: dict[str, Any], options: dict[str, Any]) -> list[dict[str, Any]]:
     return interpret_nmap_results(parsed_data, options)
 
@@ -103,6 +108,7 @@ MODULE_FINDING_INTERPRETERS: dict[str, InterpreterFn] = {
     "infra_http_security": _interpret_http_security,
     "infra_remote_access_review": _interpret_remote_access,
     "infra_web_stack_identifier": _interpret_web_stack,
+    "infra_web_path_review": _interpret_web_path,
     "infra_whois_rdap": _interpret_whois_rdap,
     "intel_virustotal": _interpret_virustotal,
     "intel_abuseipdb": _interpret_abuseipdb,

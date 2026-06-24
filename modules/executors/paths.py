@@ -12,6 +12,7 @@ TLS_REVIEW_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_
 HTTP_SECURITY_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_http_security.py"
 REMOTE_ACCESS_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_remote_access_review.py"
 WEB_STACK_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_web_stack_identifier.py"
+WEB_PATH_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_web_path_review.py"
 WHOIS_RDAP_MODULE_PATH = PROJECT_ROOT / "modules" / "2_infrastructure" / "infra_whois_rdap.py"
 VIRUSTOTAL_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_virustotal.py"
 ABUSEIPDB_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_abuseipdb.py"

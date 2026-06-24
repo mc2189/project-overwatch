@@ -1254,6 +1254,161 @@ def _persist_web_stack_records(
         )
 
 
+def _persist_web_path_records(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    host_entity_id: int,
+    module_id: str,
+    target: str,
+    result: dict[str, Any],
+    authorisation_confirmed: bool,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> None:
+    """Save web path review operations, observations, entities, and relationships."""
+    result = _prepare_module_result(result)
+    create_operation_log(
+        case_id,
+        module_id,
+        target,
+        result["status"],
+        authorisation_confirmed=authorisation_confirmed,
+        summary=result["summary"],
+        run_mode_id=run_mode_id,
+        run_mode_label=run_mode_label,
+        conn=conn,
+    )
+
+    if not should_persist_observation(result["status"]):
+        return
+
+    parsed_data = result.get("parsed_data") or {}
+    host = parsed_data.get("host") or target
+    scheme = (parsed_data.get("scheme") or "https").lower()
+    port = int(parsed_data.get("port") or (443 if scheme == "https" else 80))
+    path_results = list(parsed_data.get("path_results") or [])
+    service_entity_id: int | None = None
+
+    if parsed_data.get("reachable"):
+        service_value = f"{host}:{port}/{scheme}"
+        service_label = f"{port}/{scheme} web"
+        service_entity = create_or_get_entity(
+            case_id,
+            "service",
+            service_value,
+            label=service_label,
+            source=module_id,
+            confidence=85,
+            conn=conn,
+        )
+        service_entity_id = service_entity["id"]
+        create_relationship(
+            case_id,
+            host_entity_id,
+            "exposes_web_service",
+            service_entity_id,
+            source_module=module_id,
+            confidence=85,
+            conn=conn,
+        )
+
+    for row in path_results:
+        if not row.get("notable"):
+            continue
+        full_url = row.get("full_url")
+        if not full_url:
+            continue
+        path_entity = create_or_get_entity(
+            case_id,
+            "url",
+            full_url,
+            label=str(row.get("path") or full_url)[:120],
+            source=module_id,
+            confidence=75,
+            conn=conn,
+        )
+        if service_entity_id is not None:
+            create_relationship(
+                case_id,
+                service_entity_id,
+                "exposes_path",
+                path_entity["id"],
+                source_module=module_id,
+                confidence=75,
+                conn=conn,
+            )
+        else:
+            create_relationship(
+                case_id,
+                host_entity_id,
+                "exposes_path",
+                path_entity["id"],
+                source_module=module_id,
+                confidence=75,
+                conn=conn,
+            )
+
+    observation = create_observation(
+        case_id,
+        host_entity_id,
+        module_id,
+        "web_path_review",
+        "Controlled web path review result",
+        summary=result["summary"],
+        data_json=json.dumps(
+            {
+                "module_id": module_id,
+                "success": result["success"],
+                "status": result["status"],
+                "findings": result.get("findings", []),
+                "interpreter_findings": result.get("interpreter_findings", []),
+                "warnings": result.get("warnings", []),
+                "target": parsed_data.get("target"),
+                "host": host,
+                "scheme": scheme,
+                "port": port,
+                "base_url": parsed_data.get("base_url"),
+                "requested_url": parsed_data.get("requested_url"),
+                "paths_checked": parsed_data.get("paths_checked"),
+                "notable_count": parsed_data.get("notable_count"),
+                "notable_categories": parsed_data.get("notable_categories"),
+                "path_results": [
+                    {
+                        key: value
+                        for key, value in row.items()
+                        if key not in {"body_preview"}
+                    }
+                    for row in path_results
+                ],
+            }
+        ),
+        raw_output=result["raw_output"],
+        **_observation_evidence_kwargs(module_id, result),
+        conn=conn,
+    )
+
+    _persist_observation_evidence(
+        conn,
+        case_id=case_id,
+        entity_id=host_entity_id,
+        observation_id=observation["id"],
+        module_id=module_id,
+        result=result,
+    )
+
+    interpreter_findings = result.get("interpreter_findings") or []
+    if interpreter_findings:
+        _persist_module_findings(
+            conn,
+            case_id=case_id,
+            entity_id=host_entity_id,
+            observation_id=observation["id"],
+            module_id=module_id,
+            interpreter_findings=interpreter_findings,
+        )
+
+
 def _organisation_entity_value(info: dict[str, Any] | None) -> str | None:
     if not info:
         return None

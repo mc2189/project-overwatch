@@ -2,6 +2,8 @@
 
 Project Overwatch is a **local** Python/Streamlit intelligence, OSINT, security testing and resilience advisory dashboard for **private internal use** supporting future client assessments.
 
+**v2.28** adds **Controlled Web Path Review** — a small sequential check of curated common web paths (admin, API docs, status, CMS, sensitive-name indicators) with cautious findings and no full body storage.
+
 **v2.27** adds **Web Stack Identifier** — a controlled HTTP GET that surfaces visible web technology indicators from headers and a capped page preview, without storing full page bodies.
 
 **v2.26** adds **Remote Access Exposure Review** — classifies SSH/RDP/VNC/SMB/Telnet/FTP and similar services from Nmap observations with cautious findings and no authentication.
@@ -105,6 +107,7 @@ Results appear automatically in Operations, Observations, Findings, Relationship
 - **SSL / TLS Configuration Review** — active; domain, URL, or IPv4; single host:port TLS handshake (default 443); authorisation and engagement/scope required.
 - **HTTP Security Header Review** — active; domain, URL, or IPv4; GET/HEAD response review with security header and cookie flag analysis; authorisation required.
 - **Web Stack Identifier** — active; domain, URL, or IPv4; single HTTP GET with capped preview to suggest web server, CMS, framework, hosting, CDN, and analytics indicators; authorisation required; no full page body stored.
+- **Controlled Web Path Review** — active; domain, URL, or IPv4; sequential review of up to 24 curated common paths; authorisation required; sensitive paths use HEAD only.
 - **WHOIS / RDAP Intelligence** — passive registration/allocation metadata for domain, URL (host extracted), or public IPv4 via public RDAP.
 - **VirusTotal Reputation Intelligence** — passive API reputation enrichment for domain, URL, or public IPv4 (`VIRUSTOTAL_API_KEY` required; private IPs skipped).
 - **AbuseIPDB Reputation Intelligence** — passive abuse-confidence lookup for public IPv4 only (`ABUSEIPDB_API_KEY` required; lookup-only, no report submission).
@@ -727,6 +730,22 @@ Identifies **visible web stack indicators** from a normal authorised HTTP GET �
 1. Confirm Personal Lab or Client Engagement context and authorisation.
 2. Select **Web Stack Identifier** and run against the target URL.
 3. Review the concise result card, collapsed indicator table, findings, and evidence (no full HTML body in structured data).
+
+### Controlled Web Path Review (active / safe active check)
+
+Checks a **small curated list** of common public paths sequentially — not a discovery tool or wordlist scan.
+
+- **Default paths (24 max):** `/`, `/robots.txt`, `/security.txt`, `/sitemap.xml`, `/admin`, `/login`, `/wp-login.php`, `/api/docs`, `/swagger`, `/health`, `/.env`, `/.git/`, and similar review-friendly paths
+- **Rules:** GET or HEAD only, sequential, short timeout, no forms, no login, no link following, no path mutations
+- **Sensitive paths:** HEAD only — response metadata stored, no body content
+- **Output:** path table with status, category, redirect target, optional title; cautious findings
+- **Next actions:** admin/login → access control review; API docs → inventory note; sensitive response → report + manual validation
+
+**How to test:** against an authorised site:
+
+1. Confirm Personal Lab or Client Engagement context and authorisation.
+2. Select **Controlled Web Path Review** and run.
+3. Review paths checked count, notable responses, collapsed path table, and findings.
 
 ### Domain Intelligence (passive)
 

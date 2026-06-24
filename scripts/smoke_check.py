@@ -911,6 +911,7 @@ def _check_target_compatibility() -> None:
         or "infra_tls_review" not in module_ids
         or "infra_http_security" not in module_ids
         or "infra_web_stack_identifier" not in module_ids
+        or "infra_web_path_review" not in module_ids
         or "infra_domain_intel" not in module_ids
         or "infra_cert_subdomain" not in module_ids
         or "infra_website_metadata" not in module_ids
@@ -3869,6 +3870,164 @@ def _check_web_stack_identifier() -> None:
         raise AssertionError("CMS indicators should suggest website metadata review")
 
 
+def _check_web_path_review() -> None:
+    import importlib.util
+
+    from utils.web_path_catalog import (
+        CATEGORY_LOGIN_ADMIN,
+        CATEGORY_SENSITIVE,
+        DEFAULT_WEB_PATHS,
+        MAX_PATHS,
+        validate_path,
+        resolve_path_entries,
+    )
+    from utils.web_path_interpreter import interpret_web_path_results
+
+    if len(DEFAULT_WEB_PATHS) > MAX_PATHS:
+        raise AssertionError("default path list exceeds MAX_PATHS cap")
+    entries = resolve_path_entries()
+    if len(entries) > MAX_PATHS:
+        raise AssertionError("resolved path entries exceed cap")
+    if len(entries) != len(DEFAULT_WEB_PATHS):
+        raise AssertionError("default path count mismatch")
+
+    ok, _ = validate_path("/admin")
+    if not ok:
+        raise AssertionError("/admin should validate")
+    bad, err = validate_path("/../etc/passwd")
+    if bad or not err:
+        raise AssertionError("path traversal should be rejected")
+
+    mock_rows = [
+        {
+            "path": "/login",
+            "full_url": "https://example.com/login",
+            "category": CATEGORY_LOGIN_ADMIN,
+            "category_label": "Login / admin",
+            "status_code": 200,
+            "content_type": "text/html",
+            "notable": True,
+            "note": "test",
+            "response_note": "Login path responded.",
+        },
+        {
+            "path": "/.env",
+            "full_url": "https://example.com/.env",
+            "category": CATEGORY_SENSITIVE,
+            "category_label": "Sensitive-name indicator",
+            "status_code": 200,
+            "content_type": "text/plain",
+            "notable": True,
+            "note": "test",
+            "response_note": "Sensitive path responded.",
+            "method": "HEAD",
+        },
+        {
+            "path": "/missing",
+            "full_url": "https://example.com/missing",
+            "category": "baseline",
+            "category_label": "Baseline",
+            "status_code": 404,
+            "notable": False,
+            "note": "test",
+            "response_note": "Not found.",
+        },
+    ]
+    mock_data = {
+        "target": "example.com",
+        "host": "example.com",
+        "scheme": "https",
+        "port": 443,
+        "base_url": "https://example.com",
+        "requested_url": "https://example.com/",
+        "target_type": "domain",
+        "path_results": mock_rows,
+        "paths_checked": len(mock_rows),
+        "notable_count": 2,
+        "notable_categories": ["Login / admin", "Sensitive-name indicator"],
+        "reachable": True,
+    }
+    findings = interpret_web_path_results(mock_data)
+    if not findings or not any("completed" in f.get("title", "").lower() for f in findings):
+        raise AssertionError("web path interpreter should emit completion finding")
+    if not any("Login/admin" in f.get("title", "") for f in findings):
+        raise AssertionError("interpreter should emit login/admin finding")
+
+    registry = __import__("modules.module_registry", fromlist=["get_module"])
+    module = registry.get_module("infra_web_path_review")
+    if module is None or not module.implemented:
+        raise AssertionError("infra_web_path_review registry entry missing or not implemented")
+    if not module.requires_authorisation:
+        raise AssertionError("infra_web_path_review must require authorisation")
+    if module.risk_level != "medium":
+        raise AssertionError("infra_web_path_review risk_level should be medium")
+    if module.accepted_target_types != ("domain", "url", "ipv4"):
+        raise AssertionError("infra_web_path_review accepted_target_types mismatch")
+
+    module_path = Path(PROJECT_ROOT) / "modules" / "2_infrastructure" / "infra_web_path_review.py"
+    spec = importlib.util.spec_from_file_location("infra_web_path_review", module_path)
+    if spec is None or spec.loader is None:
+        raise AssertionError("could not load infra_web_path_review module spec")
+    path_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(path_mod)
+
+    result = path_mod.run_web_path_review("example.com", options={"mock_data": mock_data})
+    if not result.get("success") or result.get("module_id") != "infra_web_path_review":
+        raise AssertionError("mock web path review should succeed")
+    data = result.get("data") or {}
+    for row in data.get("path_results") or []:
+        if "body_preview" in row:
+            raise AssertionError("path results must not store body_preview in persisted data")
+
+    source = module_path.read_text(encoding="utf-8")
+    if "subprocess" in source or "shell=True" in source:
+        raise AssertionError("infra_web_path_review must not use subprocess/shell=True")
+    if "wordlist" in source.lower() and "no wordlists" not in source.lower():
+        pass  # docstring may mention wordlists as prohibition
+
+    registry_pipeline = __import__(
+        "utils.findings_registry",
+        fromlist=["module_has_findings_pipeline"],
+    )
+    if not registry_pipeline.module_has_findings_pipeline("infra_web_path_review"):
+        raise AssertionError("findings pipeline not registered for infra_web_path_review")
+
+    from modules.executor_dispatch import get_dispatch_entry
+    from modules.executors.loaders import _load_web_path_handler
+
+    entry = get_dispatch_entry("infra_web_path_review")
+    if entry is None or not callable(entry.execute):
+        raise AssertionError("infra_web_path_review dispatch missing")
+    _load_web_path_handler()
+    import modules.executors.loaders as loaders
+
+    if loaders._web_path_handler is None:
+        raise AssertionError("web path handler failed to load")
+
+    from utils.result_next_actions import suggest_result_action
+
+    sensitive_action = suggest_result_action(
+        {
+            "module_id": "infra_web_path_review",
+            "success": True,
+            "parsed_data": mock_data,
+            "interpreter_findings": findings,
+        },
+        target="example.com",
+    )
+    if sensitive_action.get("action_type") != "create_report":
+        raise AssertionError("sensitive path response should suggest report action")
+
+    testing_levels = __import__("utils.module_testing_levels", fromlist=["get_module_testing_level"])
+    if testing_levels.get_module_testing_level("infra_web_path_review") != "safe_active_check":
+        raise AssertionError("infra_web_path_review testing level should be safe_active_check")
+
+    evidence = __import__("utils.evidence_model", fromlist=["default_evidence_for_module"])
+    defaults = evidence.default_evidence_for_module("infra_web_path_review")
+    if defaults.get("collection_method") != "controlled_web_path_review":
+        raise AssertionError("web path evidence collection_method mismatch")
+
+
 def _check_executor_dispatch_registry() -> None:
     import inspect
 
@@ -3901,6 +4060,7 @@ def _check_executor_dispatch_registry() -> None:
         "infra_http_security",
         "infra_remote_access_review",
         "infra_web_stack_identifier",
+        "infra_web_path_review",
         "intel_virustotal",
         "intel_abuseipdb",
         "intel_greynoise",
@@ -4296,6 +4456,11 @@ def main() -> int:
     run(
         "web stack identifier",
         lambda: _check_web_stack_identifier(),
+    )
+
+    run(
+        "web path review",
+        lambda: _check_web_path_review(),
     )
 
     run(

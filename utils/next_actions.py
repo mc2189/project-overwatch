@@ -403,6 +403,8 @@ def suggest_next_actions(
     def _http_tls_unreachable(result: dict[str, Any]) -> bool:
         parsed = result.get("parsed_data") or {}
         module_id = result.get("module_id")
+        if module_id == "infra_web_path_review":
+            return not parsed.get("reachable")
         if module_id == "infra_http_security":
             response = parsed.get("response") or {}
             return not response.get("success")
@@ -548,6 +550,7 @@ def suggest_next_actions(
         "infra_email_security": (GOAL_EMAIL_SPOOFING, "Review email security posture"),
         "infra_http_security": (GOAL_WEBSITE_POSTURE, "Run HTTP header review"),
         "infra_web_stack_identifier": (GOAL_WEBSITE_POSTURE, "Run web stack identification"),
+        "infra_web_path_review": (GOAL_WEBSITE_POSTURE, "Run controlled web path review"),
         "infra_tls_review": (GOAL_WEBSITE_POSTURE, "Run TLS configuration review"),
         "intel_shodan": (GOAL_EXTERNAL_EXPOSURE, "Run Shodan exposure lookup"),
         "infra_domain_intel": (GOAL_WEBSITE_POSTURE, "Run domain intelligence"),
@@ -560,13 +563,13 @@ def suggest_next_actions(
         if (
             is_private_ipv4_target(cleaned)
             and not has_service_data
-            and module_id in {"infra_http_security", "infra_tls_review", "infra_web_stack_identifier"}
+            and module_id in {"infra_http_security", "infra_tls_review", "infra_web_stack_identifier", "infra_web_path_review"}
         ):
             continue
         if (
             is_private_ipv4_target(cleaned)
             and has_service_data
-            and module_id in {"infra_http_security", "infra_tls_review", "infra_web_stack_identifier"}
+            and module_id in {"infra_http_security", "infra_tls_review", "infra_web_stack_identifier", "infra_web_path_review"}
             and not any(
                 row.get("classification") in {"http_candidate", "https_candidate", "tls_candidate"}
                 for row in services

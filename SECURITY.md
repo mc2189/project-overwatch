@@ -124,6 +124,14 @@ The **Domain Email Security Posture** module (`infra_email_security`) is **passi
 - Uses `requests` with short timeout — no subprocess, no `shell=True`
 - Indicators use cautious language only — they are review prompts, not confirmed fingerprinting
 
+## Controlled Web Path Review (v2.28)
+
+- **Module ID:** `infra_web_path_review` — controlled active assessment (`safe_active_check`)
+- Allowed: sequential GET/HEAD requests to up to 24 curated paths on a single authorised base URL
+- **Not allowed:** wordlists, path mutations, form submission, login, link following, full-site browsing, full body storage
+- Sensitive-name paths (`/.env`, `/.git/`, `/backup`, etc.) use HEAD only — existence check, no body retained
+- Requires authorisation and the correct operating context with scope/ROE guardrails before connecting
+
 ## Authorised assessment model (v2.8+)
 
 Project Overwatch is designed for **authorised client assessments**, not unconstrained scanning.

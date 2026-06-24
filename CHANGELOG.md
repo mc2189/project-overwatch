@@ -2,6 +2,15 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.28.0 — Controlled Web Path Review
+
+- **`infra_web_path_review`** — sequential review of up to 24 curated common web paths via controlled GET/HEAD requests
+- **`utils/web_path_catalog.py`** — capped path list, categories, validation (no wordlists or mutations)
+- **`utils/web_path_interpreter.py`** — cautious findings for admin/login, API/docs, status/health, CMS, and sensitive-name responses
+- **Findings, evidence, entities** — path review summary evidence; web service and URL/path entities with `exposes_path` relationships
+- **Reports** — Web Path Review Summary with notable paths and limitations
+- **Next actions** — admin/login → access control review; API docs → inventory note; CMS → web stack ID; sensitive paths → report
+
 ## v2.27.0 — Web Stack Identifier
 
 - **`infra_web_stack_identifier`** — controlled active HTTP GET to identify visible web stack indicators (server, CMS, framework, hosting, CDN, analytics) from headers and capped page preview

@@ -844,6 +844,132 @@ def capture_web_stack_evidence(
     return items
 
 
+def capture_web_path_evidence(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    observation_id: int,
+    module_id: str,
+    result: dict[str, Any],
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    parsed_data = result.get("parsed_data") or {}
+    path_results = list(parsed_data.get("path_results") or [])
+    notable = [row for row in path_results if row.get("notable")]
+
+    items.append(
+        _create_item(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            title="Web path review summary",
+            summary="Controlled sequential review of curated web paths.",
+            content_text=_text_summary(
+                {
+                    "base_url": parsed_data.get("base_url"),
+                    "paths_checked": parsed_data.get("paths_checked"),
+                    "notable_count": parsed_data.get("notable_count"),
+                    "notable_categories": parsed_data.get("notable_categories"),
+                    "reachable": parsed_data.get("reachable"),
+                }
+            ),
+            content_type="application/json",
+            evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+            source_name="HTTP response",
+            collection_method="controlled_web_path_review",
+            reliability=RELIABILITY_HIGH if parsed_data.get("reachable") else RELIABILITY_MEDIUM,
+        )
+    )
+
+    if notable:
+        safe_rows = [
+            {key: value for key, value in row.items() if key not in {"body_preview"}}
+            for row in notable
+        ]
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Notable path responses",
+                summary="Notable curated path responses (metadata only).",
+                content_text=_text_summary({"notable_paths": safe_rows}),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="HTTP response",
+                collection_method="controlled_web_path_review",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    redirects = [
+        {"path": row.get("path"), "redirect_target": row.get("redirect_target")}
+        for row in path_results
+        if row.get("redirect_target")
+    ]
+    if redirects:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Redirect summary",
+                summary="Redirect targets observed during path review.",
+                content_text=_text_summary({"redirects": redirects}),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="HTTP response",
+                collection_method="controlled_web_path_review",
+                reliability=RELIABILITY_MEDIUM,
+            )
+        )
+
+    sensitive = [
+        row
+        for row in notable
+        if (row.get("category") or "") == "sensitive-name indicator"
+    ]
+    if sensitive:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Sensitive-name path response summary",
+                summary="Sensitive-name paths that responded — metadata only, no body stored.",
+                content_text=_text_summary(
+                    {
+                        "paths": [
+                            {
+                                "path": row.get("path"),
+                                "status_code": row.get("status_code"),
+                                "content_type": row.get("content_type"),
+                                "response_note": row.get("response_note"),
+                            }
+                            for row in sensitive
+                        ]
+                    }
+                ),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="HTTP response",
+                collection_method="controlled_web_path_review",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    return items
+
+
 def capture_tls_review_evidence(
     conn: sqlite3.Connection,
     *,
@@ -2375,6 +2501,15 @@ def capture_module_evidence(
         )
     if module_id == "infra_web_stack_identifier":
         return capture_web_stack_evidence(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            result=result,
+        )
+    if module_id == "infra_web_path_review":
+        return capture_web_path_evidence(
             conn,
             case_id=case_id,
             entity_id=entity_id,

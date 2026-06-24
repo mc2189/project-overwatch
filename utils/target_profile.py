@@ -24,6 +24,7 @@ _MODULE_FAMILIES: dict[str, str] = {
     "infra_tls_review": "TLS / certificates",
     "infra_http_security": "HTTP security",
     "infra_web_stack_identifier": "Web stack",
+    "infra_web_path_review": "Web path review",
     "infra_domain_intel": "Domain intelligence",
     "infra_cert_subdomain": "Subdomains / CT",
     "infra_website_metadata": "Website metadata",
