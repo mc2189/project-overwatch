@@ -2570,6 +2570,133 @@ def _check_pcap_module() -> None:
             Path(empty_pcap.name).unlink(missing_ok=True)
 
 
+def _check_file_metadata_module() -> None:
+    import importlib.util
+    from pathlib import Path
+
+    registry = __import__(
+        "modules.module_registry",
+        fromlist=["get_module", "is_executable"],
+    )
+    module = registry.get_module("evidence_file_metadata")
+    if module is None or not registry.is_executable(module):
+        raise AssertionError("evidence_file_metadata should be registered and executable")
+    if module.mode != "analysis":
+        raise AssertionError("evidence_file_metadata mode should be analysis")
+
+    extractors = __import__(
+        "utils.file_metadata_extractors",
+        fromlist=["extract_file_metadata", "sha256_file"],
+    )
+    storage = __import__(
+        "utils.file_metadata_storage",
+        fromlist=["is_supported_metadata_filename", "store_file_metadata_upload"],
+    )
+    if not storage.is_supported_metadata_filename("photo.jpg"):
+        raise AssertionError("jpg should be supported for metadata review")
+    if storage.is_supported_metadata_filename("archive.zip"):
+        raise AssertionError("zip should not be supported for metadata review")
+
+    module_path = (
+        Path(__file__).resolve().parent.parent
+        / "modules"
+        / "6_evidence_analysis"
+        / "evidence_file_metadata.py"
+    )
+    spec = importlib.util.spec_from_file_location("evidence_file_metadata_smoke", module_path)
+    if spec is None or spec.loader is None:
+        raise AssertionError("could not load evidence_file_metadata module")
+    meta_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(meta_mod)
+
+    blocked = meta_mod.run_file_metadata_review("notes.txt", options={"uploaded_files": []})
+    if blocked.get("status") != "blocked":
+        raise AssertionError("missing uploads should return blocked status")
+    if blocked.get("success"):
+        raise AssertionError("missing uploads should not succeed")
+
+    mock_parsed = {
+        "file_count": 2,
+        "notable_count": 1,
+        "filenames": ["photo.jpg", "report.pdf"],
+        "privacy_notes": ["Author/creator metadata present — treat names as privacy-sensitive."],
+        "files": [
+            {
+                "filename": "photo.jpg",
+                "extension": "jpg",
+                "size_bytes": 1200,
+                "sha256": "a" * 64,
+                "extraction_status": "complete",
+                "notable": True,
+                "privacy_flags": {"gps_present": True, "author_present": False, "company_present": False},
+                "image": {"width": 800, "height": 600, "camera_make": "Example"},
+                "gps_details": {"GPSLatitude": "51.5"},
+            },
+            {
+                "filename": "report.pdf",
+                "extension": "pdf",
+                "size_bytes": 4096,
+                "sha256": "b" * 64,
+                "extraction_status": "complete",
+                "notable": True,
+                "privacy_flags": {"gps_present": False, "author_present": True, "company_present": False},
+                "document": {"author": "Analyst", "page_count": 3},
+            },
+        ],
+    }
+    mock_result = meta_mod.run_file_metadata_review(
+        "photo.jpg",
+        options={"mock_data": mock_parsed},
+    )
+    if not mock_result.get("success"):
+        raise AssertionError("mock file metadata review should succeed")
+    if "File metadata review completed" not in (mock_result.get("summary") or ""):
+        raise AssertionError("mock file metadata summary missing completed wording")
+
+    interpreter = __import__(
+        "utils.file_metadata_interpreter",
+        fromlist=["interpret_file_metadata_results"],
+    )
+    findings = interpreter.interpret_file_metadata_results(mock_parsed)
+    if not findings:
+        raise AssertionError("file metadata interpreter should return findings")
+    titles = {item.get("title") for item in findings}
+    if "GPS/location metadata present" not in titles:
+        raise AssertionError("GPS finding should be present in mock interpretation")
+
+    findings_registry = __import__(
+        "utils.findings_registry",
+        fromlist=["interpret_module_findings", "module_has_findings_pipeline"],
+    )
+    if not findings_registry.module_has_findings_pipeline("evidence_file_metadata"):
+        raise AssertionError("evidence_file_metadata should have findings pipeline")
+    pipeline_findings = findings_registry.interpret_module_findings("evidence_file_metadata", mock_parsed)
+    if not pipeline_findings:
+        raise AssertionError("findings pipeline returned no file metadata findings")
+
+    executor = __import__(
+        "modules.executor",
+        fromlist=["is_runtime_ready"],
+    )
+    if not executor.is_runtime_ready("evidence_file_metadata"):
+        raise AssertionError("evidence_file_metadata runtime should be ready")
+
+    next_actions = __import__(
+        "utils.file_metadata_next_actions",
+        fromlist=["suggest_file_metadata_primary_action"],
+    )
+    action = next_actions.suggest_file_metadata_primary_action(mock_result, case_id=0, workspace_target="photo.jpg")
+    if action.get("action_type") == "no_action" and "GPS" not in (action.get("title") or ""):
+        raise AssertionError("primary action should prioritise GPS review for mock GPS file")
+
+    evidence_capture = __import__(
+        "utils.evidence_capture",
+        fromlist=["capture_file_metadata_evidence"],
+    )
+    if not callable(evidence_capture.capture_file_metadata_evidence):
+        raise AssertionError("capture_file_metadata_evidence helper should exist")
+
+
 def _check_live_capture_module() -> None:
     import importlib.util
     from pathlib import Path
@@ -4033,7 +4160,7 @@ def _check_executor_dispatch_registry() -> None:
 
     from modules import executor as executor_mod
     from modules import executor_dispatch as dispatch_mod
-    from modules.executors import infrastructure, loaders, network_analysis, registry, threat_intelligence
+    from modules.executors import evidence_analysis, infrastructure, loaders, network_analysis, registry, threat_intelligence
     from modules.executor_dispatch import get_dispatch_entry, list_registered_module_ids
     from modules.module_registry import MODULES, is_executable
 
@@ -4044,6 +4171,7 @@ def _check_executor_dispatch_registry() -> None:
         infrastructure,
         threat_intelligence,
         network_analysis,
+        evidence_analysis,
         registry,
     ):
         __import__(mod.__name__)
@@ -4068,6 +4196,7 @@ def _check_executor_dispatch_registry() -> None:
         "intel_urlhaus",
         "net_pcap_review",
         "net_live_capture",
+        "evidence_file_metadata",
     }
     if registered != expected:
         missing = expected - registered
@@ -4401,6 +4530,11 @@ def main() -> int:
     run(
         "pcap module",
         lambda: _check_pcap_module(),
+    )
+
+    run(
+        "file metadata module",
+        lambda: _check_file_metadata_module(),
     )
 
     run(

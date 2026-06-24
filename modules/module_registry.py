@@ -52,7 +52,8 @@ CATEGORIES: list[dict[str, str | bool]] = [
     {"key": "Vulnerability", "label": "3. Vulnerability", "default_expanded": False},
     {"key": "Threat Intel", "label": "4. Threat Intel", "default_expanded": False},
     {"key": "Network Analysis", "label": "5. Network Analysis", "default_expanded": False},
-    {"key": "Dark Web", "label": "6. Dark Web", "default_expanded": False},
+    {"key": "Evidence Analysis", "label": "6. Evidence Analysis", "default_expanded": False},
+    {"key": "Dark Web", "label": "7. Dark Web", "default_expanded": False},
     {"key": "Financial", "label": "7. Financial", "default_expanded": False},
     {"key": "GEOINT and Media", "label": "8. GEOINT and Media", "default_expanded": False},
     {"key": "Corporate Networks", "label": "9. Corporate Networks", "default_expanded": False},
@@ -763,6 +764,41 @@ MODULES: list[ModuleEntry] = [
             "Install pyshark and tshark for full parsing; metadata-only fallback otherwise.",
             "Passwords, tokens, cookies, and raw payloads are not shown by default.",
             "Findings are analyst aids based on the supplied capture only.",
+        ),
+    ),
+    ModuleEntry(
+        module_id="evidence_file_metadata",
+        display_name="Document and Image Metadata Review",
+        category="Evidence Analysis",
+        description="Local review of uploaded documents and images for useful metadata.",
+        status="active",
+        mode="analysis",
+        risk_level="low",
+        requires_authorisation=False,
+        requires_api_key=False,
+        implemented=True,
+        accepted_target_types=("file", "image", "document", "pdf"),
+        config_notes=(
+            "Local file analysis only — upload one or more supported files. "
+            "Optional Pillow for images and pypdf for PDF metadata. "
+            "No OCR, no external upload, and files are not modified."
+        ),
+        rate_limit_notes="Not applicable — analysis runs against uploaded local files only.",
+        short_help="Review EXIF, document properties, and privacy-sensitive metadata from uploaded files.",
+        detailed_help=(
+            "Extracts metadata from uploaded images, PDFs, Office documents, and basic text/CSV files locally. "
+            "GPS/location metadata is highlighted as a privacy advisory. Author/creator names are shown with "
+            "privacy guidance. Raw metadata is available in collapsed details only."
+        ),
+        example_inputs=("photo.jpg", "report.pdf", "briefing.docx", "sheet.xlsx"),
+        output_summary=(
+            "File hashes, metadata summaries, privacy notes, EXIF/document fields, and cautious findings."
+        ),
+        caution_notes=(
+            "Local-only analysis — files are not sent externally.",
+            "GPS and author metadata may be privacy-sensitive — review before sharing externally.",
+            "Missing optional libraries produce graceful partial results, not hard failures.",
+            "Metadata presence does not prove authenticity or provenance.",
         ),
     ),
     ModuleEntry(

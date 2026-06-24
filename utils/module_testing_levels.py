@@ -38,6 +38,7 @@ MODULE_TESTING_LEVELS: dict[str, TestingLevel] = {
     "intel_shodan": "passive_lookup",
     "intel_urlhaus": "passive_lookup",
     "net_pcap_review": "local_evidence_review",
+    "evidence_file_metadata": "local_evidence_review",
     "net_live_capture": "personal_lab_capture",
     # Active
     "infra_nmap": "safe_active_check",

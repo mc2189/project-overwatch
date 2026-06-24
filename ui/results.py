@@ -116,6 +116,22 @@ def render_result_summary_tab(result: dict) -> None:
         if highest:
             st.caption(f"Highest severity: {highest}")
 
+    if result["module_id"] == "evidence_file_metadata" and parsed_data:
+        files = list(parsed_data.get("files") or [])
+        st.write(f"**Files reviewed:** {parsed_data.get('file_count', len(files))}")
+        st.write(f"**Notable metadata:** {parsed_data.get('notable_count', 0)}")
+        if parsed_data.get("filenames"):
+            names = ", ".join(str(name) for name in parsed_data["filenames"][:4])
+            suffix = f" (+{len(parsed_data['filenames']) - 4} more)" if len(parsed_data["filenames"]) > 4 else ""
+            st.caption(f"Files: {names}{suffix}")
+        privacy_notes = parsed_data.get("privacy_notes") or []
+        if privacy_notes:
+            for note in privacy_notes[:3]:
+                st.warning(note)
+        highest = _highest_severity(result.get("interpreter_findings") or [])
+        if highest:
+            st.caption(f"Highest severity: {highest}")
+
     if result["module_id"] == "infra_cert_subdomain" and parsed_data:
         subdomains = parsed_data.get("subdomains") or []
         st.write(f"**Certificate names returned:** {len(subdomains)}")
@@ -987,6 +1003,89 @@ def render_result_module_output_tab(result: dict) -> None:
                     hide_index=True,
                 )
 
+    if result["module_id"] == "evidence_file_metadata" and parsed_data:
+        st.caption(
+            "Local metadata review only — files are not uploaded externally. "
+            "GPS coordinates are hidden unless you expand file details below."
+        )
+        files = list(parsed_data.get("files") or [])
+        if files:
+            table_rows = [
+                {
+                    "filename": row.get("filename"),
+                    "extension": row.get("extension"),
+                    "size_bytes": row.get("size_bytes"),
+                    "sha256": (row.get("sha256") or "")[:16] + "…" if row.get("sha256") else "",
+                    "status": row.get("extraction_status"),
+                    "notable": row.get("notable"),
+                    "gps": "yes" if (row.get("privacy_flags") or {}).get("gps_present") else "no",
+                    "author": "yes" if (row.get("privacy_flags") or {}).get("author_present") else "no",
+                }
+                for row in files
+            ]
+            st.markdown("**File metadata table**")
+            st.dataframe(pd.DataFrame(table_rows), width="stretch", hide_index=True)
+
+        for row in files:
+            image = row.get("image") or {}
+            document = row.get("document") or {}
+            if not image and not document:
+                continue
+            label = row.get("filename") or "file"
+            with st.expander(f"EXIF / document metadata — {label}", expanded=False):
+                if image:
+                    st.markdown("**Image metadata**")
+                    st.write(
+                        f"Dimensions: {image.get('width')}×{image.get('height')} · "
+                        f"Mode: {image.get('mode')} · Format: {image.get('format')}"
+                    )
+                    if image.get("camera_make") or image.get("camera_model"):
+                        st.write(f"Camera: {image.get('camera_make') or ''} {image.get('camera_model') or ''}".strip())
+                    if image.get("software"):
+                        st.write(f"Software/editor: {image['software']}")
+                    if image.get("created_date"):
+                        st.write(f"Created: {image['created_date']}")
+                    if image.get("modified_date"):
+                        st.write(f"Modified: {image['modified_date']}")
+                    if image.get("orientation"):
+                        st.write(f"Orientation: {image['orientation']}")
+                    flags = row.get("privacy_flags") or {}
+                    if flags.get("gps_present"):
+                        st.warning("GPS/location metadata present — review before sharing externally.")
+                        with st.expander("GPS coordinates (expand only if needed)", expanded=False):
+                            st.json(row.get("gps_details") or {"note": "Coordinates not decoded."})
+                    exif = image.get("exif_summary") or {}
+                    if exif:
+                        with st.expander("EXIF summary", expanded=False):
+                            st.json(exif)
+                if document:
+                    st.markdown("**Document metadata**")
+                    for key in (
+                        "title",
+                        "author",
+                        "creator",
+                        "last_modified_by",
+                        "created_date",
+                        "modified_date",
+                        "producer",
+                        "application",
+                        "page_count",
+                        "sheet_count",
+                        "slide_count",
+                        "template",
+                        "company",
+                        "revision",
+                    ):
+                        if document.get(key) not in (None, ""):
+                            st.write(f"{key.replace('_', ' ').title()}: {document[key]}")
+                raw_meta = row.get("raw_metadata") or {}
+                if raw_meta:
+                    with st.expander("Raw metadata (collapsed)", expanded=False):
+                        st.json(raw_meta)
+                notes = row.get("extraction_notes") or []
+                if notes:
+                    st.caption(" · ".join(str(note) for note in notes[:3]))
+
 
 def render_result_raw_tab(result: dict) -> None:
     raw_output = result.get("raw_output")
@@ -1012,6 +1111,16 @@ def render_result_structured_tab(result: dict) -> None:
     if result["module_id"] == "net_pcap_review" and isinstance(parsed_data, dict):
         from utils.security import redact_secrets_from_dict
 
+        parsed_data = redact_secrets_from_dict(parsed_data)
+    if result["module_id"] == "evidence_file_metadata" and isinstance(parsed_data, dict):
+        from utils.security import redact_secrets_from_dict
+
+        sanitized_files = []
+        for row in parsed_data.get("files") or []:
+            item = dict(row)
+            item.pop("gps_details", None)
+            sanitized_files.append(redact_secrets_from_dict(item))
+        parsed_data = {**parsed_data, "files": sanitized_files}
         parsed_data = redact_secrets_from_dict(parsed_data)
     payload = {
         "selected_options": result.get("selected_options"),

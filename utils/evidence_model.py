@@ -194,6 +194,13 @@ MODULE_EVIDENCE_DEFAULTS: dict[str, dict[str, Any]] = {
         "reliability": RELIABILITY_HIGH,
         "collection_method": "local_packet_capture_review",
     },
+    "evidence_file_metadata": {
+        "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
+        "source_name": "uploaded_file",
+        "source_url": None,
+        "reliability": RELIABILITY_HIGH,
+        "collection_method": "local_file_metadata_review",
+    },
     "net_live_capture": {
         "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
         "source_name": "personal_lab_packet_capture",
@@ -335,6 +342,14 @@ RELATIONSHIP_EVIDENCE_DEFAULTS: dict[tuple[str, str], dict[str, Any]] = {
     ("net_pcap_review", "connected_to_service"): {
         "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
         "reliability": RELIABILITY_HIGH,
+    },
+    ("evidence_file_metadata", "identifies_file"): {
+        "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
+        "reliability": RELIABILITY_HIGH,
+    },
+    ("evidence_file_metadata", "identifies_product"): {
+        "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
+        "reliability": RELIABILITY_MEDIUM,
     },
 }
 

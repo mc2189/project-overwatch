@@ -34,6 +34,7 @@ ROADMAP_SECTIONS: tuple[dict[str, object], ...] = (
             "infra_web_stack_identifier",
             "infra_web_path_review",
             "net_pcap_review",
+            "evidence_file_metadata",
             "net_live_capture",
         ),
     },

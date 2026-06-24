@@ -1971,6 +1971,157 @@ def capture_urlhaus_evidence(
     return items
 
 
+def capture_file_metadata_evidence(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    observation_id: int,
+    module_id: str,
+    result: dict[str, Any],
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    parsed_data = result.get("parsed_data") or {}
+    files = list(parsed_data.get("files") or [])
+
+    items.append(
+        _create_item(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            title="File metadata review summary",
+            summary="Summary of locally reviewed uploaded files.",
+            content_text=_text_summary(
+                {
+                    "file_count": parsed_data.get("file_count"),
+                    "notable_count": parsed_data.get("notable_count"),
+                    "privacy_notes": parsed_data.get("privacy_notes"),
+                    "filenames": parsed_data.get("filenames"),
+                }
+            ),
+            content_type="application/json",
+            evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+            source_name="uploaded_file",
+            collection_method="local_file_metadata_review",
+            reliability=RELIABILITY_HIGH,
+        )
+    )
+
+    for row in files:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title=f"File hash — {row.get('filename', 'file')}",
+                summary="SHA-256 hash for reviewed file.",
+                content_text=_text_summary(
+                    {
+                        "filename": row.get("filename"),
+                        "extension": row.get("extension"),
+                        "sha256": row.get("sha256"),
+                        "size_bytes": row.get("size_bytes"),
+                    }
+                ),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="uploaded_file",
+                collection_method="local_file_metadata_review",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    notable = [row for row in files if row.get("notable")]
+    if notable:
+        safe_rows = [
+            {
+                key: value
+                for key, value in row.items()
+                if key not in {"gps_details", "raw_metadata"}
+            }
+            for row in notable
+        ]
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Extracted metadata summary",
+                summary="Notable extracted metadata fields (GPS coordinates omitted from summary).",
+                content_text=_text_summary({"files": safe_rows}),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="uploaded_file",
+                collection_method="local_file_metadata_review",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    gps_files = [row for row in files if (row.get("privacy_flags") or {}).get("gps_present")]
+    if gps_files:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="GPS/location presence note",
+                summary="GPS/location metadata appears present — review before external sharing.",
+                content_text=_text_summary(
+                    {
+                        "files_with_gps": [row.get("filename") for row in gps_files],
+                        "note": "Expand file details in the module output to review coordinates if needed.",
+                    }
+                ),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="uploaded_file",
+                collection_method="local_file_metadata_review",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    partial = [row for row in files if row.get("extraction_status") in {"partial", "unavailable", "unsupported"}]
+    if partial:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Partial or unsupported extraction note",
+                summary="Some files could not be fully parsed.",
+                content_text=_text_summary(
+                    {
+                        "files": [
+                            {
+                                "filename": row.get("filename"),
+                                "extraction_status": row.get("extraction_status"),
+                                "extraction_notes": row.get("extraction_notes"),
+                            }
+                            for row in partial
+                        ]
+                    }
+                ),
+                content_type="application/json",
+                evidence_type=EVIDENCE_UNAVAILABLE_SOURCE,
+                source_name="uploaded_file",
+                collection_method="local_file_metadata_review",
+                reliability=RELIABILITY_MEDIUM,
+            )
+        )
+
+    return items
+
+
 def capture_pcap_evidence(
     conn: sqlite3.Connection,
     *,
@@ -2591,6 +2742,15 @@ def capture_module_evidence(
         )
     elif module_id == "net_pcap_review":
         items = capture_pcap_evidence(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            result=result,
+        )
+    elif module_id == "evidence_file_metadata":
+        items = capture_file_metadata_evidence(
             conn,
             case_id=case_id,
             entity_id=entity_id,

@@ -300,12 +300,28 @@ def suggest_next_actions(
             for result in latest_results
             if result.get("module_id") == "net_pcap_review" and result.get("success")
         ]
+        metadata_results = [
+            result
+            for result in latest_results
+            if result.get("module_id") == "evidence_file_metadata" and result.get("success")
+        ]
         live_results = [
             result
             for result in latest_results
             if result.get("module_id") == "net_live_capture" and result.get("success")
         ]
         evidence_actions: list[dict[str, Any]] = []
+        if metadata_results:
+            from utils.file_metadata_next_actions import suggest_file_metadata_investigation_actions
+
+            for meta_result in metadata_results[:2]:
+                evidence_actions.extend(
+                    suggest_file_metadata_investigation_actions(
+                        meta_result,
+                        case_id=case_id,
+                        workspace_target=cleaned,
+                    )[:6]
+                )
         source_result = pcap_results[0] if pcap_results else (live_results[0] if live_results else None)
         if source_result:
             if source_result.get("module_id") == "net_live_capture":
@@ -321,14 +337,14 @@ def suggest_next_actions(
                     workspace_target=cleaned,
                 )[:10]
             )
-        else:
+        elif not metadata_results:
             evidence_actions.append(
                 make_action(
-                    title="Upload a PCAP or run live capture",
-                    reason="Upload a capture via Uploaded evidence review or use Packet Capture.",
+                    title="Upload evidence files",
+                    reason="Upload a PCAP and/or supported document/image files via Uploaded evidence review.",
                     action_type="no_action",
                     priority="high",
-                    button_label="Capture required",
+                    button_label="Upload required",
                 )
             )
         return finalize_actions(

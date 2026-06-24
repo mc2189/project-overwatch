@@ -2,6 +2,18 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.29.0 — Document and Image Metadata Review
+
+- **`evidence_file_metadata`** — local-only review of uploaded documents and images for useful metadata (no OCR, no external upload)
+- **`utils/file_metadata_extractors.py`** — Pillow (images/EXIF/GPS), pypdf (PDF), Office core properties, text/CSV stats; graceful fallbacks when libraries missing
+- **`utils/file_metadata_storage.py`** — case-scoped upload storage with SHA-256 hashing
+- **`utils/file_metadata_interpreter.py`** — cautious findings for EXIF, GPS, author/creator, producer, revision, and extraction limits
+- **Assessment Workspace** — Uploaded evidence review goal now supports document/image uploads alongside PCAP
+- **Findings, evidence, entities** — file hash and metadata summary evidence; file and software entities where appropriate
+- **Reports** — File Metadata Review Summary with hashes, privacy notes, and limitations
+- **Next actions** — GPS review, metadata stripping reminder, privacy note, evidence locker, report generation
+- **Batch queue** — TODO only (file upload queue not yet supported)
+
 ## v2.28.0 — Controlled Web Path Review
 
 - **`infra_web_path_review`** — sequential review of up to 24 curated common web paths via controlled GET/HEAD requests

@@ -76,6 +76,17 @@ The **PCAP Evidence Review** module (`net_pcap_review`) is **supplied-capture-on
 - Analysis reflects only the uploaded capture at review time — not proof of current network behaviour
 - Optional `pyshark` / `tshark` dependency: when missing, the module returns metadata-only partial results without crashing the app
 
+## Document and Image Metadata Review boundary (v2.29)
+
+The **Document and Image Metadata Review** module (`evidence_file_metadata`) is **local uploaded-file analysis only**:
+
+- Allowed: SHA-256 hashing and metadata extraction from user-uploaded images, PDFs, Office documents, and basic text/CSV files
+- **Not allowed:** OCR, external file upload, file modification, network calls, or display of large full file contents
+- GPS/location metadata is flagged as a privacy advisory; coordinates are omitted from report summaries and shown only in collapsed UI expanders
+- Author/creator and company/template fields may be privacy-sensitive — findings use cautious wording (`metadata present`, `review before sharing externally`)
+- Missing optional libraries (`pillow-heif` for HEIC) produce graceful partial/unavailable results per file type — not application crashes
+- File hashes and metadata summaries may be stored in observations, findings, evidence, and reports
+
 ## Personal Lab Packet Capture boundary (v2.18)
 
 The **Personal Lab Packet Capture** module (`net_live_capture`) is **bounded local capture only**:

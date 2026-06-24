@@ -60,7 +60,8 @@ from utils.run_modes import (
 )
 from utils.pcap_storage import store_pcap_upload
 from utils.pcap_analysis import is_supported_pcap_filename
-from utils.target_detection import get_target_type
+from utils.file_metadata_storage import is_supported_metadata_filename, store_file_metadata_upload
+from utils.target_detection import get_target_type, file_target_type
 from utils.target_profile import build_target_profile
 from utils.web_port_planner import (
     filter_modules_without_service_data,
@@ -71,6 +72,7 @@ from utils.web_port_planner import (
 PREV_GOAL_KEY = "workspace_prev_goal"
 RUN_GOAL_SESSION_KEY = "assessment_goal"
 PCAP_UPLOAD_SESSION_KEY = "pcap_upload"
+FILE_METADATA_UPLOADS_SESSION_KEY = "file_metadata_uploads"
 
 
 def _init_module_selection() -> None:
@@ -190,6 +192,13 @@ def _execute_modules(
                     "pcap_sha256": pcap_upload.get("sha256"),
                     "pcap_size": pcap_upload.get("size_bytes"),
                     "case_id": current_case["id"],
+                }
+            elif module_id == "evidence_file_metadata":
+                uploads = list(st.session_state.get(FILE_METADATA_UPLOADS_SESSION_KEY) or [])
+                options = {
+                    "uploaded_files": uploads,
+                    "case_id": current_case["id"],
+                    "target_type": file_target_type(uploads[0]["filename"]) if uploads else get_target_type(target_value),
                 }
             options["operating_context"] = operating_context
             options["personal_lab_confirmed"] = personal_lab_confirmed
@@ -316,33 +325,64 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
                 st.rerun()
 
         pcap_upload = st.session_state.get(PCAP_UPLOAD_SESSION_KEY)
+        file_uploads = list(st.session_state.get(FILE_METADATA_UPLOADS_SESSION_KEY) or [])
         if goal_id == GOAL_EVIDENCE_REVIEW:
-            section_heading("Capture file")
-            uploaded = st.file_uploader(
+            section_heading("Evidence files")
+            uploaded_pcap = st.file_uploader(
                 "Upload PCAP evidence",
                 type=["pcap", "pcapng"],
                 key="workspace_pcap_uploader",
                 help="Local .pcap or .pcapng file only — no live capture in this version.",
             )
-            if uploaded is not None:
-                data = uploaded.getvalue()
+            if uploaded_pcap is not None:
+                data = uploaded_pcap.getvalue()
                 stored = store_pcap_upload(
                     current_case["id"],
-                    uploaded.name,
+                    uploaded_pcap.name,
                     data,
                 )
                 st.session_state[PCAP_UPLOAD_SESSION_KEY] = stored
                 st.session_state.operation_target = stored["filename"]
                 pcap_upload = stored
                 st.caption(
-                    f"**{stored['filename']}** · {stored['size_bytes']:,} bytes · "
+                    f"**PCAP:** {stored['filename']} · {stored['size_bytes']:,} bytes · "
                     f"SHA-256 `{stored['sha256'][:16]}…`"
                 )
             elif pcap_upload:
                 st.caption(
-                    f"Using **{pcap_upload['filename']}** · SHA-256 `{pcap_upload['sha256'][:16]}…`"
+                    f"**PCAP:** {pcap_upload['filename']} · SHA-256 `{pcap_upload['sha256'][:16]}…`"
                 )
-            target = st.session_state.operation_target or (pcap_upload or {}).get("filename", "")
+
+            uploaded_docs = st.file_uploader(
+                "Upload document/image files for metadata review",
+                type=["jpg", "jpeg", "png", "heic", "tif", "tiff", "pdf", "docx", "xlsx", "pptx", "txt", "csv"],
+                accept_multiple_files=True,
+                key="workspace_file_metadata_uploader",
+                help="Local metadata review only — files are not sent externally.",
+            )
+            if uploaded_docs:
+                stored_files: list[dict] = []
+                for item in uploaded_docs:
+                    if not is_supported_metadata_filename(item.name):
+                        continue
+                    stored_files.append(
+                        store_file_metadata_upload(current_case["id"], item.name, item.getvalue())
+                    )
+                if stored_files:
+                    st.session_state[FILE_METADATA_UPLOADS_SESSION_KEY] = stored_files
+                    file_uploads = stored_files
+                    if not st.session_state.operation_target:
+                        st.session_state.operation_target = stored_files[0]["filename"]
+                    names = ", ".join(row["filename"] for row in stored_files[:4])
+                    suffix = f" (+{len(stored_files) - 4} more)" if len(stored_files) > 4 else ""
+                    st.caption(f"**Metadata files:** {names}{suffix}")
+            elif file_uploads:
+                names = ", ".join(row["filename"] for row in file_uploads[:4])
+                st.caption(f"**Metadata files:** {names}")
+
+            target = st.session_state.operation_target or (pcap_upload or {}).get("filename") or (
+                file_uploads[0]["filename"] if file_uploads else ""
+            )
         else:
             target = st.text_input(
                 "Investigation target",
@@ -525,10 +565,18 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
             if goal_id == GOAL_LIVE_CAPTURE:
                 launch_blocked = "Use the Packet Capture page in the sidebar for live capture."
             elif goal_id == GOAL_EVIDENCE_REVIEW:
-                if not pcap_upload or not is_supported_pcap_filename(
-                    (pcap_upload or {}).get("filename", "")
-                ):
+                needs_pcap = "net_pcap_review" in selected_ids
+                needs_metadata = "evidence_file_metadata" in selected_ids
+                has_pcap = bool(
+                    pcap_upload and is_supported_pcap_filename((pcap_upload or {}).get("filename", ""))
+                )
+                has_metadata = bool(file_uploads)
+                if needs_pcap and needs_metadata and not has_pcap and not has_metadata:
+                    launch_blocked = "Upload a PCAP file and/or supported document/image files to review."
+                elif needs_pcap and not has_pcap:
                     launch_blocked = "Upload a .pcap or .pcapng capture file to review."
+                elif needs_metadata and not has_metadata:
+                    launch_blocked = "Upload one or more supported document/image files for metadata review."
             elif not target.strip():
                 launch_blocked = "Enter a target."
             elif not selected_ids:

@@ -7,5 +7,8 @@ dnspython>=2.4
 requests>=2.31
 cryptography>=42.0
 python-dotenv>=1.0
+pillow>=10.0
+pypdf>=4.0
 
 # Optional report/graph extras: pip install -r requirements-optional.txt
+# Optional HEIC/HEIF images: pip install pillow-heif

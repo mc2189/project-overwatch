@@ -2,6 +2,8 @@
 
 Project Overwatch is a **local** Python/Streamlit intelligence, OSINT, security testing and resilience advisory dashboard for **private internal use** supporting future client assessments.
 
+**v2.29** adds **Document and Image Metadata Review** — local EXIF and document property extraction from uploaded files with privacy advisories for GPS and author metadata (no OCR, no external upload).
+
 **v2.28** adds **Controlled Web Path Review** — a small sequential check of curated common web paths (admin, API docs, status, CMS, sensitive-name indicators) with cautious findings and no full body storage.
 
 **v2.27** adds **Web Stack Identifier** — a controlled HTTP GET that surfaces visible web technology indicators from headers and a capped page preview, without storing full page bodies.
@@ -357,6 +359,27 @@ Local-only review of uploaded packet capture files — **no live network capture
 - Uploaded files are stored under the case evidence area; UI and reports show filename and SHA-256 only (not full local paths)
 
 **Workspace integration:** discovered IPs and domains can suggest reputation checks, Network Service Check (local IPs), evidence review, and report generation — nothing auto-runs active checks.
+
+### Document and Image Metadata Review (v2.29)
+
+Local-only review of uploaded documents and images for useful metadata — **no OCR, no external upload, files are not modified**.
+
+1. On **Run Operation**, choose goal **Uploaded evidence review**.
+2. Upload one or more supported files (images, PDF, Office, text/CSV).
+3. Run **Document and Image Metadata Review** — results include SHA-256 hashes, extracted metadata summaries, privacy notes, and cautious findings.
+
+**Supported file types:** `.jpg`, `.jpeg`, `.png`, `.heic`/`.heif` (optional `pillow-heif`), `.tif`, `.tiff`, `.pdf`, `.docx`, `.xlsx`, `.pptx`, `.txt`, `.csv`. Unsupported types fail cleanly per file.
+
+**Dependencies:** `Pillow` for images and `pypdf` for PDF metadata (in `requirements.txt`). Missing optional libraries produce partial results with operational warnings — the app does not crash.
+
+**Privacy / safety:**
+
+- GPS/location metadata is **highlighted** as a privacy advisory; coordinates appear only in collapsed UI expanders
+- Author/creator names are shown with privacy guidance — review before sharing externally
+- Raw metadata and structured output are **collapsed by default**; large file contents are not displayed
+- Secrets/tokens in text metadata are redacted before persistence
+
+**Workspace integration:** next actions suggest GPS review, metadata stripping reminders, privacy notes, evidence locker review, and report generation.
 
 ### Personal Lab Packet Capture (v2.18)
 
@@ -975,7 +998,7 @@ Run `validate_module_registry()` or check **Settings → System status** for met
 python scripts/smoke_check.py
 ```
 
-Smoke checks verify SDK helpers, registry metadata for implemented modules, executor imports, evidence locker integration, PCAP Evidence Review and Personal Lab Packet Capture mock paths, and VirusTotal/AbuseIPDB/GreyNoise/Shodan/URLhaus mock lookups — no live network required.
+Smoke checks verify SDK helpers, registry metadata for implemented modules, executor imports, evidence locker integration, PCAP Evidence Review, Document and Image Metadata Review mock paths, Personal Lab Packet Capture mock paths, and VirusTotal/AbuseIPDB/GreyNoise/Shodan/URLhaus mock lookups — no live network required.
 
 Unit tests live in `tests/test_module_sdk.py`. CI runs both smoke check and unit tests (see `.github/workflows/smoke_check.yml`).
 

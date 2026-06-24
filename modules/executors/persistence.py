@@ -2513,6 +2513,135 @@ def _persist_pcap_records(
     )
 
 
+def _persist_file_metadata_records(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    module_id: str,
+    target: str,
+    result: dict[str, Any],
+    authorisation_confirmed: bool,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> None:
+    """Save file metadata review operations, observations, entities, and relationships."""
+    result = _prepare_module_result(result)
+    create_operation_log(
+        case_id,
+        module_id,
+        target,
+        result["status"],
+        authorisation_confirmed=authorisation_confirmed,
+        summary=result["summary"],
+        run_mode_id=run_mode_id,
+        run_mode_label=run_mode_label,
+        conn=conn,
+    )
+
+    if not should_persist_observation(result["status"]):
+        return
+
+    parsed_data = result.get("parsed_data") or {}
+    files = list(parsed_data.get("files") or [])
+
+    for row in files:
+        sha256 = row.get("sha256") or "unknown"
+        filename = row.get("filename") or "file"
+        file_entity = create_or_get_entity(
+            case_id,
+            "artefact",
+            f"{sha256}:{filename}",
+            label=filename[:120],
+            source=module_id,
+            confidence=90,
+            conn=conn,
+        )
+        create_relationship(
+            case_id,
+            entity_id,
+            "identifies_file",
+            file_entity["id"],
+            source_module=module_id,
+            confidence=90,
+            conn=conn,
+        )
+        document = row.get("document") or {}
+        producer = document.get("producer") or document.get("application")
+        if producer and row.get("notable"):
+            software_entity = create_or_get_entity(
+                case_id,
+                "software",
+                str(producer)[:120],
+                label=str(producer)[:120],
+                source=module_id,
+                confidence=70,
+                conn=conn,
+            )
+            create_relationship(
+                case_id,
+                file_entity["id"],
+                "identifies_product",
+                software_entity["id"],
+                source_module=module_id,
+                confidence=70,
+                conn=conn,
+            )
+
+    safe_files = [
+        {
+            key: value
+            for key, value in row.items()
+            if key not in {"gps_details", "raw_metadata"}
+        }
+        for row in files
+    ]
+    observation = create_observation(
+        case_id,
+        entity_id,
+        module_id,
+        "file_metadata_review",
+        "Document and image metadata review",
+        summary=result["summary"],
+        data_json=json.dumps(
+            {
+                "module_id": module_id,
+                "success": result["success"],
+                "status": result["status"],
+                "file_count": parsed_data.get("file_count"),
+                "notable_count": parsed_data.get("notable_count"),
+                "privacy_notes": parsed_data.get("privacy_notes"),
+                "files": safe_files,
+                "interpreter_findings": result.get("interpreter_findings", []),
+                "warnings": result.get("warnings", []),
+            }
+        ),
+        raw_output=result["raw_output"],
+        **_observation_evidence_kwargs(module_id, result),
+        conn=conn,
+    )
+
+    _persist_observation_evidence(
+        conn,
+        case_id=case_id,
+        entity_id=entity_id,
+        observation_id=observation["id"],
+        module_id=module_id,
+        result=result,
+    )
+
+    interpreter_findings = result.get("interpreter_findings") or []
+    if interpreter_findings:
+        _persist_module_findings(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation["id"],
+            module_id=module_id,
+            interpreter_findings=interpreter_findings,
+        )
+
+
 def _persist_pcap_entities(
     conn: sqlite3.Connection,
     *,

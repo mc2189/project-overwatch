@@ -86,6 +86,7 @@ MODULE_CARD_TITLES: dict[str, str] = {
     "intel_shodan": "Shodan Internet Exposure Intelligence",
     "intel_urlhaus": "URLhaus Malware URL Intelligence",
     "net_pcap_review": "PCAP Evidence Review",
+    "evidence_file_metadata": "Document and Image Metadata Review",
     "net_live_capture": "Personal Lab Packet Capture",
 }
 

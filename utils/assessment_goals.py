@@ -57,7 +57,7 @@ GOAL_DESCRIPTIONS: dict[str, str] = {
     GOAL_EXTERNAL_EXPOSURE: "Internet exposure context from Shodan, subdomains, and supporting passive checks.",
     GOAL_THREAT_REPUTATION: "Third-party reputation and malware URL intelligence where API keys allow.",
     GOAL_LOCAL_NETWORK: "Conservative network service check for a private or local IPv4 address.",
-    GOAL_EVIDENCE_REVIEW: "Upload and review a .pcap or .pcapng packet capture locally — no live network capture.",
+    GOAL_EVIDENCE_REVIEW: "Upload and review packet captures or document/image files locally — no external upload.",
     GOAL_LIVE_CAPTURE: "Start a bounded Personal Lab packet capture from the Packet Capture page — no client engagement required.",
     GOAL_FULL_CLIENT: "Broader passive footprint plus optional active TLS/HTTP checks when authorised.",
     GOAL_CUSTOM: "Choose any compatible module manually (advanced).",
@@ -184,7 +184,7 @@ def get_modules_for_goal(
 ) -> list[str]:
     """Return recommended module IDs for an assessment goal and target."""
     if goal_id == GOAL_EVIDENCE_REVIEW:
-        return ["net_pcap_review"]
+        return ["net_pcap_review", "evidence_file_metadata"]
     if goal_id == GOAL_LIVE_CAPTURE:
         return ["net_live_capture"]
     if goal_id == GOAL_CUSTOM:

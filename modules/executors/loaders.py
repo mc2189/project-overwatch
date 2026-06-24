@@ -15,6 +15,7 @@ from modules.executors.paths import (
     GREYNOISE_MODULE_PATH,
     HTTP_SECURITY_MODULE_PATH,
     LIVE_CAPTURE_MODULE_PATH,
+    FILE_METADATA_MODULE_PATH,
     NMAP_MODULE_PATH,
     PCAP_REVIEW_MODULE_PATH,
     REMOTE_ACCESS_MODULE_PATH,
@@ -82,6 +83,9 @@ _pcap_review_load_attempted = False
 _live_capture_handler: Any | None = None
 _live_capture_load_error: str | None = None
 _live_capture_load_attempted = False
+_file_metadata_handler: Any | None = None
+_file_metadata_load_error: str | None = None
+_file_metadata_load_attempted = False
 
 
 def _observation_evidence_kwargs(module_id: str, result: dict[str, Any]) -> dict[str, Any]:
@@ -570,6 +574,29 @@ def _load_live_capture_handler() -> None:
         _live_capture_handler = net_live_capture.run_live_capture
     except Exception as exc:
         _live_capture_load_error = str(exc)
+
+
+def _load_file_metadata_handler() -> None:
+    global _file_metadata_handler, _file_metadata_load_error, _file_metadata_load_attempted
+
+    if _file_metadata_load_attempted:
+        return
+
+    _file_metadata_load_attempted = True
+
+    if not FILE_METADATA_MODULE_PATH.is_file():
+        _file_metadata_load_error = f"Module file not found: {FILE_METADATA_MODULE_PATH}"
+        return
+
+    try:
+        spec = importlib.util.spec_from_file_location("evidence_file_metadata", FILE_METADATA_MODULE_PATH)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load module spec from {FILE_METADATA_MODULE_PATH}")
+        evidence_file_metadata = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(evidence_file_metadata)
+        _file_metadata_handler = evidence_file_metadata.run_file_metadata_review
+    except Exception as exc:
+        _file_metadata_load_error = str(exc)
 
 
 def _nmap_binary_available() -> bool:

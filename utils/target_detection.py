@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from urllib.parse import urlparse
 
 TARGET_TYPES: tuple[str, ...] = (
@@ -12,6 +13,9 @@ TARGET_TYPES: tuple[str, ...] = (
     "email",
     "username",
     "file",
+    "image",
+    "document",
+    "pdf",
     "pcap",
     "pcapng",
     "unknown",
@@ -31,6 +35,9 @@ TARGET_TYPE_LABELS: dict[str, str] = {
     "email": "Email address",
     "username": "Username-like value",
     "file": "File",
+    "image": "Image file",
+    "document": "Document file",
+    "pdf": "PDF file",
     "pcap": "PCAP capture",
     "pcapng": "PCAPNG capture",
     "unknown": "Unknown",
@@ -43,9 +50,28 @@ ENTITY_TYPE_BY_TARGET: dict[str, str] = {
     "email": "email",
     "username": "username",
     "file": "artefact",
+    "image": "artefact",
+    "document": "artefact",
+    "pdf": "artefact",
     "pcap": "artefact",
     "pcapng": "artefact",
     "unknown": "unknown",
+}
+
+FILE_EXTENSION_TARGET_TYPES: dict[str, str] = {
+    "jpg": "image",
+    "jpeg": "image",
+    "png": "image",
+    "heic": "image",
+    "heif": "image",
+    "tif": "image",
+    "tiff": "image",
+    "pdf": "pdf",
+    "docx": "document",
+    "xlsx": "document",
+    "pptx": "document",
+    "txt": "document",
+    "csv": "document",
 }
 
 
@@ -76,7 +102,17 @@ def get_target_type(value: str) -> str:
     if lowered.endswith(".pcap"):
         return "pcap"
 
+    ext = Path(cleaned).suffix.lower().lstrip(".")
+    if ext in FILE_EXTENSION_TARGET_TYPES:
+        return FILE_EXTENSION_TARGET_TYPES[ext]
+
     return "unknown"
+
+
+def file_target_type(filename: str) -> str:
+    """Map a filename extension to a metadata review target type."""
+    ext = Path(filename.strip()).suffix.lower().lstrip(".")
+    return FILE_EXTENSION_TARGET_TYPES.get(ext, "file")
 
 
 def target_type_label(target_type: str) -> str:

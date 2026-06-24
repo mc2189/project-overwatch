@@ -565,6 +565,58 @@ def build_case_report(
                 lines.append(f"- Created: {observation.get('created_at', '-')}")
                 lines.append("")
 
+        metadata_observations = [
+            observation
+            for observation in observations
+            if observation.get("module_id") == "evidence_file_metadata"
+        ]
+        if metadata_observations:
+            lines.extend(["## File Metadata Review Summary", ""])
+            lines.append(
+                "_Local metadata review of uploaded files only. Files are not sent externally. "
+                "GPS coordinates are omitted from this report summary._"
+            )
+            lines.append("")
+            for observation in metadata_observations:
+                entity = _entity_display(
+                    entity_by_id.get(observation.get("entity_id")),
+                    observation.get("entity_id"),
+                )
+                payload: dict[str, Any] = {}
+                data_json = observation.get("data_json")
+                if data_json:
+                    try:
+                        payload = json.loads(data_json) if isinstance(data_json, str) else data_json
+                    except (TypeError, json.JSONDecodeError):
+                        payload = {}
+                files = list(payload.get("files") or [])
+                lines.append(f"### {observation.get('title', 'File metadata review')}")
+                lines.append("")
+                lines.append(f"- Entity: {entity}")
+                lines.append(f"- Summary: {observation.get('summary') or '_No summary._'}")
+                lines.append(f"- Files reviewed: {payload.get('file_count', len(files))}")
+                lines.append(f"- Notable metadata: {payload.get('notable_count', 0)}")
+                privacy_notes = payload.get("privacy_notes") or []
+                if privacy_notes:
+                    lines.append(f"- Privacy notes: {'; '.join(privacy_notes)}")
+                if files:
+                    lines.append("- File hashes:")
+                    for row in files[:12]:
+                        sha = row.get("sha256") or "—"
+                        lines.append(
+                            f"  - {row.get('filename', 'file')}: `{sha}` "
+                            f"({row.get('size_bytes', 0):,} bytes, status={row.get('extraction_status')})"
+                        )
+                partial = payload.get("partial_count") or 0
+                unsupported = payload.get("unsupported_count") or 0
+                if partial or unsupported:
+                    lines.append(
+                        f"- Limitations: partial={partial}, unsupported={unsupported} "
+                        "(optional libraries or unsupported types may apply)"
+                    )
+                lines.append(f"- Created: {observation.get('created_at', '-')}")
+                lines.append("")
+
         nmap_observations = [
             observation
             for observation in observations

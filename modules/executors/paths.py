@@ -21,3 +21,4 @@ SHODAN_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel
 URLHAUS_MODULE_PATH = PROJECT_ROOT / "modules" / "4_threat_intelligence" / "intel_urlhaus.py"
 PCAP_REVIEW_MODULE_PATH = PROJECT_ROOT / "modules" / "5_network_analysis" / "net_pcap_review.py"
 LIVE_CAPTURE_MODULE_PATH = PROJECT_ROOT / "modules" / "5_network_analysis" / "net_live_capture.py"
+FILE_METADATA_MODULE_PATH = PROJECT_ROOT / "modules" / "6_evidence_analysis" / "evidence_file_metadata.py"

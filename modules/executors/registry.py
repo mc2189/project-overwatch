@@ -6,7 +6,7 @@ import sqlite3
 from typing import Any, Callable
 
 from modules.executor_dispatch import ExecuteFn, ModuleDispatchEntry, register_executor
-from modules.executors import infrastructure, loaders, network_analysis, threat_intelligence
+from modules.executors import evidence_analysis, infrastructure, loaders, network_analysis, threat_intelligence
 from modules.executors.persistence import _persist_nmap_services_and_relationships
 
 
@@ -210,6 +210,14 @@ def register_all_executors() -> None:
             get_error=_module_error(loaders._load_live_capture_handler, lambda: loaders._live_capture_load_error),
             execute=network_analysis._execute_live_capture,
             unavailable_label="Personal Lab Packet Capture",
+        ),
+        ModuleDispatchEntry(
+            "evidence_file_metadata",
+            load=loaders._load_file_metadata_handler,
+            is_ready=_module_ready(loaders._load_file_metadata_handler, lambda: loaders._file_metadata_handler),
+            get_error=_module_error(loaders._load_file_metadata_handler, lambda: loaders._file_metadata_load_error),
+            execute=evidence_analysis._execute_file_metadata_review,
+            unavailable_label="Document and Image Metadata Review",
         ),
     )
     for entry in entries:

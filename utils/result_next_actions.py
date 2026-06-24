@@ -257,6 +257,11 @@ def suggest_result_action(result: dict[str, Any], *, target: str) -> dict[str, A
                 button_label="Add note",
             )
 
+    if module_id == "evidence_file_metadata":
+        from utils.file_metadata_next_actions import suggest_file_metadata_primary_action
+
+        return suggest_file_metadata_primary_action(result, case_id=0, workspace_target=target)
+
     if module_id == "net_pcap_review":
         from utils.pcap_next_actions import suggest_pcap_primary_action
 

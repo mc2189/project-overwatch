@@ -37,6 +37,8 @@ ACTIVE_BATCH_MODULE_IDS: tuple[str, ...] = (
     "infra_web_path_review",
 )
 
+# TODO(v2.29): evidence_file_metadata — batch queue does not yet support file upload queues.
+
 QUEUE_STATUSES: tuple[str, ...] = (
     "queued",
     "running",
