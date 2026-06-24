@@ -95,6 +95,13 @@ def build_pivot_recommendations(
     if entity_type == "service":
         details = parse_service_entity_details(entity)
         host = details["host"] if details else execution_target
+        service_name = (details or {}).get("service", "").lower()
+        port = (details or {}).get("port", "")
+        if "ssh" in service_name or port == "22":
+            suggestions.append(
+                f"SSH service entity — run **SSH Configuration Review** against parent host `{host}` "
+                f"on port {port or '22'} after confirming authorisation."
+            )
         suggestions.append(
             f"No direct module targets service entities. Review the parent host `{host}` "
             "in Entity Workspace and run Network Service Check or passive modules there."

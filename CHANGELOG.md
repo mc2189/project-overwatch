@@ -2,6 +2,15 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.31.0 — SSH Configuration Review
+
+- **`infra_ssh_review`** — safe single-port SSH banner and visible handshake metadata review (no authentication)
+- **`utils/ssh_banner.py`** — port validation, banner parsing, socket banner read, optional Paramiko metadata (graceful if missing)
+- **`utils/ssh_review_interpreter.py`** — cautious findings for SSH observed, non-standard port, banner/version disclosure, public/private context, connection failures
+- **Integration** — Nmap and Remote Access follow-ups, Assessment Workspace port override, Batch Queue, Entity Workspace pivots, reports (SSH Configuration Review Summary), next actions
+- **Evidence** — banner summary, Nmap SSH row, direct connection result; `collection_method: ssh_configuration_review`
+- **Smoke check** — registry/dispatch, banner parser, port validation, mock review (no live SSH connection required)
+
 ## v2.30.0 — Report Builder v2 / Client Pack
 
 - **Report Builder v2 UI** — guided workflow: case → report type → sections → findings/evidence review → analyst notes → generate/export

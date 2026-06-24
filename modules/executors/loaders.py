@@ -20,6 +20,7 @@ from modules.executors.paths import (
     PCAP_REVIEW_MODULE_PATH,
     REMOTE_ACCESS_MODULE_PATH,
     SHODAN_MODULE_PATH,
+    SSH_REVIEW_MODULE_PATH,
     TLS_REVIEW_MODULE_PATH,
     URLHAUS_MODULE_PATH,
     VIRUSTOTAL_MODULE_PATH,
@@ -53,6 +54,9 @@ _http_security_load_attempted = False
 _remote_access_handler: Any | None = None
 _remote_access_load_error: str | None = None
 _remote_access_load_attempted = False
+_ssh_review_handler: Any | None = None
+_ssh_review_load_error: str | None = None
+_ssh_review_load_attempted = False
 _web_stack_handler: Any | None = None
 _web_stack_load_error: str | None = None
 _web_stack_load_attempted = False
@@ -344,6 +348,29 @@ def _load_remote_access_handler() -> None:
         _remote_access_handler = infra_remote_access_review.run_remote_access_review
     except Exception as exc:
         _remote_access_load_error = str(exc)
+
+
+def _load_ssh_review_handler() -> None:
+    global _ssh_review_handler, _ssh_review_load_error, _ssh_review_load_attempted
+
+    if _ssh_review_load_attempted:
+        return
+
+    _ssh_review_load_attempted = True
+
+    if not SSH_REVIEW_MODULE_PATH.is_file():
+        _ssh_review_load_error = f"Module file not found: {SSH_REVIEW_MODULE_PATH}"
+        return
+
+    try:
+        spec = importlib.util.spec_from_file_location("infra_ssh_review", SSH_REVIEW_MODULE_PATH)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load module spec from {SSH_REVIEW_MODULE_PATH}")
+        infra_ssh_review = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(infra_ssh_review)
+        _ssh_review_handler = infra_ssh_review.run_ssh_review
+    except Exception as exc:
+        _ssh_review_load_error = str(exc)
 
 
 def _load_web_stack_handler() -> None:

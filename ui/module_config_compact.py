@@ -39,17 +39,19 @@ def render_advanced_module_settings(
     nmap_options: dict = st.session_state.get("nmap_options", {})
     tls_review_options: dict = st.session_state.get("tls_review_options", {})
     http_security_options: dict = st.session_state.get("http_security_options", {})
+    ssh_review_options: dict = st.session_state.get("ssh_review_options", {})
 
     active_selected = [
         module_id
         for module_id in module_ids
-        if module_id in {"infra_nmap", "infra_tls_review", "infra_http_security", "infra_web_stack_identifier", "infra_web_path_review"}
+        if module_id in {"infra_nmap", "infra_tls_review", "infra_ssh_review", "infra_http_security", "infra_web_stack_identifier", "infra_web_path_review"}
     ]
     if not active_selected:
         return {
             "nmap_options": nmap_options,
             "tls_review_options": tls_review_options,
             "http_security_options": http_security_options,
+            "ssh_review_options": ssh_review_options,
         }
 
     with st.expander("Advanced settings (active modules)", expanded=False):
@@ -114,12 +116,28 @@ def render_advanced_module_settings(
                     )
                 )
                 http_security_options = http_review_options
+            elif module_id == "infra_ssh_review":
+                port_override = st.number_input(
+                    f"{title} port",
+                    min_value=1,
+                    max_value=65535,
+                    value=int(st.session_state.get("ssh_review_port_override", 22)),
+                    key="ssh_review_port_override",
+                    help="Single SSH port only — no ranges or lists.",
+                )
+                ssh_review_options = {
+                    "port_override": int(port_override),
+                    "manual_review": True,
+                }
+                st.caption("Performs one lightweight banner read — no login, passwords, or private keys.")
 
     st.session_state.nmap_options = nmap_options
     st.session_state.tls_review_options = tls_review_options
     st.session_state.http_security_options = http_security_options
+    st.session_state.ssh_review_options = ssh_review_options
     return {
         "nmap_options": nmap_options,
         "tls_review_options": tls_review_options,
         "http_security_options": http_security_options,
+        "ssh_review_options": ssh_review_options,
     }

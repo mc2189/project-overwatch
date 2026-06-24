@@ -56,6 +56,19 @@ def suggest_result_action(result: dict[str, Any], *, target: str) -> dict[str, A
 
     if module_id == "infra_remote_access_review" and result.get("success"):
         services = parsed.get("remote_services") or []
+        ssh_services = [
+            row for row in services if str(row.get("service_label") or "").upper() == "SSH" or row.get("port") == 22
+        ]
+        if ssh_services:
+            return make_action(
+                title="Run SSH Configuration Review",
+                reason="SSH was observed — review banner and visible SSH exposure on the selected port.",
+                action_type="run_module",
+                priority="medium",
+                target=target,
+                module_id="infra_ssh_review",
+                button_label="SSH review",
+            )
         if not services and parsed.get("no_service_data"):
             return make_action(
                 title="Run Network Service Check",
@@ -242,6 +255,48 @@ def suggest_result_action(result: dict[str, Any], *, target: str) -> dict[str, A
                 module_id=module_id,
                 button_label="Review findings",
             )
+
+    if module_id == "infra_ssh_review":
+        connection = parsed.get("connection") or {}
+        if parsed.get("no_service_data") and not connection.get("attempted"):
+            return make_action(
+                title="Run Network Service Check first",
+                reason="No SSH service data was available — discover open ports before banner review.",
+                action_type="run_module",
+                priority="high",
+                target=target,
+                module_id="infra_nmap",
+                button_label="Select Nmap",
+            )
+        if not connection.get("success"):
+            return make_action(
+                title="Run Network Service Check",
+                reason="SSH banner review could not connect — confirm open SSH port with Nmap.",
+                action_type="run_module",
+                priority="high",
+                target=target,
+                module_id="infra_nmap",
+                button_label="Select Nmap",
+            )
+        if parsed.get("is_private_target"):
+            return make_action(
+                title="Review whether SSH is expected",
+                reason="SSH service observed on a local/private target — confirm administration exposure.",
+                action_type="open_finding",
+                priority="medium",
+                target=target,
+                module_id=module_id,
+                button_label="Review findings",
+            )
+        return make_action(
+            title="Add SSH exposure to report",
+            reason="Public SSH service indicators should be validated and documented.",
+            action_type="create_report",
+            priority="high",
+            target=target,
+            module_id=module_id,
+            button_label="Generate report",
+        )
 
     if module_id == "infra_tls_review":
         cert = parsed.get("certificate") or {}

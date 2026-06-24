@@ -131,6 +131,13 @@ MODULE_EVIDENCE_DEFAULTS: dict[str, dict[str, Any]] = {
         "reliability": RELIABILITY_HIGH,
         "collection_method": "remote_access_exposure_review",
     },
+    "infra_ssh_review": {
+        "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
+        "source_name": "SSH service",
+        "source_url": None,
+        "reliability": RELIABILITY_HIGH,
+        "collection_method": "ssh_configuration_review",
+    },
     "infra_web_stack_identifier": {
         "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
         "source_name": "http_response",
@@ -348,6 +355,14 @@ RELATIONSHIP_EVIDENCE_DEFAULTS: dict[tuple[str, str], dict[str, Any]] = {
         "reliability": RELIABILITY_HIGH,
     },
     ("evidence_file_metadata", "identifies_product"): {
+        "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
+        "reliability": RELIABILITY_MEDIUM,
+    },
+    ("infra_ssh_review", "exposes_service"): {
+        "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
+        "reliability": RELIABILITY_HIGH,
+    },
+    ("infra_ssh_review", "identifies_product"): {
         "evidence_type": EVIDENCE_DIRECT_OBSERVATION,
         "reliability": RELIABILITY_MEDIUM,
     },

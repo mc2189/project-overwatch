@@ -33,6 +33,7 @@ ACTIVE_BATCH_MODULE_IDS: tuple[str, ...] = (
     "infra_tls_review",
     "infra_http_security",
     "infra_remote_access_review",
+    "infra_ssh_review",
     "infra_web_stack_identifier",
     "infra_web_path_review",
 )

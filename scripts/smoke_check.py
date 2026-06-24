@@ -1345,6 +1345,138 @@ def _check_tls_review_module() -> None:
         raise AssertionError("infra_tls_review must not use subprocess/shell=True")
 
 
+def _check_ssh_review_module() -> None:
+    import importlib.util
+
+    from utils.ssh_banner import (
+        filter_ssh_services,
+        is_ssh_service_row,
+        parse_ssh_banner,
+        validate_port,
+    )
+    from utils.ssh_review_interpreter import interpret_ssh_review_results
+
+    registry = __import__("modules.module_registry", fromlist=["get_module"])
+    module = registry.get_module("infra_ssh_review")
+    if module is None or not module.implemented:
+        raise AssertionError("infra_ssh_review registry entry missing or not implemented")
+    if not module.requires_authorisation:
+        raise AssertionError("infra_ssh_review must require authorisation")
+    if module.requires_api_key:
+        raise AssertionError("infra_ssh_review should not require API key")
+    if module.accepted_target_types != ("ipv4", "domain"):
+        raise AssertionError("infra_ssh_review accepted_target_types mismatch")
+    for field in ("short_help", "detailed_help", "caution_notes", "config_notes"):
+        if not getattr(module, field, None):
+            raise AssertionError(f"infra_ssh_review missing registry metadata: {field}")
+
+    banner = parse_ssh_banner("SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13")
+    if banner.get("software_family") != "OpenSSH" or banner.get("protocol") != "SSH-2.0":
+        raise AssertionError("parse_ssh_banner failed on sample OpenSSH banner")
+    if parse_ssh_banner("not-ssh").get("software_family") is not None:
+        raise AssertionError("non-SSH banner should not yield software family")
+
+    if validate_port(22) != 22 or validate_port(0) is not None or validate_port(70000) is not None:
+        raise AssertionError("validate_port edge cases failed")
+    if validate_port("2222") != 2222:
+        raise AssertionError("validate_port should accept numeric strings")
+
+    ssh_rows = filter_ssh_services(
+        [
+            {"port": 22, "service_name": "ssh"},
+            {"port": 80, "service_name": "http"},
+            {"port": 2222, "product": "OpenSSH"},
+        ]
+    )
+    if len(ssh_rows) != 2 or not all(is_ssh_service_row(row) for row in ssh_rows):
+        raise AssertionError("filter_ssh_services classification failed")
+
+    module_path = Path(PROJECT_ROOT) / "modules" / "2_infrastructure" / "infra_ssh_review.py"
+    spec = importlib.util.spec_from_file_location("infra_ssh_review", module_path)
+    if spec is None or spec.loader is None:
+        raise AssertionError("could not load infra_ssh_review module spec")
+    ssh_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ssh_mod)
+
+    parsed = ssh_mod.parse_ssh_target("192.168.1.10", port_override=2222)
+    if parsed.get("host") != "192.168.1.10" or parsed.get("port") != 2222:
+        raise AssertionError("SSH target parser failed for IPv4 with port override")
+    blocked = ssh_mod.parse_ssh_target("https://example.com/path")
+    if blocked.get("valid"):
+        raise AssertionError("URL targets should not be valid for SSH review parser")
+
+    mock_data = {
+        "target": "192.168.1.10",
+        "host": "192.168.1.10",
+        "port": 22,
+        "target_type": "ipv4",
+        "is_private_target": True,
+        "exposure_context": "local_private",
+        "data_sources": ["nmap_result"],
+        "nmap_ssh_service": {"port": 22, "service_name": "ssh", "product": "OpenSSH", "version": "8.9"},
+        "ssh_services": [{"port": 22, "service_name": "ssh"}],
+        "no_service_data": False,
+        "manual_review": True,
+        "connection": {"attempted": True, "success": True, "error": None, "source": "direct_banner"},
+        "banner": parse_ssh_banner("SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13"),
+        "optional_metadata": None,
+        "optional_metadata_unavailable": True,
+        "limitations": ["Visible service review only."],
+    }
+    result = ssh_mod.run_ssh_review("192.168.1.10", options={"mock_data": mock_data})
+    if not result.get("success") or result.get("module_id") != "infra_ssh_review":
+        raise AssertionError("mock SSH review should succeed")
+    for field in ("findings", "warnings", "errors", "data"):
+        if field not in result:
+            raise AssertionError(f"SSH review result missing field: {field}")
+
+    findings = interpret_ssh_review_results(mock_data)
+    if not findings or not any("SSH" in f.get("title", "") for f in findings):
+        raise AssertionError("SSH review interpreter should return SSH findings")
+
+    registry_pipeline = __import__(
+        "utils.findings_registry",
+        fromlist=["module_has_findings_pipeline"],
+    )
+    if not registry_pipeline.module_has_findings_pipeline("infra_ssh_review"):
+        raise AssertionError("findings pipeline not registered for infra_ssh_review")
+
+    executor = __import__("modules.executor", fromlist=["is_runtime_ready", "execute_module"])
+    if not executor.is_runtime_ready("infra_ssh_review"):
+        raise AssertionError("executor cannot load infra_ssh_review backend")
+
+    guardrail_blocked = executor.execute_module(
+        "infra_ssh_review",
+        "192.168.1.10",
+        authorisation_confirmed=False,
+        options={"mock_data": mock_data},
+    )
+    if guardrail_blocked.get("status") != "blocked":
+        raise AssertionError("SSH review should be blocked without engagement/authorisation")
+
+    evidence = __import__(
+        "utils.evidence_model",
+        fromlist=["default_evidence_for_module", "default_relationship_evidence"],
+    )
+    defaults = evidence.default_evidence_for_module("infra_ssh_review")
+    if defaults.get("collection_method") != "ssh_configuration_review":
+        raise AssertionError("SSH review evidence defaults unexpected")
+    rel = evidence.default_relationship_evidence("infra_ssh_review", "exposes_service")
+    if rel.get("reliability") != "high":
+        raise AssertionError("SSH exposes_service relationship evidence unexpected")
+
+    testing_levels = __import__(
+        "utils.module_testing_levels",
+        fromlist=["get_module_testing_level"],
+    )
+    if testing_levels.get_module_testing_level("infra_ssh_review") != "safe_active_check":
+        raise AssertionError("infra_ssh_review testing level should be safe_active_check")
+
+    source = module_path.read_text(encoding="utf-8")
+    if "subprocess" in source or "shell=True" in source:
+        raise AssertionError("infra_ssh_review must not use subprocess/shell=True")
+
+
 def _check_http_security_module() -> None:
     import importlib.util
 
@@ -4244,6 +4376,7 @@ def _check_executor_dispatch_registry() -> None:
         "infra_tls_review",
         "infra_http_security",
         "infra_remote_access_review",
+        "infra_ssh_review",
         "infra_web_stack_identifier",
         "infra_web_path_review",
         "intel_virustotal",
@@ -4542,6 +4675,11 @@ def main() -> int:
     run(
         "tls review module",
         lambda: _check_tls_review_module(),
+    )
+
+    run(
+        "ssh review module",
+        lambda: _check_ssh_review_module(),
     )
 
     run(

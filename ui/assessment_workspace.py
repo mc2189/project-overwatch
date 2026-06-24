@@ -184,6 +184,20 @@ def _execute_modules(
                         nmap_ports = (prior.get("parsed_data") or {}).get("parsed_ports") or []
                         break
                 options = {"parsed_ports": nmap_ports, "latest_results": latest}
+            elif module_id == "infra_ssh_review":
+                latest = st.session_state.get("latest_run_results") or []
+                nmap_ports: list[dict] = []
+                for prior in latest:
+                    if prior.get("module_id") == "infra_nmap" and prior.get("success"):
+                        nmap_ports = (prior.get("parsed_data") or {}).get("parsed_ports") or []
+                        break
+                ssh_opts = st.session_state.get("ssh_review_options", {})
+                options = {
+                    "parsed_ports": nmap_ports,
+                    "latest_results": latest,
+                    "port_override": ssh_opts.get("port_override"),
+                    "explicit_review": True,
+                }
             elif module_id == "net_pcap_review":
                 pcap_upload = st.session_state.get(PCAP_UPLOAD_SESSION_KEY) or {}
                 options = {

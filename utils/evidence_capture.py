@@ -642,6 +642,170 @@ def capture_remote_access_evidence(
     return items
 
 
+def capture_ssh_review_evidence(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    entity_id: int,
+    observation_id: int,
+    module_id: str,
+    result: dict[str, Any],
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    parsed_data = result.get("parsed_data") or {}
+    host = parsed_data.get("host") or "target"
+    port = parsed_data.get("port") or 22
+    connection = parsed_data.get("connection") or {}
+    banner = parsed_data.get("banner") or {}
+
+    items.append(
+        _create_item(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            title="SSH review summary",
+            summary=result.get("summary") or f"SSH configuration review for {host}:{port}.",
+            content_text=_text_summary(
+                {
+                    "host": host,
+                    "port": port,
+                    "exposure_context": parsed_data.get("exposure_context"),
+                    "connection_success": connection.get("success"),
+                    "data_sources": parsed_data.get("data_sources"),
+                }
+            ),
+            content_type="application/json",
+            evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+            source_name="SSH service",
+            collection_method="ssh_configuration_review",
+            reliability=RELIABILITY_HIGH if connection.get("success") else RELIABILITY_MEDIUM,
+        )
+    )
+
+    if banner.get("raw_banner"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="SSH banner summary",
+                summary="Visible SSH identification string from direct banner review.",
+                content_text=_text_summary(banner),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="SSH service",
+                collection_method="ssh_configuration_review",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    nmap_ssh = parsed_data.get("nmap_ssh_service")
+    if nmap_ssh:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Nmap SSH service row",
+                summary="SSH service observation from Nmap or stored service data.",
+                content_text=_text_summary(nmap_ssh),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="Nmap",
+                collection_method="ssh_configuration_review",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+
+    if connection.get("attempted"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Direct SSH connection result",
+                summary="Outcome of the single lightweight banner connection attempt.",
+                content_text=_text_summary(connection),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="SSH service",
+                collection_method="ssh_configuration_review",
+                reliability=RELIABILITY_HIGH if connection.get("success") else RELIABILITY_MEDIUM,
+            )
+        )
+
+    metadata = parsed_data.get("optional_metadata")
+    if metadata:
+        safe_meta = {key: value for key, value in metadata.items() if key != "error"}
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="Optional SSH metadata summary",
+                summary="Non-authenticated handshake metadata collected when optional backend was available.",
+                content_text=_text_summary(safe_meta),
+                content_type="application/json",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="SSH service",
+                collection_method="ssh_configuration_review",
+                reliability=RELIABILITY_MEDIUM,
+            )
+        )
+
+    if connection.get("attempted") and not connection.get("success"):
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="SSH connection failure summary",
+                summary="Banner connection attempt did not succeed.",
+                content_text=_text_summary(
+                    {"error": connection.get("error"), "host": host, "port": port}
+                ),
+                content_type="application/json",
+                evidence_type=EVIDENCE_UNAVAILABLE_SOURCE,
+                source_name="SSH service",
+                collection_method="ssh_configuration_review",
+                reliability=RELIABILITY_MEDIUM,
+            )
+        )
+
+    limitations = parsed_data.get("limitations") or []
+    if limitations:
+        items.append(
+            _create_item(
+                conn,
+                case_id=case_id,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                module_id=module_id,
+                title="SSH review limitations",
+                summary="Visible service review limitations and caveats.",
+                content_text="\n".join(f"- {line}" for line in limitations),
+                content_type="text/plain",
+                evidence_type=EVIDENCE_DIRECT_OBSERVATION,
+                source_name="SSH service",
+                collection_method="ssh_configuration_review",
+                reliability=RELIABILITY_HIGH,
+            )
+        )
+    return items
+
+
 def capture_http_security_evidence(
     conn: sqlite3.Connection,
     *,
@@ -2643,6 +2807,15 @@ def capture_module_evidence(
         )
     if module_id == "infra_remote_access_review":
         return capture_remote_access_evidence(
+            conn,
+            case_id=case_id,
+            entity_id=entity_id,
+            observation_id=observation_id,
+            module_id=module_id,
+            result=result,
+        )
+    if module_id == "infra_ssh_review":
+        return capture_ssh_review_evidence(
             conn,
             case_id=case_id,
             entity_id=entity_id,

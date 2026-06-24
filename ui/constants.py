@@ -73,6 +73,7 @@ MODULE_CARD_TITLES: dict[str, str] = {
     "infra_tls_review": "SSL / TLS Configuration Review",
     "infra_http_security": "HTTP Security Header Review",
     "infra_remote_access_review": "Remote Access Exposure Review",
+    "infra_ssh_review": "SSH Configuration Review",
     "infra_web_stack_identifier": "Web Stack Identifier",
     "infra_web_path_review": "Controlled Web Path Review",
     "infra_domain_intel": "Domain Intelligence",

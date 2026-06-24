@@ -51,6 +51,7 @@ from modules.executors.persistence import (
     _persist_email_security_records,
     _persist_http_security_records,
     _persist_remote_access_records,
+    _persist_ssh_review_records,
     _persist_web_stack_records,
     _persist_web_path_records,
     _persist_investigation_records,
@@ -1079,6 +1080,123 @@ def _execute_remote_access_review(
             host_entity_id = host_entity["id"]
 
         _persist_remote_access_records(
+            db_context,
+            case_id=case_id,
+            host_entity_id=host_entity_id,
+            module_id=module_id,
+            target=target,
+            result=result,
+            authorisation_confirmed=authorisation_confirmed,
+            run_mode_id=run_mode_id,
+            run_mode_label=run_mode_label,
+        )
+
+    return result
+
+
+def _execute_ssh_review(
+    module_id: str,
+    target: str,
+    options: dict[str, Any],
+    db_context: sqlite3.Connection | None,
+    authorisation_confirmed: bool,
+    case_id: int | None,
+    entity_id: int | None,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> dict[str, Any]:
+    ssh_handler, ssh_load_error = loaders.loaded_handler(
+        loaders._load_ssh_review_handler, "_ssh_review_handler", "_ssh_review_load_error"
+    )
+    if ssh_handler is None:
+        error_message = ssh_load_error or "SSH Configuration Review module is not available."
+        return make_result(
+            module_id,
+            success=False,
+            status="error",
+            summary="SSH Configuration Review module is not available.",
+            errors=[error_message],
+        )
+
+    review_options = dict(options)
+    review_options["explicit_review"] = True
+    if review_options.get("parsed_data") and not review_options.get("parsed_ports"):
+        parsed = review_options.get("parsed_data") or {}
+        if isinstance(parsed, dict) and parsed.get("parsed_ports"):
+            review_options["parsed_ports"] = parsed.get("parsed_ports")
+
+    if db_context is not None and case_id is not None and not review_options.get("discovered_services"):
+        from utils.service_discovery import load_discovered_services
+
+        review_options["discovered_services"] = load_discovered_services(
+            case_id,
+            target,
+            conn=db_context,
+            latest_results=review_options.get("latest_results"),
+        )
+
+    ssh_data = ssh_handler(target, options=review_options)
+    status = ssh_data.get("status", "error")
+    if status == "blocked":
+        errors = ssh_data.get("errors") or [ssh_data.get("summary") or "SSH review blocked."]
+        return make_result(
+            module_id,
+            success=False,
+            status="blocked",
+            summary=errors[0],
+            raw_output=ssh_data.get("raw_output", ""),
+            errors=errors,
+            parsed_data=ssh_data.get("data"),
+            warnings=ssh_data.get("warnings", []),
+        )
+
+    if not ssh_data.get("success"):
+        errors = ssh_data.get("errors") or ssh_data.get("warnings") or ["SSH review failed."]
+        return make_result(
+            module_id,
+            success=False,
+            status=status,
+            summary=errors[0] if errors else "SSH review failed.",
+            raw_output=ssh_data.get("raw_output", ""),
+            errors=errors if isinstance(errors, list) else [str(errors)],
+            parsed_data=ssh_data.get("data"),
+            warnings=ssh_data.get("warnings", []),
+        )
+
+    parsed_data = ssh_data.get("data") or {}
+    host = parsed_data.get("host") or target
+    interpreter_findings = interpret_module_findings(module_id, parsed_data, review_options)
+    result = make_result(
+        module_id,
+        success=True,
+        status=ssh_data.get("status", "completed"),
+        summary=ssh_data.get("summary", f"SSH review completed for {host}."),
+        raw_output=ssh_data.get("raw_output", ""),
+        findings=ssh_data.get("findings", []),
+        warnings=ssh_data.get("warnings", []),
+        parsed_data=parsed_data,
+        interpreter_findings=interpreter_findings,
+    )
+
+    if db_context is not None and case_id is not None:
+        target_type = parsed_data.get("target_type") or get_target_type(target)
+        host_entity_type = ENTITY_TYPE_BY_TARGET.get(target_type, "domain")
+        if target_type == "ipv4":
+            host_entity_type = "ipv4"
+
+        host_entity_id = entity_id
+        if host_entity_id is None:
+            host_entity = create_or_get_entity(
+                case_id,
+                host_entity_type,
+                host,
+                label=host,
+                source=module_id,
+                conn=db_context,
+            )
+            host_entity_id = host_entity["id"]
+
+        _persist_ssh_review_records(
             db_context,
             case_id=case_id,
             host_entity_id=host_entity_id,

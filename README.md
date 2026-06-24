@@ -1,6 +1,8 @@
-# Project Overwatch v2.21
+# Project Overwatch v2.31
 
 Project Overwatch is a **local** Python/Streamlit intelligence, OSINT, security testing and resilience advisory dashboard for **private internal use** supporting future client assessments.
+
+**v2.31** adds **SSH Configuration Review** — a safe single-port SSH banner and visible handshake metadata review using Nmap/service context and one lightweight connection (no login, passwords, or private keys).
 
 **v2.30** adds **Report Builder v2** — guided assessment packs with eight report types, selectable sections, rule-based executive summaries, ranked recommended actions, finding/evidence controls, and Markdown/HTML/PDF export with metadata sidecars.
 
@@ -108,6 +110,7 @@ Results appear automatically in Operations, Observations, Findings, Relationship
 ### Module cards on Run Operation
 
 - **Network Service Check, powered by Nmap** — active; IPv4 or domain only (not URL — enter hostname separately for port scans).
+- **SSH Configuration Review** — active; IPv4 or domain only; single-port SSH banner review (default 22); uses Nmap/service context when available; authorisation and engagement/scope required; no authentication.
 - **SSL / TLS Configuration Review** — active; domain, URL, or IPv4; single host:port TLS handshake (default 443); authorisation and engagement/scope required.
 - **HTTP Security Header Review** — active; domain, URL, or IPv4; GET/HEAD response review with security header and cookie flag analysis; authorisation required.
 - **Web Stack Identifier** — active; domain, URL, or IPv4; single HTTP GET with capped preview to suggest web server, CMS, framework, hosting, CDN, and analytics indicators; authorisation required; no full page body stored.
@@ -746,7 +749,7 @@ Guided profiles for authorised Personal Lab and client assessments — **single 
 - **Defaults:** Quick Service Check for general targets; Standard for Local Network Check goal; Web Surface for website/local web triage goals.
 - **Elevation:** OS detection is skipped with a clear message when the Streamlit session is not elevated — the rest of the scan still runs.
 - **Results:** XML parsing (host status, MAC/vendor, services, CPEs, duration) with text fallback; profile name stored on the result.
-- **Next actions:** open web ports suggest HTTP Security Header Review and TLS Review on the assessed target.
+- **Next actions:** open web ports suggest HTTP Security Header Review and TLS Review on the assessed target; SSH services suggest SSH Configuration Review.
 - **Packet Capture:** LAN device rows include **Run Network Service Check** (Local Device Detail profile).
 - Legacy profile names (`Quick check`, `Standard service scan`, …) still resolve for backward compatibility.
 
@@ -758,6 +761,23 @@ Reviews SSH, RDP, VNC, SMB, Telnet, FTP, WinRM, RTSP and similar services using 
 - **When to run:** After Network Service Check when remote-admin or file-sharing ports are observed; Nmap follow-up suggests this module automatically.
 - **Output:** Service table with classification (`remote_admin`, `file_sharing`, `legacy_cleartext`, etc.), cautious findings, evidence summary, and next actions (capture, report, restrict access).
 - **Guardrails:** Personal Lab or Client Engagement confirmation required; does not change remote services or send unsafe payloads.
+
+### SSH Configuration Review (active / safe active check)
+
+Reviews **visible SSH service information** on a single authorised host and port — banner read and optional non-authenticated handshake metadata when Paramiko is installed locally.
+
+- **Does not authenticate:** no login, passwords, private keys, credential testing, or remote commands
+- **Data sources:** Nmap service results, Remote Access Exposure Review context, service entities, open-port observations, manual port selection (1–65535, one port only)
+- **When to run:** after Network Service Check when SSH is observed; Remote Access Exposure Review suggests this module when SSH is classified
+- **Output:** connection outcome, SSH banner, software/version hints, exposure context (local/private vs public), cautious findings, evidence, and next actions
+- **Reports:** SSH Configuration Review Summary with limitation — visible service review only, not authenticated server configuration inspection
+- **Guardrails:** Personal Lab confirmation is enough for local/private IPs; Client Engagement scope/ROE checks apply for client targets
+
+**How to test:** against an authorised local IP such as `192.168.1.10`:
+
+1. Confirm Personal Lab or Client Engagement context and authorisation.
+2. Run **Network Service Check** if SSH port is unknown, or select **SSH Configuration Review** with manual port `22`.
+3. Review the result card (target, port, banner, connection status), collapsed metadata, findings, and evidence — no password fields are shown.
 
 ### Web Stack Identifier (active / safe active check)
 

@@ -15,6 +15,7 @@ SECTION_ASSETS: Final = "assets_entities"
 SECTION_NETWORK_SERVICES: Final = "network_service_summary"
 SECTION_WEB_POSTURE: Final = "web_posture_summary"
 SECTION_REMOTE_ACCESS: Final = "remote_access_summary"
+SECTION_SSH_CONFIGURATION: Final = "ssh_configuration_summary"
 SECTION_PACKET_CAPTURE: Final = "packet_capture_summary"
 SECTION_FILE_METADATA: Final = "file_metadata_summary"
 SECTION_EVIDENCE: Final = "evidence_summary"
@@ -34,6 +35,7 @@ ALL_SECTIONS: tuple[str, ...] = (
     SECTION_NETWORK_SERVICES,
     SECTION_WEB_POSTURE,
     SECTION_REMOTE_ACCESS,
+    SECTION_SSH_CONFIGURATION,
     SECTION_PACKET_CAPTURE,
     SECTION_FILE_METADATA,
     SECTION_EVIDENCE,
@@ -66,6 +68,7 @@ SECTION_LABELS: dict[str, str] = {
     SECTION_NETWORK_SERVICES: "Network service summary",
     SECTION_WEB_POSTURE: "Web posture summary",
     SECTION_REMOTE_ACCESS: "Remote access summary",
+    SECTION_SSH_CONFIGURATION: "SSH configuration summary",
     SECTION_PACKET_CAPTURE: "Packet capture summary",
     SECTION_FILE_METADATA: "File metadata summary",
     SECTION_EVIDENCE: "Evidence summary",

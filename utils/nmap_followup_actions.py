@@ -122,6 +122,21 @@ def suggest_nmap_followup_actions(result: dict[str, Any], *, target: str) -> lis
                         button_label="Remote access review",
                     )
                 )
+            if service == "ssh" or row["port_num"] == 22:
+                key = f"{target}:ssh"
+                if key not in seen:
+                    seen.add(key)
+                    actions.append(
+                        make_action(
+                            title=f"SSH Configuration Review (port {row['port_num']})",
+                            reason=f"SSH service observed on port {row['port_num']} — review banner and exposure.",
+                            action_type="run_module",
+                            priority="medium",
+                            target=target,
+                            module_id="infra_ssh_review",
+                            button_label="SSH review",
+                        )
+                    )
             break
 
     remote_candidates = filter_remote_access_services(nmap_ports_to_service_rows(parsed.get("parsed_ports") or []))

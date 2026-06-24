@@ -23,6 +23,7 @@ from utils.report_sections import (
     SECTION_RECOMMENDED_ACTIONS,
     SECTION_REMOTE_ACCESS,
     SECTION_SCOPE,
+    SECTION_SSH_CONFIGURATION,
     SECTION_TECHNICAL_OBSERVATIONS,
     SECTION_WEB_POSTURE,
 )
@@ -69,7 +70,7 @@ REPORT_TYPES: dict[str, ReportType] = {
         description="Exposure-focused pack for remote access, services, and perimeter observations.",
         default_sections=frozenset(
             DEFAULT_CONCISE_SECTIONS
-            | {SECTION_NETWORK_SERVICES, SECTION_REMOTE_ACCESS, SECTION_WEB_POSTURE}
+            | {SECTION_NETWORK_SERVICES, SECTION_REMOTE_ACCESS, SECTION_SSH_CONFIGURATION, SECTION_WEB_POSTURE}
         ),
         default_operating_context=CLIENT_ENGAGEMENT,
         include_engagement_by_default=True,
@@ -100,10 +101,10 @@ REPORT_TYPES: dict[str, ReportType] = {
         description="Local IP, Nmap, and LAN-oriented service observations.",
         default_sections=frozenset(
             DEFAULT_CONCISE_SECTIONS
-            | {SECTION_NETWORK_SERVICES, SECTION_REMOTE_ACCESS, SECTION_ASSETS}
+            | {SECTION_NETWORK_SERVICES, SECTION_REMOTE_ACCESS, SECTION_SSH_CONFIGURATION, SECTION_ASSETS}
         ),
         default_operating_context=PERSONAL_LAB,
-        highlight_modules=frozenset({"infra_nmap", "infra_remote_access_review"}),
+        highlight_modules=frozenset({"infra_nmap", "infra_remote_access_review", "infra_ssh_review"}),
     ),
     "packet_capture_lan_recon": ReportType(
         type_id="packet_capture_lan_recon",
@@ -142,6 +143,7 @@ REPORT_TYPES: dict[str, ReportType] = {
                 SECTION_NETWORK_SERVICES,
                 SECTION_WEB_POSTURE,
                 SECTION_REMOTE_ACCESS,
+                SECTION_SSH_CONFIGURATION,
                 SECTION_PACKET_CAPTURE,
                 SECTION_FILE_METADATA,
                 SECTION_EVIDENCE,

@@ -1106,6 +1106,142 @@ def _persist_remote_access_records(
         )
 
 
+def _persist_ssh_review_records(
+    conn: sqlite3.Connection,
+    *,
+    case_id: int,
+    host_entity_id: int,
+    module_id: str,
+    target: str,
+    result: dict[str, Any],
+    authorisation_confirmed: bool,
+    run_mode_id: str | None = None,
+    run_mode_label: str | None = None,
+) -> None:
+    """Save SSH review operations, observations, entities, and relationships."""
+    result = _prepare_module_result(result)
+    create_operation_log(
+        case_id,
+        module_id,
+        target,
+        result["status"],
+        authorisation_confirmed=authorisation_confirmed,
+        summary=result["summary"],
+        run_mode_id=run_mode_id,
+        run_mode_label=run_mode_label,
+        conn=conn,
+    )
+
+    if not should_persist_observation(result["status"]):
+        return
+
+    parsed_data = result.get("parsed_data") or {}
+    host = parsed_data.get("host") or target
+    port = int(parsed_data.get("port") or 22)
+    connection = parsed_data.get("connection") or {}
+    banner = parsed_data.get("banner") or {}
+
+    service_for_entity = {
+        "port": port,
+        "protocol": "tcp",
+        "service": "ssh",
+        "service_name": "ssh",
+        "product": banner.get("software_family") or banner.get("software"),
+        "version": banner.get("version"),
+    }
+    service_entity = create_or_get_entity(
+        case_id,
+        "service",
+        build_service_entity_value(host, service_for_entity),
+        label=build_service_entity_label(service_for_entity),
+        source=module_id,
+        confidence=85 if connection.get("success") else 70,
+        conn=conn,
+    )
+    create_relationship(
+        case_id,
+        host_entity_id,
+        "exposes_service",
+        service_entity["id"],
+        source_module=module_id,
+        confidence=85 if connection.get("success") else 70,
+        conn=conn,
+    )
+
+    product = banner.get("software_family") or banner.get("software")
+    if product:
+        product_entity = create_or_get_entity(
+            case_id,
+            "software",
+            f"{host}:{port}:{product}",
+            label=str(product)[:120],
+            source=module_id,
+            confidence=75,
+            conn=conn,
+        )
+        create_relationship(
+            case_id,
+            service_entity["id"],
+            "identifies_product",
+            product_entity["id"],
+            source_module=module_id,
+            confidence=75,
+            conn=conn,
+        )
+
+    observation = create_observation(
+        case_id,
+        host_entity_id,
+        module_id,
+        "ssh_configuration_review",
+        "SSH configuration review result",
+        summary=result["summary"],
+        data_json=json.dumps(
+            {
+                "module_id": module_id,
+                "success": result["success"],
+                "status": result["status"],
+                "target": parsed_data.get("target"),
+                "host": host,
+                "port": port,
+                "is_private_target": parsed_data.get("is_private_target"),
+                "exposure_context": parsed_data.get("exposure_context"),
+                "banner": banner,
+                "connection": connection,
+                "nmap_ssh_service": parsed_data.get("nmap_ssh_service"),
+                "optional_metadata": parsed_data.get("optional_metadata"),
+                "data_sources": parsed_data.get("data_sources"),
+                "limitations": parsed_data.get("limitations"),
+                "interpreter_findings": result.get("interpreter_findings", []),
+                "warnings": result.get("warnings", []),
+            }
+        ),
+        raw_output=result["raw_output"],
+        **_observation_evidence_kwargs(module_id, result),
+        conn=conn,
+    )
+
+    _persist_observation_evidence(
+        conn,
+        case_id=case_id,
+        entity_id=host_entity_id,
+        observation_id=observation["id"],
+        module_id=module_id,
+        result=result,
+    )
+
+    interpreter_findings = result.get("interpreter_findings") or []
+    if interpreter_findings:
+        _persist_module_findings(
+            conn,
+            case_id=case_id,
+            entity_id=host_entity_id,
+            observation_id=observation["id"],
+            module_id=module_id,
+            interpreter_findings=interpreter_findings,
+        )
+
+
 def _persist_web_stack_records(
     conn: sqlite3.Connection,
     *,

@@ -776,6 +776,66 @@ def build_case_report(
             )
             lines.append("")
 
+        ssh_observations = [
+            observation
+            for observation in observations
+            if observation.get("module_id") == "infra_ssh_review"
+        ]
+        if ssh_observations and enabled("ssh_configuration_summary"):
+            lines.extend(["## SSH Configuration Review Summary", ""])
+            lines.append(
+                "_This is a visible service review and does not include authenticated server configuration inspection._"
+            )
+            lines.append("")
+            for observation in ssh_observations:
+                entity = _entity_display(
+                    entity_by_id.get(observation.get("entity_id")),
+                    observation.get("entity_id"),
+                )
+                payload: dict[str, Any] = {}
+                data_json = observation.get("data_json")
+                if data_json:
+                    try:
+                        payload = json.loads(data_json) if isinstance(data_json, str) else data_json
+                    except (TypeError, json.JSONDecodeError):
+                        payload = {}
+                host = payload.get("host") or "target"
+                port = payload.get("port") or 22
+                banner = payload.get("banner") or {}
+                connection = payload.get("connection") or {}
+                exposure = "local/private" if payload.get("is_private_target") else "public or non-local"
+                lines.append(f"### {observation.get('title', 'SSH configuration review')}")
+                lines.append("")
+                lines.append(f"- Entity: {entity}")
+                lines.append(f"- Summary: {observation.get('summary') or '_No summary._'}")
+                lines.append(f"- Target / port: {host}:{port}")
+                lines.append(f"- Exposure context: {exposure}")
+                lines.append(
+                    f"- Connection: {'success' if connection.get('success') else 'failed'}"
+                    + (f" ({connection.get('error')})" if connection.get("error") else "")
+                )
+                if banner.get("raw_banner"):
+                    lines.append(f"- SSH banner: {banner['raw_banner'][:160]}")
+                elif banner.get("software_family"):
+                    lines.append(f"- Software family: {banner['software_family']}")
+                if banner.get("version"):
+                    lines.append(f"- Version string: {banner['version']}")
+                nmap_ssh = payload.get("nmap_ssh_service") or {}
+                if nmap_ssh:
+                    lines.append(
+                        f"- Nmap service: {nmap_ssh.get('service_name') or nmap_ssh.get('service') or 'ssh'} "
+                        f"{nmap_ssh.get('product') or ''} {nmap_ssh.get('version') or ''}".strip()
+                    )
+                lines.append(
+                    "- Recommendation: review whether SSH is expected and restricted to trusted networks."
+                )
+                lines.append(f"- Created: {observation.get('created_at', '-')}")
+                lines.append("")
+            lines.append(
+                "_Limitation: banner and handshake metadata reflect point-in-time visible service information only._"
+            )
+            lines.append("")
+
         web_stack_observations = [
             observation
             for observation in observations

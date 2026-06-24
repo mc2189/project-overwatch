@@ -132,6 +132,14 @@ def register_all_executors() -> None:
             unavailable_label="Remote Access Exposure Review",
         ),
         ModuleDispatchEntry(
+            "infra_ssh_review",
+            load=loaders._load_ssh_review_handler,
+            is_ready=_module_ready(loaders._load_ssh_review_handler, lambda: loaders._ssh_review_handler),
+            get_error=_module_error(loaders._load_ssh_review_handler, lambda: loaders._ssh_review_load_error),
+            execute=infrastructure._execute_ssh_review,
+            unavailable_label="SSH Configuration Review",
+        ),
+        ModuleDispatchEntry(
             "infra_web_stack_identifier",
             load=loaders._load_web_stack_handler,
             is_ready=_module_ready(loaders._load_web_stack_handler, lambda: loaders._web_stack_handler),

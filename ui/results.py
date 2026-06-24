@@ -85,6 +85,29 @@ def render_result_summary_tab(result: dict) -> None:
         if highest:
             st.caption(f"Highest severity: {highest}")
 
+    if result["module_id"] == "infra_ssh_review" and parsed_data:
+        host = parsed_data.get("host")
+        port = parsed_data.get("port")
+        conn = parsed_data.get("connection") or {}
+        banner = parsed_data.get("banner") or {}
+        st.markdown(f"**Target:** {parsed_data.get('target')}")
+        st.markdown(f"**Host / port:** {host}:{port}")
+        st.markdown(
+            f"**Connection:** {'success' if conn.get('success') else 'failed'}"
+            + (f" — {conn['error']}" if conn.get("error") else "")
+        )
+        if banner.get("raw_banner"):
+            preview = banner["raw_banner"][:120]
+            suffix = "…" if len(banner["raw_banner"]) > 120 else ""
+            st.markdown(f"**SSH banner:** {preview}{suffix}")
+        elif banner.get("software_family"):
+            st.markdown(f"**Software:** {banner['software_family']}")
+        if parsed_data.get("exposure_context"):
+            st.caption(f"Exposure context: {parsed_data['exposure_context'].replace('_', ' ')}")
+        highest = _highest_severity(result.get("interpreter_findings") or [])
+        if highest:
+            st.caption(f"Highest severity: {highest}")
+
     if result["module_id"] == "infra_web_stack_identifier" and parsed_data:
         response = parsed_data.get("response") or {}
         indicators = parsed_data.get("indicators") or []
@@ -950,6 +973,36 @@ def render_result_module_output_tab(result: dict) -> None:
                     "raw_certificate": parsed_data.get("raw_certificate"),
                 }
             )
+
+    if result["module_id"] == "infra_ssh_review" and parsed_data:
+        st.caption(
+            "Visible service review only — no login, passwords, private keys, or remote commands."
+        )
+        st.markdown(f"**Target:** {parsed_data.get('target')}")
+        st.markdown(f"**Host / port:** {parsed_data.get('host')}:{parsed_data.get('port')}")
+        conn = parsed_data.get("connection") or {}
+        st.markdown(
+            f"**Connection:** {'success' if conn.get('success') else 'failed'}"
+            + (f" — {conn['error']}" if conn.get("error") else "")
+        )
+        ssh_services = parsed_data.get("ssh_services") or []
+        if ssh_services:
+            st.markdown("**SSH service observations**")
+            st.dataframe(pd.DataFrame(ssh_services), width="stretch", hide_index=True)
+        nmap_ssh = parsed_data.get("nmap_ssh_service")
+        if nmap_ssh:
+            st.markdown("**Nmap SSH service row**")
+            st.json(nmap_ssh)
+        banner = parsed_data.get("banner") or {}
+        if banner.get("raw_banner"):
+            st.markdown("**SSH banner**")
+            st.code(banner["raw_banner"], language="text")
+        metadata = parsed_data.get("optional_metadata")
+        if metadata:
+            with st.expander("Optional SSH metadata (collapsed)", expanded=False):
+                st.json(metadata)
+        with st.expander("Structured review data (collapsed)", expanded=False):
+            st.json(parsed_data)
 
     if result["module_id"] == "infra_http_security" and parsed_data:
         cookies = parsed_data.get("cookies") or []

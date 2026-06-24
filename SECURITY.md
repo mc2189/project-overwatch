@@ -117,6 +117,17 @@ The **Domain Email Security Posture** module (`infra_email_security`) is **passi
 - Results are point-in-time observations — not proof of ongoing posture
 - No API keys or secrets are used by this module
 
+## SSH Configuration Review (v2.31)
+
+- **Module ID:** `infra_ssh_review` — controlled active assessment (`safe_active_check`)
+- Allowed: single host:port TCP connection, SSH identification banner read, optional non-authenticated handshake metadata via Paramiko when installed locally
+- **Not allowed:** login, password prompts, password testing, private keys, remote command execution, server setting changes, repeated connection retries, port ranges, or broad port scans
+- Uses existing Nmap/service observations first; performs one lightweight banner read when the module is explicitly run
+- Requires authorisation and the correct operating context (Personal Lab or Client Engagement) with scope/ROE guardrails before connecting
+- Uses Python `socket` as baseline — optional Paramiko is not required for the app to work
+- Results are visible service observations only — not an authenticated configuration review
+- No API keys or secrets are used by this module
+
 ## HTTP Security Header Review (v2.10)
 
 - **Module ID:** `infra_http_security` — controlled active assessment (`safe_active_check`)

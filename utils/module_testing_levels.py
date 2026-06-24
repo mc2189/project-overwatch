@@ -45,6 +45,7 @@ MODULE_TESTING_LEVELS: dict[str, TestingLevel] = {
     "infra_tls_review": "safe_active_check",
     "infra_http_security": "safe_active_check",
     "infra_remote_access_review": "safe_active_check",
+    "infra_ssh_review": "safe_active_check",
     "infra_web_stack_identifier": "safe_active_check",
     "infra_web_path_review": "safe_active_check",
     # Planned authorised assessment modules

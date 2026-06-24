@@ -51,6 +51,12 @@ def apply_workspace_action(action: dict[str, Any], case_id: int) -> str:
                 if port_match:
                     st.session_state.tls_review_port_override = int(port_match.group(1))
                     st.session_state.tls_target_source = "discovered_service"
+            if module_id == "infra_ssh_review":
+                import re
+
+                port_match = re.search(r"port\s+(\d+)", action.get("title", ""), re.IGNORECASE)
+                if port_match:
+                    st.session_state.ssh_review_port_override = int(port_match.group(1))
         if action.get("goal_id"):
             st.session_state[ASSESSMENT_GOAL_SESSION_KEY] = action["goal_id"]
         st.session_state.workspace_focus_run_panel = True

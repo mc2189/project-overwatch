@@ -15,6 +15,7 @@ from utils.assessment_goals import (
     GOAL_EMAIL_SPOOFING,
     GOAL_EVIDENCE_REVIEW,
     GOAL_EXTERNAL_EXPOSURE,
+    GOAL_LOCAL_NETWORK,
     GOAL_THREAT_REPUTATION,
     GOAL_WEBSITE_POSTURE,
 )
@@ -568,6 +569,7 @@ def suggest_next_actions(
         "infra_web_stack_identifier": (GOAL_WEBSITE_POSTURE, "Run web stack identification"),
         "infra_web_path_review": (GOAL_WEBSITE_POSTURE, "Run controlled web path review"),
         "infra_tls_review": (GOAL_WEBSITE_POSTURE, "Run TLS configuration review"),
+        "infra_ssh_review": (GOAL_LOCAL_NETWORK, "Run SSH configuration review"),
         "intel_shodan": (GOAL_EXTERNAL_EXPOSURE, "Run Shodan exposure lookup"),
         "infra_domain_intel": (GOAL_WEBSITE_POSTURE, "Run domain intelligence"),
         "infra_website_metadata": (GOAL_WEBSITE_POSTURE, "Run website metadata review"),

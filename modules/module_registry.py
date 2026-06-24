@@ -233,6 +233,38 @@ MODULES: list[ModuleEntry] = [
         ),
     ),
     ModuleEntry(
+        module_id="infra_ssh_review",
+        display_name="SSH Configuration Review",
+        category="Infrastructure",
+        description="Review visible SSH service exposure and banner metadata without authentication.",
+        status="active",
+        mode="active",
+        risk_level="medium",
+        requires_authorisation=True,
+        requires_api_key=False,
+        implemented=True,
+        accepted_target_types=("ipv4", "domain"),
+        config_notes=(
+            "No API key required. Performs a single lightweight connection to read an SSH banner on one port "
+            "(default 22). Uses Nmap/service observations when available. Does not log in or use passwords/keys."
+        ),
+        rate_limit_notes="Single host/port banner review per run — not a port scan.",
+        short_help="Review SSH exposure, banner, and optional handshake metadata on one authorised port.",
+        detailed_help=(
+            "Combines existing Nmap SSH observations with a safe direct banner read on a single port. "
+            "Optional Paramiko metadata is collected without authentication when installed. "
+            "Does not run commands, test passwords, or modify remote settings."
+        ),
+        example_inputs=("192.168.1.10", "10.0.0.5", "ssh.example.com"),
+        output_summary="SSH port, banner, exposure context, optional metadata summary, and cautious findings.",
+        caution_notes=(
+            "Visible service review only — not an authenticated configuration inspection.",
+            "Authorisation and operating context controls apply before connecting.",
+            "Does not log in, request passwords, or use private keys.",
+            "Review whether SSH exposure is expected and restricted to trusted networks.",
+        ),
+    ),
+    ModuleEntry(
         module_id="infra_web_stack_identifier",
         display_name="Web Stack Identifier",
         category="Infrastructure",

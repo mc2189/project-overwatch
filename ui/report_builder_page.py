@@ -13,8 +13,6 @@ from utils.report_builder import ReportOptions, build_case_report, save_report_m
 from utils.report_executive_summary import ExecutiveSummaryContext, build_executive_summary_prose
 from utils.report_export import (
     build_case_report_json,
-    is_encryption_available,
-    is_pdf_export_available,
     markdown_to_html,
     save_report_html,
     save_report_pdf,
