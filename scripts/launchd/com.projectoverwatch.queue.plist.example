@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+"""Example launchd plist for the batch queue background worker.
+
+Copy to ~/Library/LaunchAgents/com.projectoverwatch.queue.plist and edit paths.
+Load with: launchctl load ~/Library/LaunchAgents/com.projectoverwatch.queue.plist
+"""
+
+PLIST = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.projectoverwatch.queue</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/path/to/python</string>
+    <string>/path/to/project_overwatch/scripts/run_queue_worker.py</string>
+    <string>--all-cases-with-queue</string>
+    <string>--personal-lab-confirmed</string>
+    <string>--interval-seconds</string>
+    <string>120</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/path/to/project_overwatch</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/project-overwatch-queue-worker.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/project-overwatch-queue-worker.err</string>
+</dict>
+</plist>
+"""
+
+if __name__ == "__main__":
+    print(PLIST)

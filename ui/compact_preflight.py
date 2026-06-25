@@ -88,6 +88,36 @@ def _render_preflight_details(
                     st.caption(f"→ {item['fix']}")
 
 
+def evaluate_compact_preflight(
+    *,
+    operating_context: str,
+    module_preflights: list[dict[str, Any]],
+    selected_module_ids: list[str],
+    active_count: int = 0,
+) -> dict[str, Any]:
+    """Return aggregate preflight status without rendering UI."""
+    active_rows = [
+        row
+        for row in module_preflights
+        if row.get("module_id") in selected_module_ids
+        and is_active_testing_level(get_module_testing_level(row.get("module_id", "")))
+    ]
+    if not active_rows:
+        return {"has_active": False, "ready": True, "result": "ready", "summary": "Passive checks only."}
+
+    lab_status = _aggregate_personal_lab_status(active_rows) if operating_context == PERSONAL_LAB else None
+    all_ready = all(row.get("allowed") for row in active_rows)
+    any_blocked = any(row.get("result") == "blocked" for row in active_rows)
+    result = "ready" if all_ready else ("blocked" if any_blocked else "needs_confirmation")
+    summary = _build_summary_line(
+        active_count=len(active_rows),
+        operating_context=operating_context,
+        result=result,
+        personal_lab_confirmed=lab_status.get("confirmed") if lab_status else None,
+    )
+    return {"has_active": True, "ready": all_ready, "result": result, "summary": summary}
+
+
 def render_compact_preflight(
     *,
     operating_context: str,
@@ -97,6 +127,12 @@ def render_compact_preflight(
     active_count: int = 0,
 ) -> dict[str, Any]:
     """Render a compact preflight summary; return aggregate status."""
+    status = evaluate_compact_preflight(
+        operating_context=operating_context,
+        module_preflights=module_preflights,
+        selected_module_ids=selected_module_ids,
+        active_count=active_count,
+    )
     active_rows = [
         row
         for row in module_preflights
@@ -105,23 +141,15 @@ def render_compact_preflight(
     ]
     if not active_rows:
         if active_count:
-            st.caption(_build_summary_line(active_count=active_count, operating_context=operating_context, result="ready"))
-        return {"has_active": False, "ready": True, "result": "ready", "summary": "Passive checks only."}
+            st.caption(
+                _build_summary_line(active_count=active_count, operating_context=operating_context, result="ready")
+            )
+        return status
 
     lab_status = _aggregate_personal_lab_status(active_rows) if operating_context == PERSONAL_LAB else None
-    all_ready = all(row.get("allowed") for row in active_rows)
-    any_blocked = any(row.get("result") == "blocked" for row in active_rows)
-    result = "ready" if all_ready else ("blocked" if any_blocked else "needs_confirmation")
-
-    summary = _build_summary_line(
-        active_count=len(active_rows),
-        operating_context=operating_context,
-        result=result,
-        personal_lab_confirmed=lab_status.get("confirmed") if lab_status else None,
-    )
-
+    result = status["result"]
     chip_key = "ready" if result == "ready" else ("blocked" if result == "blocked" else "needs_confirmation")
-    render_status_chip(chip_key, label=summary)
+    render_status_chip(chip_key, label=status["summary"])
 
     with st.expander("Show readiness details", expanded=False):
         _render_preflight_details(
@@ -130,4 +158,4 @@ def render_compact_preflight(
             lab_status=lab_status,
         )
 
-    return {"has_active": True, "ready": all_ready, "result": result, "summary": summary}
+    return status

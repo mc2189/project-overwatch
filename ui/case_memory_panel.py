@@ -22,6 +22,13 @@ from utils.baseline_ops import (
     is_baseline_snapshot_ready,
     snapshot_and_replace_baseline,
 )
+from utils.case_memory_refresh import (
+    CASE_MEMORY_ANCHOR_ID,
+    WORKSPACE_SCROLL_TO_CASE_MEMORY_KEY,
+    get_case_memory_refresh,
+    pop_case_memory_refresh,
+    store_case_memory_refresh,
+)
 from utils.settings_manager import auto_suggest_baseline_creation
 
 
@@ -75,6 +82,27 @@ def render_case_memory_panel(case_id: int, *, conn: Any | None = None) -> dict[s
             conn.close()
 
     section_heading("Case memory")
+    st.markdown(f'<div id="{CASE_MEMORY_ANCHOR_ID}"></div>', unsafe_allow_html=True)
+    refresh = get_case_memory_refresh(st.session_state, case_id)
+    if refresh:
+        refresh_lines = [
+            f"Updated after latest run — **{refresh.get('device_count', 0)}** devices, "
+            f"**{refresh.get('service_count', 0)}** services, "
+            f"**{refresh.get('open_findings', 0)}** open findings."
+        ]
+        if refresh.get("comparison_summary"):
+            refresh_lines.append(str(refresh["comparison_summary"]))
+        unexpected_count = int(refresh.get("unexpected_count") or 0)
+        if unexpected_count:
+            refresh_lines.append(f"**{unexpected_count}** unreviewed change(s) since baseline.")
+        for change in refresh.get("notable_changes") or []:
+            if change.get("title"):
+                refresh_lines.append(f"- {change['title']}")
+        st.info("\n\n".join(refresh_lines))
+        if st.button("Dismiss memory update", key=f"dismiss_memory_refresh_{case_id}"):
+            pop_case_memory_refresh(st.session_state, case_id)
+            st.rerun()
+
     with st.container(border=True):
         cols = st.columns(4)
         cols[0].metric("Devices", len(memory.get("known_devices") or []))

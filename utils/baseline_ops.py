@@ -8,7 +8,7 @@ from typing import Any
 from database.db_setup import create_case_baseline, get_latest_case_baseline, update_case_baseline
 from utils.baseline_compare import compare_case_to_latest_baseline
 from utils.case_memory import build_baseline_snapshot, build_case_memory
-from utils.settings_manager import auto_offer_baseline_snapshot, change_meets_sensitivity
+from utils.settings_manager import auto_offer_baseline_snapshot, auto_snapshot_after_clean_run, change_meets_sensitivity
 
 
 def unexpected_baseline_changes(comparison: dict[str, Any]) -> list[dict[str, Any]]:
@@ -107,12 +107,35 @@ def assess_baseline_snapshot(
     unexpected = unexpected_baseline_changes(comparison)
     run_success = bool(latest_results) and all(result.get("success") for result in latest_results)
     ready = is_baseline_snapshot_ready(comparison)
-    offer = auto_offer_baseline_snapshot() and run_success and ready
+    auto = auto_snapshot_after_clean_run() and run_success and ready
+    offer = auto_offer_baseline_snapshot() and run_success and ready and not auto
     return {
         "comparison": comparison,
         "ready": ready,
         "offer_snapshot": offer,
+        "auto_snapshot": auto,
         "unexpected_count": len(unexpected),
         "summary_text": baseline_snapshot_summary(comparison),
         "run_success": run_success,
     }
+
+
+def maybe_auto_snapshot_after_run(
+    case_id: int,
+    *,
+    latest_results: list[dict[str, Any]] | None = None,
+    conn: Any,
+    notes: str | None = None,
+) -> dict[str, Any] | None:
+    """Automatically snapshot/replace baseline when enabled and the run is clean."""
+    if not auto_snapshot_after_clean_run():
+        return None
+    assessment = assess_baseline_snapshot(case_id, conn=conn, latest_results=latest_results)
+    if not assessment.get("auto_snapshot"):
+        return None
+    return snapshot_and_replace_baseline(
+        case_id,
+        notes=notes or "Auto-snapshot after clean assessment run.",
+        source="auto_after_clean_run",
+        conn=conn,
+    )

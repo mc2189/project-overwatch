@@ -1601,6 +1601,130 @@ def _check_autopilot_playbooks() -> None:
         raise AssertionError("port validation helper failed")
 
 
+def _check_lab_assessment() -> None:
+    import utils.lab_assessment as lab_assessment_module
+    import utils.workspace_runner as workspace_runner_module
+    from database.db_setup import create_case, get_db_conn
+    from utils.autopilot_engine import run_autopilot_lab_queue, set_case_autopilot_queue
+    from utils.autopilot_queue import build_autopilot_item
+    from utils.autopilot_rules import make_autopilot_action
+    from utils.lab_assessment import apply_post_run_hooks, finalize_lab_assessment
+
+    for name, module in (
+        ("lab_assessment", lab_assessment_module),
+        ("workspace_runner", workspace_runner_module),
+    ):
+        if not hasattr(module, "finalize_lab_assessment" if name == "lab_assessment" else "execute_workspace_modules"):
+            raise AssertionError(f"{name} helper missing expected entry point")
+
+    conn = get_db_conn()
+    try:
+        case = create_case("Smoke lab assessment", conn=conn)
+        case_id = int(case["id"])
+        outcome = finalize_lab_assessment(
+            case_id=case_id,
+            target="192.168.1.10",
+            goal_id="local_network_triage",
+            primary_results=[{"module_id": "infra_nmap", "success": True}],
+            session_state={},
+            operating_context="personal_lab",
+            personal_lab_confirmed=True,
+            authorisation_confirmed=True,
+            conn=conn,
+        )
+        if not isinstance(outcome.get("results"), list):
+            raise AssertionError("finalize_lab_assessment should return results list")
+
+        snapshot = apply_post_run_hooks(
+            case_id=case_id,
+            latest_results=[{"module_id": "infra_nmap", "success": True}],
+            conn=conn,
+        )
+        if snapshot is not None and snapshot.get("action") not in {"created", "updated"}:
+            raise AssertionError("apply_post_run_hooks returned unexpected snapshot payload")
+
+        action = make_autopilot_action(
+            title="SSH review",
+            reason="SSH observed",
+            action_type="run_module",
+            target="192.168.1.10",
+            module_id="infra_ssh_review",
+        )
+        item = build_autopilot_item(action, playbook_id="local_network_triage")
+        item["status"] = "proposed"
+        session_state: dict = {"autopilot_lab_confirmed": True}
+        set_case_autopilot_queue(session_state, case_id, [item])
+        _, messages, batch_items = __import__(
+            "utils.autopilot_engine",
+            fromlist=["queue_autopilot_to_batch"],
+        ).queue_autopilot_to_batch(
+            case_id,
+            session_state,
+            operating_context="personal_lab",
+            personal_lab_confirmed=True,
+            authorisation_confirmed=True,
+            allow_confirmed_active=True,
+        )
+        if any("Skipped active" in message for message in messages):
+            raise AssertionError("confirmed lab autopilot should queue active follow-ups")
+        if not any(row.get("module_id") == "infra_ssh_review" for row in batch_items):
+            raise AssertionError("lab autopilot queue should include SSH review item")
+        if not hasattr(run_autopilot_lab_queue, "__call__"):
+            raise AssertionError("run_autopilot_lab_queue helper missing")
+    finally:
+        conn.close()
+
+
+def _check_batch_queue_runner() -> None:
+    from database.db_setup import create_case, get_db_conn
+    from utils.batch_queue_runner import run_batch_queue_for_case, select_queue_ids
+    from utils.batch_queue_summary import summarize_batch_queue
+    from utils.case_memory_refresh import build_case_memory_refresh
+
+    items = [
+        {"queue_id": "q1", "status": "queued", "mode": "passive", "entity_value": "example.com"},
+        {"queue_id": "q2", "status": "completed", "mode": "passive"},
+    ]
+    summary = summarize_batch_queue(items)
+    if summary["queued"] != 1:
+        raise AssertionError("batch queue summary queued count mismatch")
+    if select_queue_ids(items, "passive") != ["q1"]:
+        raise AssertionError("select_queue_ids passive filter failed")
+
+    conn = get_db_conn()
+    try:
+        case = create_case("Batch runner smoke", conn=conn)
+        case_id = int(case["id"])
+        refresh = build_case_memory_refresh(case_id, conn=conn)
+        if refresh.get("case_id") != case_id:
+            raise AssertionError("case memory refresh payload missing case_id")
+        dry = run_batch_queue_for_case(case_id, dry_run=True)
+        if dry.get("selected_count") != 0:
+            raise AssertionError("empty case dry run should select zero items")
+    finally:
+        conn.close()
+
+
+def _check_express_lab() -> None:
+    from utils.express_lab import default_goal_for_target, express_lab_enabled, sync_express_goal
+    from utils.assessment_goals import GOAL_LOCAL_NETWORK
+
+    if not express_lab_enabled.__name__:
+        raise AssertionError("express_lab_enabled helper missing")
+    if default_goal_for_target("ipv4", "192.168.1.10") != GOAL_LOCAL_NETWORK:
+        raise AssertionError("express lab should default private IP to local network goal")
+    session: dict = {}
+    goal = sync_express_goal(
+        session,
+        target="192.168.1.10",
+        target_type="ipv4",
+        goal_session_key="assessment_goal",
+        prev_goal_key="workspace_prev_goal",
+    )
+    if goal != GOAL_LOCAL_NETWORK:
+        raise AssertionError("sync_express_goal failed for private IP")
+
+
 def _check_case_memory() -> None:
     import utils.case_memory as case_memory_module
     import utils.baseline_compare as baseline_compare_module
@@ -4965,6 +5089,21 @@ def main() -> int:
     run(
         "autopilot playbooks",
         lambda: _check_autopilot_playbooks(),
+    )
+
+    run(
+        "lab assessment",
+        lambda: _check_lab_assessment(),
+    )
+
+    run(
+        "batch queue runner",
+        lambda: _check_batch_queue_runner(),
+    )
+
+    run(
+        "express lab",
+        lambda: _check_express_lab(),
     )
 
     run(

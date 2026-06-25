@@ -2,6 +2,16 @@
 
 Project Overwatch is a **local** Python/Streamlit intelligence, OSINT, security testing and resilience advisory dashboard for **private internal use** supporting future client assessments.
 
+**v2.40** adds **Express Lab** — with solo operator mode on, the workspace is target + **Assess target** + results (auto-goal, hidden auth/mode clutter).
+
+**v2.39** scrolls to case memory after lab runs, adds **Run active queued** in the workspace sidebar, and includes a systemd worker example.
+
+**v2.38** merges Batch Queue into the Assessment Workspace sidebar, adds a post-run case memory refresh banner, and ships a background queue worker (`scripts/run_queue_worker.py`).
+
+**v2.37** fixes Personal Lab autopilot follow-ups (queue-then-run) and clarifies session queue vs Batch Queue in the UI.
+
+**v2.36** adds **Run lab assessment** (one-click primary run + autopilot + auto-snapshot), **auto-snapshot after clean run**, a **CLI batch queue runner** (`scripts/run_queue.py`), and baseline unit tests.
+
 **v2.35** adds **Snapshot & replace baseline** — one click after a clean run saves current state as the new comparison point (create or update latest).
 
 **v2.34** sharpens case memory for solo lab use — expected-item suppression stops repeated follow-ups, result cards show baseline deltas inline, finding fingerprints improve change detection, baseline history and batch expected marking, and optional solo operator mode.

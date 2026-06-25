@@ -2,6 +2,41 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.40.0 — Express Lab Workspace
+
+- **Express Lab UI** — when `PROJECT_OVERWATCH_SOLO_OPERATOR_MODE=true`, Assessment Workspace becomes **Personal Lab**: target → **Assess target** → results and memory
+- **Auto-goal** — assessment goal follows target type (e.g. private IP → local network check); override under **Advanced**
+- **Hidden friction** — operating context, auth checkboxes, dual run buttons, and full autopilot/batch panels collapsed for solo use
+- **Compact sidebar** — case memory, follow-up queue summary, and **Run remaining queued**
+
+## v2.39.0 — Case Memory Focus and Active Queue Runs
+
+- **Auto-scroll to case memory** — after lab assessment, auto-snapshot, or inline queue runs, the workspace scrolls to case memory and expands the change summary
+- **Run active queued** — inline Batch Queue panel can execute active items when Personal Lab or client authorisation is confirmed
+- **Queue modes** — CLI/worker support `--mode active` in addition to passive/all
+- **systemd example** — `scripts/systemd/project-overwatch-queue.service.example` for Linux hosts
+
+## v2.38.0 — Inline Batch Queue and Memory Refresh
+
+- **Inline Batch Queue** — autopilot panel shows persisted queue status, queued preview, **Open Batch Queue**, **Run passive queued**, and CLI worker command
+- **Case memory refresh banner** — after lab assessment or post-run hooks, case memory panel highlights updated counts and baseline deltas
+- **Background worker** — `scripts/run_queue_worker.py` polls queued items; example launchd plist under `scripts/launchd/`
+- **Shared runner** — `utils/batch_queue_runner.py` and `utils/batch_queue_summary.py` used by CLI, worker, and UI
+
+## v2.37.0 — Lab Autopilot Fix and Queue Clarity
+
+- **Lab autopilot execution** — `run_autopilot_lab_queue()` queues session follow-ups into the Batch Queue before executing (fixes silent no-op on Run lab assessment)
+- **Confirmed active follow-ups** — `allow_confirmed_active` on `queue_autopilot_to_batch()` lets Personal Lab autopilot queue active checks after confirmation
+- **Autopilot panel** — explains session queue vs Batch Queue; solo operator mode always shows Personal Lab autopilot
+- **Tests & smoke** — `tests/test_lab_assessment.py` and smoke check for lab orchestration helpers
+
+## v2.36.0 — Lab Orchestration and Incremental Automation
+
+- **Auto-snapshot after clean run** — `PROJECT_OVERWATCH_AUTO_SNAPSHOT_AFTER_CLEAN_RUN` (default off; on in solo operator mode) via `maybe_auto_snapshot_after_run()`
+- **Run lab assessment** — unified button runs selected checks, autopilot follow-ups, and optional auto-snapshot in one pass (`utils/lab_assessment.py`, `utils/workspace_runner.py`)
+- **CLI batch queue** — `scripts/run_queue.py` executes persisted queue items outside Streamlit
+- **Tests** — `tests/test_baseline_ops.py` and `tests/test_baseline_compare.py`; CI runs full `tests/` suite
+
 ## v2.35.0 — Snapshot and Replace Baseline
 
 - **`utils/baseline_ops.py`** — one-click snapshot/replace for latest baseline; clean-run detection when no unexpected changes remain

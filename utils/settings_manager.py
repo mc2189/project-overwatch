@@ -248,6 +248,12 @@ def auto_offer_baseline_snapshot() -> bool:
     return get_bool_env("PROJECT_OVERWATCH_AUTO_OFFER_BASELINE_SNAPSHOT", True)
 
 
+def auto_snapshot_after_clean_run() -> bool:
+    if solo_operator_mode():
+        return True
+    return get_bool_env("PROJECT_OVERWATCH_AUTO_SNAPSHOT_AFTER_CLEAN_RUN", False)
+
+
 def auto_suggest_baseline_creation() -> bool:
     if solo_operator_mode():
         return True
@@ -285,6 +291,7 @@ def autopilot_settings() -> dict[str, Any]:
         "show_expected_in_reports": show_expected_in_reports(),
         "solo_operator_mode": solo_operator_mode(),
         "auto_offer_baseline_snapshot": auto_offer_baseline_snapshot(),
+        "auto_snapshot_after_clean_run": auto_snapshot_after_clean_run(),
     }
 
 
@@ -530,6 +537,7 @@ def general_settings_summary() -> dict[str, Any]:
         "show_expected_in_reports": show_expected_in_reports(),
         "solo_operator_mode": solo_operator_mode(),
         "auto_offer_baseline_snapshot": auto_offer_baseline_snapshot(),
+        "auto_snapshot_after_clean_run": auto_snapshot_after_clean_run(),
         "python_version": sys.version.split()[0],
     }
 

@@ -241,13 +241,12 @@ def update_autopilot_from_results(
             personal_lab_confirmed=personal_lab_confirmed,
             autopilot_confirmed=bool(session_state.get(SESSION_AUTOPILOT_CONFIRMED_KEY)),
         ):
-            auto_run_results = run_autopilot_confirmed_queue(
+            auto_run_results = run_autopilot_lab_queue(
                 case_id=case_id,
                 session_state=session_state,
                 operating_context=operating_context,
                 personal_lab_confirmed=personal_lab_confirmed,
                 authorisation_confirmed=authorisation_confirmed,
-                include_active=True,
             )
 
     return {
@@ -270,6 +269,7 @@ def queue_autopilot_to_batch(
     operating_context: str,
     personal_lab_confirmed: bool,
     authorisation_confirmed: bool,
+    allow_confirmed_active: bool = False,
 ) -> tuple[list[dict[str, Any]], list[str], list[dict[str, Any]]]:
     """Move queued autopilot module actions into the existing Batch Queue."""
     autopilot_items = get_case_autopilot_queue(session_state, case_id)
@@ -284,7 +284,11 @@ def queue_autopilot_to_batch(
             module_id = item.get("module_id")
             if not target or not module_id:
                 continue
-            if item.get("is_active") and item.get("requires_confirmation"):
+            if (
+                item.get("is_active")
+                and item.get("requires_confirmation")
+                and not allow_confirmed_active
+            ):
                 messages.append(f"Skipped active check {module_id} — requires run panel confirmation.")
                 autopilot_items = mark_autopilot_item(
                     autopilot_items,
@@ -418,6 +422,59 @@ def run_autopilot_confirmed_queue(
             run_mode_label="Autopilot (Personal Lab)",
         )
         save_batch_queue(case_id, sort_queue_items(updated))
+        return results
+    finally:
+        conn.close()
+
+
+def run_autopilot_lab_queue(
+    *,
+    case_id: int,
+    session_state: dict[str, Any],
+    operating_context: str,
+    personal_lab_confirmed: bool,
+    authorisation_confirmed: bool,
+) -> list[dict[str, Any]]:
+    """Queue and execute Personal Lab autopilot follow-ups (passive + confirmed active)."""
+    _, messages, batch_items = queue_autopilot_to_batch(
+        case_id,
+        session_state,
+        operating_context=operating_context,
+        personal_lab_confirmed=personal_lab_confirmed,
+        authorisation_confirmed=authorisation_confirmed,
+        allow_confirmed_active=True,
+    )
+    queued_ids = [
+        item["queue_id"]
+        for item in batch_items
+        if item.get("status") == "queued"
+        and item.get("compatibility_status") == "compatible"
+    ]
+    if not queued_ids:
+        return [{"messages": messages}] if messages else []
+    conn = get_db_conn()
+    try:
+        updated, results = execute_queue_items(
+            case_id,
+            batch_items,
+            queued_ids,
+            db_conn=conn,
+            authorisation_confirmed=authorisation_confirmed,
+            operating_context=operating_context,
+            personal_lab_confirmed=personal_lab_confirmed,
+            run_mode_label="Autopilot (Personal Lab)",
+        )
+        save_batch_queue(case_id, sort_queue_items(updated))
+        autopilot_items = get_case_autopilot_queue(session_state, case_id)
+        for row in results:
+            meta = (row.get("queue_item") or {}).get("autopilot_metadata") or {}
+            autopilot_id = meta.get("autopilot_id")
+            if not autopilot_id:
+                continue
+            result = row.get("result") or {}
+            status = "completed" if result.get("success") else "failed"
+            autopilot_items = mark_autopilot_item(autopilot_items, autopilot_id, status=status)
+        set_case_autopilot_queue(session_state, case_id, autopilot_items)
         return results
     finally:
         conn.close()

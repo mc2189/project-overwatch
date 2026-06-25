@@ -30,4 +30,4 @@ jobs:
         run: python scripts/security_audit.py
 
       - name: Run module SDK unit tests
-        run: python -m unittest tests.test_module_sdk -v
+        run: python -m unittest discover -s tests -v

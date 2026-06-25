@@ -6,6 +6,7 @@ from typing import Any
 
 import streamlit as st
 
+from ui.inline_batch_queue import render_inline_batch_queue
 from ui.styles import section_heading
 from utils.assessment_playbooks import (
     MODE_ASSISTED,
@@ -30,7 +31,12 @@ from utils.autopilot_engine import (
     stop_autopilot,
     update_autopilot_from_results,
 )
-from utils.settings_manager import autopilot_settings, passive_autopilot_enabled, personal_lab_autopilot_enabled
+from utils.settings_manager import (
+    autopilot_settings,
+    passive_autopilot_enabled,
+    personal_lab_autopilot_enabled,
+    solo_operator_mode,
+)
 from utils.target_detection import get_target_type
 
 
@@ -56,13 +62,20 @@ def render_autopilot_panel(
     """Render playbook selector, queue preview, and autopilot controls."""
     _init_autopilot_state()
     section_heading("Assessment mode & playbooks")
+    st.caption(
+        "Playbooks propose a session queue. **Run queue** copies items into the persisted Batch Queue "
+        "and executes them. **Run lab assessment** (main panel) runs primary checks, follow-ups, "
+        "and auto-snapshot in one pass."
+    )
 
     mode_labels = assessment_mode_labels()
     mode_options = list(mode_labels.keys())
     if not passive_autopilot_enabled():
         mode_options = [mode for mode in mode_options if mode != MODE_PASSIVE_AUTOPILOT]
-    if not personal_lab_autopilot_enabled():
+    if not personal_lab_autopilot_enabled() and not solo_operator_mode():
         mode_options = [mode for mode in mode_options if mode != MODE_PERSONAL_LAB_AUTOPILOT]
+    elif solo_operator_mode() and MODE_PERSONAL_LAB_AUTOPILOT not in mode_options:
+        mode_options.append(MODE_PERSONAL_LAB_AUTOPILOT)
 
     current_mode = st.session_state.get(SESSION_ASSESSMENT_MODE_KEY, default_assessment_mode())
     if current_mode not in mode_options:
@@ -162,16 +175,19 @@ def render_autopilot_panel(
     with col_run:
         if selected_mode in {MODE_ASSISTED, MODE_PASSIVE_AUTOPILOT, MODE_PERSONAL_LAB_AUTOPILOT}:
             if st.button("Run queue", key="autopilot_run_queue", disabled=emergency_stop_active):
-                _, messages, _ = queue_autopilot_to_batch(
+                lab_confirmed = (
+                    selected_mode == MODE_PERSONAL_LAB_AUTOPILOT
+                    and st.session_state.get(SESSION_AUTOPILOT_CONFIRMED_KEY)
+                )
+                _, messages, batch_items = queue_autopilot_to_batch(
                     case_id,
                     st.session_state,
                     operating_context=operating_context,
                     personal_lab_confirmed=personal_lab_confirmed,
                     authorisation_confirmed=authorisation_confirmed,
+                    allow_confirmed_active=lab_confirmed,
                 )
-                if selected_mode == MODE_PERSONAL_LAB_AUTOPILOT and st.session_state.get(
-                    SESSION_AUTOPILOT_CONFIRMED_KEY
-                ):
+                if lab_confirmed:
                     run_autopilot_confirmed_queue(
                         case_id=case_id,
                         session_state=st.session_state,
@@ -182,6 +198,10 @@ def render_autopilot_panel(
                     )
                 for message in messages[:6]:
                     st.caption(message)
+                if batch_items:
+                    queued = sum(1 for item in batch_items if item.get("status") == "queued")
+                    if queued:
+                        st.caption(f"{queued} item(s) remain queued in Batch Queue.")
                 st.rerun()
     with col_stop:
         if st.button("Stop autopilot", key="autopilot_stop"):
@@ -209,5 +229,14 @@ def render_autopilot_panel(
             st.markdown(f"**Next manual action:** {summary.get('next_manual_action', '—')}")
             if summary.get("stop_reason"):
                 st.caption(summary["stop_reason"])
+
+    render_inline_batch_queue(
+        case_id,
+        operating_context=operating_context,
+        personal_lab_confirmed=personal_lab_confirmed,
+        authorisation_confirmed=authorisation_confirmed,
+        emergency_stop_active=emergency_stop_active,
+        key_prefix=f"autopilot_inline_queue_{case_id}",
+    )
 
     return update

@@ -1,0 +1,14 @@
+[Unit]
+Description=Project Overwatch batch queue worker
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/project_overwatch
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/path/to/python scripts/run_queue_worker.py --all-cases-with-queue --personal-lab-confirmed --interval-seconds 120
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

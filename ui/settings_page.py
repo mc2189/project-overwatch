@@ -77,7 +77,8 @@ def render_settings_page(metrics: dict) -> None:
         f"show expected in reports: "
         f"{'yes' if summary.get('show_expected_in_reports') else 'no'} · "
         f"solo operator mode: {'on' if summary.get('solo_operator_mode') else 'off'} · "
-        f"offer baseline snapshot: {'on' if summary.get('auto_offer_baseline_snapshot') else 'off'}"
+        f"offer baseline snapshot: {'on' if summary.get('auto_offer_baseline_snapshot') else 'off'} · "
+        f"auto snapshot after clean run: {'on' if summary.get('auto_snapshot_after_clean_run') else 'off'}"
     )
     st.caption(
         "Set via environment variables or `config/overwatch.defaults.json`. "
