@@ -17,12 +17,35 @@ from utils.autopilot_engine import (  # noqa: E402
     queue_autopilot_to_batch,
     set_case_autopilot_queue,
 )
-from utils.autopilot_queue import build_autopilot_item  # noqa: E402
+from utils.autopilot_queue import build_autopilot_item, items_ready_to_queue  # noqa: E402
 from utils.autopilot_rules import make_autopilot_action  # noqa: E402
 from utils.lab_assessment import apply_post_run_hooks, finalize_lab_assessment  # noqa: E402
 
 
 class LabAssessmentTests(unittest.TestCase):
+    def test_items_ready_to_queue_includes_session_queued(self) -> None:
+        action = make_autopilot_action(
+            title="SSH review",
+            reason="SSH observed",
+            action_type="run_module",
+            target="192.168.1.10",
+            module_id="infra_ssh_review",
+        )
+        proposed = build_autopilot_item(action, playbook_id="local_network_triage")
+        proposed["status"] = "proposed"
+        queued = dict(proposed)
+        queued["status"] = "queued"
+        queued["autopilot_id"] = "queued-item"
+        already_batched = dict(queued)
+        already_batched["autopilot_id"] = "batched-item"
+        already_batched["batch_queue_id"] = "bq-1"
+
+        ready = items_ready_to_queue([proposed, queued, already_batched])
+        ids = {row["autopilot_id"] for row in ready}
+        self.assertIn(proposed["autopilot_id"], ids)
+        self.assertIn("queued-item", ids)
+        self.assertNotIn("batched-item", ids)
+
     @patch("utils.lab_assessment.maybe_auto_snapshot_after_run", return_value=None)
     @patch("utils.lab_assessment.update_autopilot_from_results")
     def test_finalize_lab_assessment_collects_autopilot_results(

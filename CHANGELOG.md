@@ -2,6 +2,11 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.40.1 — Autopilot Handoff and Executor Import Fixes
+
+- **Autopilot → batch queue handoff** — session items marked `queued` are now eligible for `queue_autopilot_to_batch()` (previously only `proposed`, so Personal Lab autopilot never copied/ran follow-ups after Assess)
+- **Infrastructure executor imports** — restore missing `ENTITY_TYPE_BY_TARGET`, `get_target_type`, and `create_or_get_entity` imports that crashed HTTP/TLS/SSH follow-up persistence
+
 ## v2.40.0 — Express Lab Workspace
 
 - **Express Lab UI** — when `PROJECT_OVERWATCH_SOLO_OPERATOR_MODE=true`, Assessment Workspace becomes **Personal Lab**: target → **Assess target** → results and memory

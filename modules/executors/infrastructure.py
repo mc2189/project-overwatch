@@ -6,7 +6,7 @@ import shutil
 import sqlite3
 from typing import Any
 
-from database.db_setup import create_operation_log
+from database.db_setup import create_operation_log, create_or_get_entity
 from utils.findings_registry import interpret_module_findings
 from utils.nmap_options import SCRIPT_VULN, build_nmap_flags, normalize_options
 from utils.nmap_profiles import enrich_parsed_scan_metadata, profile_display_name, resolve_profile_id
@@ -17,6 +17,7 @@ from utils.result_status import (
     STATUS_COMPLETED_WITH_WARNINGS,
     STATUS_ERROR,
 )
+from utils.target_detection import ENTITY_TYPE_BY_TARGET, get_target_type
 
 from modules.executors import loaders
 from modules.executors.loaders import (

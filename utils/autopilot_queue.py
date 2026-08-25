@@ -179,10 +179,17 @@ def evaluate_stop_conditions(
 
 
 def items_ready_to_queue(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Session items eligible to copy into the persisted Batch Queue.
+
+    Includes both ``proposed`` and session-``queued`` rows that have not yet
+    been linked to a batch queue id (``update_autopilot_from_results`` promotes
+    proposed → queued before auto-run calls ``queue_autopilot_to_batch``).
+    """
     return [
         item
         for item in items
-        if item.get("status") == "proposed"
+        if item.get("status") in {"proposed", "queued"}
+        and not item.get("batch_queue_id")
         and not item.get("blocked_reason")
         and item.get("module_id")
         and item.get("action_type") in {"add_to_queue", "run_module"}
