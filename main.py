@@ -4,15 +4,12 @@ from __future__ import annotations
 
 import streamlit as st
 
-from database.db_setup import get_or_create_default_case, list_cases
+from database.db_setup import get_or_create_default_case, get_or_create_lab_case, list_cases
 from ui.archive_pages import (
     render_backup_page,
-    render_graph_page,
-    render_observations_page,
-    render_operations_page,
-    render_relationships_page,
     render_report_page,
 )
+from ui.case_archive_page import render_case_archive_page
 from ui.settings_page import render_settings_page
 from ui.batch_queue_page import render_batch_queue_page
 from ui.entity_workspace import render_entity_workspace_page
@@ -27,6 +24,7 @@ from ui.sidebar import render_sidebar
 from utils.case_session import ensure_case_session
 from utils.local_auth import render_local_auth_gate
 from utils.report_scheduler import maybe_run_scheduled_exports
+from utils.settings_manager import solo_operator_mode
 
 st.set_page_config(
     page_title="Project Overwatch",
@@ -36,7 +34,10 @@ st.set_page_config(
 )
 
 if "case_id" not in st.session_state:
-    st.session_state.case_id = get_or_create_default_case()["id"]
+    if solo_operator_mode():
+        st.session_state.case_id = get_or_create_lab_case()["id"]
+    else:
+        st.session_state.case_id = get_or_create_default_case()["id"]
 
 if "nav_page" not in st.session_state:
     st.session_state.nav_page = "Assessment Workspace"
@@ -57,7 +58,10 @@ def get_current_case() -> dict:
     for case in cases:
         if case["id"] == st.session_state.case_id:
             return case
-    default_case = get_or_create_default_case()
+    if solo_operator_mode():
+        default_case = get_or_create_lab_case()
+    else:
+        default_case = get_or_create_default_case()
     st.session_state.case_id = default_case["id"]
     return default_case
 
@@ -86,18 +90,20 @@ elif nav_page == "Entity Workspace":
     )
 elif nav_page == "Batch Queue":
     render_batch_queue_page(st.session_state.case_id, metrics)
-elif nav_page == "Relationships":
-    render_relationships_page(st.session_state.case_id, metrics)
-elif nav_page == "Observations":
-    render_observations_page(st.session_state.case_id, metrics)
+elif nav_page == "Case Archive":
+    render_case_archive_page(st.session_state.case_id, metrics)
+elif nav_page in {"Relationships", "Observations", "Operations", "Graph"}:
+    # Legacy deep-links — keep working until callers fully migrate.
+    st.session_state.case_archive_tab = (
+        "Graph"
+        if nav_page == "Graph"
+        else nav_page
+    )
+    render_case_archive_page(st.session_state.case_id, metrics)
 elif nav_page == "Evidence Locker":
     render_evidence_page(st.session_state.case_id, metrics)
 elif nav_page == "Packet Capture":
     render_packet_capture_page(current_case)
-elif nav_page == "Operations":
-    render_operations_page(st.session_state.case_id, metrics)
-elif nav_page == "Graph":
-    render_graph_page(st.session_state.case_id, metrics)
 elif nav_page == "Report":
     render_report_page(st.session_state.case_id, metrics)
 elif nav_page == "Backup":

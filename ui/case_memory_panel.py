@@ -68,8 +68,17 @@ def _mark_changes_expected(case_id: int, changes: list[dict[str, Any]]) -> None:
         conn.close()
 
 
-def render_case_memory_panel(case_id: int, *, conn: Any | None = None) -> dict[str, Any]:
-    """Render case memory card, change summary, and baseline controls."""
+def render_case_memory_panel(
+    case_id: int,
+    *,
+    conn: Any | None = None,
+    quiet: bool = False,
+) -> dict[str, Any]:
+    """Render case memory card, change summary, and baseline controls.
+
+    When ``quiet`` is True, hide the heavy baseline chrome until the case has a
+    baseline, a post-run refresh, or session results — keeps empty Lab calm.
+    """
     own_conn = conn is None
     if own_conn:
         conn = get_db_conn()
@@ -81,9 +90,36 @@ def render_case_memory_panel(case_id: int, *, conn: Any | None = None) -> dict[s
         if own_conn:
             conn.close()
 
+    refresh = get_case_memory_refresh(st.session_state, case_id)
+    has_session_results = bool(st.session_state.get("latest_run_results"))
+    has_baseline = bool(comparison.get("has_baseline"))
+    memory_counts = (
+        len(memory.get("known_devices") or []),
+        len(memory.get("known_services") or []),
+        len(memory.get("open_findings") or []),
+        len(memory.get("accepted_findings") or []),
+    )
+    show_full_controls = (
+        not quiet
+        or bool(refresh)
+        or has_session_results
+        or has_baseline
+    )
+
     section_heading("Case memory")
     st.markdown(f'<div id="{CASE_MEMORY_ANCHOR_ID}"></div>', unsafe_allow_html=True)
-    refresh = get_case_memory_refresh(st.session_state, case_id)
+
+    if quiet and not show_full_controls:
+        if any(memory_counts):
+            cols = st.columns(4)
+            cols[0].metric("Devices", memory_counts[0])
+            cols[1].metric("Services", memory_counts[1])
+            cols[2].metric("Open findings", memory_counts[2])
+            cols[3].metric("Accepted", memory_counts[3])
+            st.caption("Run **Assess target** to update memory and enable baselines.")
+        else:
+            st.caption("Memory and baselines appear after your first assessment.")
+        return {"memory": memory, "comparison": comparison, "quiet": True}
     if refresh:
         refresh_lines = [
             f"Updated after latest run — **{refresh.get('device_count', 0)}** devices, "

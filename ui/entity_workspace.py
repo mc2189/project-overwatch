@@ -344,7 +344,8 @@ def _render_network_section(
     with graph_col1:
         if st.button("Open in Graph", key=f"entity_open_graph_{entity['id']}", width="stretch"):
             st.session_state.graph_focus_entity = int(entity["id"])
-            st.session_state.nav_page = "Graph"
+            st.session_state.case_archive_tab = "Graph"
+            st.session_state.nav_page = "Case Archive"
             st.rerun()
     with graph_col2:
         st.caption("View neighbours and pivot from the case relationship graph.")

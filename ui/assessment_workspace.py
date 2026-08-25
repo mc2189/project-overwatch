@@ -230,7 +230,7 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
     if st.session_state.pop("workspace_focus_run_panel", False):
         st.session_state.workspace_scroll_to_readiness = True
 
-    render_case_workflow_strip(current_case["id"])
+    render_case_workflow_strip(current_case["id"], compact=express)
 
     main_col, side_col = st.columns([3, 2], gap="large")
 
@@ -793,19 +793,45 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
         latest_results = st.session_state.get("latest_run_results") or []
         latest_target = st.session_state.get("latest_run_target", target)
         if latest_results and latest_target.strip():
+            if express:
+                section_heading("Results")
             render_workspace_results(
                 latest_results,
                 target=latest_target,
                 case_id=current_case["id"],
             )
+            if express:
+                section_heading("Next actions")
+                profile_with_scope = dict(profile)
+                conn = get_db_conn()
+                try:
+                    actions = suggest_next_actions(
+                        case_id=current_case["id"],
+                        target=latest_target,
+                        goal_id=goal_id,
+                        target_profile=profile_with_scope,
+                        latest_results=latest_results,
+                        operating_context=PERSONAL_LAB,
+                        personal_lab_confirmed=True,
+                        authorisation_confirmed=True,
+                        conn=conn,
+                    )
+                finally:
+                    conn.close()
+                render_action_cards(actions, case_id=current_case["id"], limit=3)
 
     with side_col:
         engagement = get_engagement_for_case(current_case["id"]) if current_case else None
         emergency_stop_active = bool(engagement and engagement.get("emergency_stop_active"))
+        has_session_results = bool(st.session_state.get("latest_run_results"))
 
         conn = get_db_conn()
         try:
-            render_case_memory_panel(current_case["id"], conn=conn)
+            render_case_memory_panel(
+                current_case["id"],
+                conn=conn,
+                quiet=express,
+            )
             if st.session_state.pop(WORKSPACE_SCROLL_TO_CASE_MEMORY_KEY, False):
                 scroll_to_anchor(CASE_MEMORY_ANCHOR_ID)
             if express:
@@ -819,6 +845,7 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
                     authorisation_confirmed=bool(st.session_state.get("authorisation_confirmed")),
                     emergency_stop_active=emergency_stop_active,
                     conn=conn,
+                    quiet=True,
                 )
             else:
                 render_autopilot_panel(
@@ -863,8 +890,8 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
             finally:
                 conn.close()
             render_action_cards(actions, case_id=current_case["id"], limit=3)
-        else:
-            with st.expander("Suggested next steps", expanded=False):
+        elif not has_session_results:
+            with st.expander("Suggested next steps", expanded=True):
                 profile_with_scope = dict(profile)
                 conn = get_db_conn()
                 try:
@@ -873,7 +900,7 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
                         target=target,
                         goal_id=goal_id,
                         target_profile=profile_with_scope,
-                        latest_results=st.session_state.get("latest_run_results") or [],
+                        latest_results=[],
                         operating_context=PERSONAL_LAB,
                         personal_lab_confirmed=True,
                         authorisation_confirmed=True,
@@ -883,18 +910,19 @@ def render_assessment_workspace(current_case: dict, metrics: dict) -> None:
                     conn.close()
                 render_action_cards(actions, case_id=current_case["id"], limit=2)
 
-        with st.expander("Recent runs", expanded=False):
-            render_run_status_panel()
+        if not express or has_session_results:
+            with st.expander("Recent runs", expanded=False):
+                render_run_status_panel()
 
-        with st.expander("Analyst notes", expanded=False):
-            st.text_area(
-                "Workspace notes",
-                value=st.session_state.get("workspace_analyst_notes", ""),
-                key="workspace_analyst_notes",
-                height=100,
-                label_visibility="collapsed",
-                placeholder="Optional notes for this session…",
-            )
+            with st.expander("Analyst notes", expanded=False):
+                st.text_area(
+                    "Workspace notes",
+                    value=st.session_state.get("workspace_analyst_notes", ""),
+                    key="workspace_analyst_notes",
+                    height=100,
+                    label_visibility="collapsed",
+                    placeholder="Optional notes for this session…",
+                )
 
         if target.strip() and operating_context == CLIENT_ENGAGEMENT:
             scope_preview = assess_target_scope(target.strip(), case_id=current_case["id"])

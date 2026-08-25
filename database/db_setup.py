@@ -596,6 +596,28 @@ def get_or_create_default_case(conn: sqlite3.Connection | None = None) -> dict[s
             conn.close()
 
 
+LAB_CASE_NAME = "Personal Lab"
+
+
+def get_or_create_lab_case(conn: sqlite3.Connection | None = None) -> dict[str, Any]:
+    """Fresh solo-operator case — avoids inheriting cluttered Default Case history."""
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_conn()
+    try:
+        for case in list_cases(conn):
+            if case["name"] == LAB_CASE_NAME:
+                return case
+        return create_case(
+            LAB_CASE_NAME,
+            "Solo operator lab case — local assessments and baselines.",
+            conn=conn,
+        )
+    finally:
+        if own_conn:
+            conn.close()
+
+
 def create_or_get_entity(
     case_id: int,
     entity_type: str,

@@ -2,6 +2,14 @@
 
 All notable changes to Project Overwatch are documented here.
 
+## v2.41.0 — Solo Lab UX Simplification
+
+- **Solo navigation** — primary strip (Lab / Capture / Findings / Entities / Evidence) with archive and admin under **More**
+- **Case Archive** — Graph, Relationships, Observations, and Operations combined into one Investigate destination
+- **Personal Lab case** — solo operator mode starts on a fresh **Personal Lab** case instead of cluttered Default Case
+- **Quieter empty Lab** — hide baseline/queue chrome until first assessment; post-Assess shows Results + top next actions
+- **Compact workflow strip** in Express Lab
+
 ## v2.40.1 — Autopilot Handoff and Executor Import Fixes
 
 - **Autopilot → batch queue handoff** — session items marked `queued` are now eligible for `queue_autopilot_to_batch()` (previously only `proposed`, so Personal Lab autopilot never copied/ran follow-ups after Assess)

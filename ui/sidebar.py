@@ -5,11 +5,88 @@ from __future__ import annotations
 import streamlit as st
 
 from database.db_setup import create_case, list_cases
-from ui.constants import NAV_GROUP_BY_PAGE, NAV_PAGES, normalize_nav_page
 from ui.case_workflow_banner import render_case_workflow_strip
+from ui.constants import (
+    ARCHIVE_TAB_BY_LEGACY_PAGE,
+    NAV_GROUP_BY_PAGE,
+    NAV_PAGES,
+    SOLO_MORE_NAV,
+    SOLO_PRIMARY_LABEL_BY_PAGE,
+    SOLO_PRIMARY_NAV,
+    SOLO_PRIMARY_PAGE_BY_LABEL,
+    SOLO_PRIMARY_PAGES,
+    normalize_nav_page,
+)
 from utils.case_session import ensure_case_session, switch_case_session
 from utils.operating_context import operating_context_label
+from utils.settings_manager import solo_operator_mode
 from version import PROJECT_VERSION
+
+_SOLO_MORE_SENTINEL = "More"
+_SOLO_NAV_KEY = "solo_primary_nav"
+
+
+def _resolve_incoming_nav() -> str:
+    raw = st.session_state.get("nav_page")
+    if isinstance(raw, str) and raw in ARCHIVE_TAB_BY_LEGACY_PAGE:
+        st.session_state.case_archive_tab = ARCHIVE_TAB_BY_LEGACY_PAGE[raw]
+    return normalize_nav_page(raw if isinstance(raw, str) else None)
+
+
+def _desired_solo_label(current_nav: str) -> str:
+    if current_nav in SOLO_PRIMARY_PAGES:
+        return SOLO_PRIMARY_LABEL_BY_PAGE[current_nav]
+    return _SOLO_MORE_SENTINEL
+
+
+def _render_solo_nav(current_nav: str) -> str:
+    """Primary strip for lab work; archive/admin under More."""
+    labels = [label for _, label in SOLO_PRIMARY_NAV] + [_SOLO_MORE_SENTINEL]
+    desired = _desired_solo_label(current_nav)
+    # Keep the pill strip aligned when another page deep-links via session state.
+    if st.session_state.get(_SOLO_NAV_KEY) != desired:
+        st.session_state[_SOLO_NAV_KEY] = desired
+
+    picked = st.segmented_control(
+        "Go to",
+        options=labels,
+        key=_SOLO_NAV_KEY,
+        label_visibility="collapsed",
+    )
+    if picked is None:
+        picked = desired
+
+    if picked == _SOLO_MORE_SENTINEL:
+        more_current = current_nav if current_nav in SOLO_MORE_NAV else "Case Archive"
+        more_index = SOLO_MORE_NAV.index(more_current)
+        nav_page = st.selectbox(
+            "More pages",
+            options=list(SOLO_MORE_NAV),
+            index=more_index,
+            key="solo_more_nav_select",
+            label_visibility="collapsed",
+        )
+    else:
+        nav_page = SOLO_PRIMARY_PAGE_BY_LABEL.get(str(picked), "Assessment Workspace")
+
+    st.session_state.nav_page = nav_page
+    return nav_page
+
+
+def _render_full_nav(current_nav: str) -> str:
+    if current_nav not in NAV_PAGES:
+        current_nav = "Assessment Workspace"
+    nav_index = NAV_PAGES.index(current_nav)
+    nav_page = st.selectbox(
+        "Go to",
+        options=list(NAV_PAGES),
+        index=nav_index,
+        format_func=lambda page: f"{NAV_GROUP_BY_PAGE.get(page, '')} · {page}",
+        label_visibility="collapsed",
+        key="sidebar_nav_select",
+    )
+    st.session_state.nav_page = nav_page
+    return nav_page
 
 
 def render_sidebar() -> str:
@@ -56,18 +133,7 @@ def render_sidebar() -> str:
 
     st.divider()
     st.subheader("Navigation")
-    current_nav = normalize_nav_page(st.session_state.get("nav_page"))
-    if current_nav not in NAV_PAGES:
-        current_nav = "Assessment Workspace"
-
-    nav_index = NAV_PAGES.index(current_nav)
-    nav_page = st.selectbox(
-        "Go to",
-        options=list(NAV_PAGES),
-        index=nav_index,
-        format_func=lambda page: f"{NAV_GROUP_BY_PAGE.get(page, '')} · {page}",
-        label_visibility="collapsed",
-        key="sidebar_nav_select",
-    )
-    st.session_state.nav_page = nav_page
-    return nav_page
+    current_nav = _resolve_incoming_nav()
+    if solo_operator_mode():
+        return _render_solo_nav(current_nav)
+    return _render_full_nav(current_nav)

@@ -176,9 +176,9 @@ def render_express_followups_panel(
     authorisation_confirmed: bool,
     emergency_stop_active: bool,
     conn: Any | None,
-) -> None:
+    quiet: bool = False,
+) -> dict[str, Any]:
     """Compact follow-up queue status instead of full autopilot + batch panels."""
-    section_heading("Follow-ups")
     update = update_autopilot_from_results(
         case_id=case_id,
         target=target.strip(),
@@ -197,7 +197,11 @@ def render_express_followups_panel(
         for row in update.get("queue") or []
         if row.get("status") in {"proposed", "queued"} and not row.get("blocked_reason")
     ]
+    has_work = bool(batch_summary["queued"] or pending_autopilot or latest_results)
+    if quiet and not has_work:
+        return {"update": update, "batch_summary": batch_summary, "hidden": True}
 
+    section_heading("Follow-ups")
     st.caption(
         f"Batch queue: **{batch_summary['queued']}** queued · "
         f"**{batch_summary['completed']}** done · "
@@ -244,3 +248,4 @@ def render_express_followups_panel(
     summary = update.get("summary") or {}
     if summary.get("next_manual_action"):
         st.caption(f"Next: {summary['next_manual_action']}")
+    return {"update": update, "batch_summary": batch_summary, "hidden": False}

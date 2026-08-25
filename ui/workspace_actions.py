@@ -131,7 +131,8 @@ def apply_workspace_action(action: dict[str, Any], case_id: int) -> str:
         entity_id = action.get("entity_id")
         if entity_id:
             st.session_state.graph_focus_entity = int(entity_id)
-        st.session_state.nav_page = "Graph"
+        st.session_state.case_archive_tab = "Graph"
+        st.session_state.nav_page = "Case Archive"
         st.rerun()
 
     if action_type == "create_report":
